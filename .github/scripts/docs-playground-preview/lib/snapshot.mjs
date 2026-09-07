@@ -71,7 +71,6 @@ return array(
  */
 function finalBlueprint( inputs ) {
 	return {
-		$schema: inputs.dependencies.playground.blueprintSchema,
 		meta: {
 			title: 'WordPress Core Code Reference preview',
 			author: 'WordPress',

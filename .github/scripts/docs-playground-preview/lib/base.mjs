@@ -186,7 +186,6 @@ function repositoryRoots( upstreams, inputs ) {
  */
 function baseBlueprint( inputs ) {
 	return {
-		$schema: inputs.dependencies.playground.blueprintSchema,
 		meta: {
 			title: 'WordPress Core Code Reference invariant base',
 			author: 'WordPress',

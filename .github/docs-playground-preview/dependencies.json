@@ -1,8 +1,7 @@
 {
 	"cacheSchemaVersion": 1,
 	"playground": {
-		"phpVersion": "8.4",
-		"blueprintSchema": "https://playground.wordpress.net/blueprint-schema.json"
+		"phpVersion": "8.4"
 	},
 	"repositories": {
 		"phpdocParser": {

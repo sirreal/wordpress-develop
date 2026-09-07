@@ -45,7 +45,7 @@ The `Code Reference Playground Preview Tests` workflow runs both. Type checking 
 The other pins live where the tool that reads them looks:
 
 - **Node:** `.nvmrc`. All seven `setup-node` steps read it. Update `engines.node` and `@types/node` in `package.json` to match.
-- **npm packages** (`@wp-playground/cli`, `@wordpress/scripts`, `@wordpress/i18n`, `yarn`): `package.json`, then regenerate `package-lock.json`.
+- **npm packages** (`@wp-playground/cli`, `@wordpress/scripts`, `yarn`): `package.json`, then regenerate `package-lock.json`.
 - **PHP:** two versions that must agree. `playground.phpVersion` in `dependencies.json` is the PHP inside the snapshot; `php-version` in both `setup-php` steps of the build workflow is the PHP that runs phpdoc-parser.
 - **Composer:** the `tools: composer:` version in both `setup-php` steps of the build workflow.
 - **A GitHub Action:** its full commit SHA and the version comment beside it, in every workflow that uses it.

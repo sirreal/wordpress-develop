@@ -21,8 +21,6 @@ const SNAPSHOT_BYTES_LIMIT = 104857600;
 const PLAYGROUND_ORIGIN = 'https://playground.wordpress.net';
 const TRUNK_POINTER_BRANCH = TRUNK_POINTER_REF.slice( 'heads/'.length );
 const CORS_PROXY = 'https://wordpress-playground-cors-proxy.net/';
-const BLUEPRINT_SCHEMA =
-	'https://playground.wordpress.net/blueprint-schema.json';
 
 /**
  * Every asset is named after the run that produced it, so one build cannot
@@ -118,7 +116,6 @@ function createLaunchBlueprint(
 	description
 ) {
 	return {
-		$schema: BLUEPRINT_SCHEMA,
 		meta: {
 			title: 'WordPress Core Code Reference preview',
 			author: 'WordPress',

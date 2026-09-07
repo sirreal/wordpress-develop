@@ -12,8 +12,6 @@ const inputs = {
 	dependencies: {
 		playground: {
 			phpVersion: '8.4',
-			blueprintSchema:
-				'https://playground.wordpress.net/blueprint-schema.json',
 		},
 	},
 	wordpress: { channel: 'beta', version: '7.2-beta1' },

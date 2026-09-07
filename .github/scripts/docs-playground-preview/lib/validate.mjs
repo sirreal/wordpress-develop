@@ -28,7 +28,6 @@ function message( error ) {
  */
 function validationBlueprint( inputs ) {
 	return {
-		$schema: inputs.dependencies.playground.blueprintSchema,
 		preferredVersions: {
 			php: inputs.dependencies.playground.phpVersion,
 			wp: inputs.wordpress.version,
