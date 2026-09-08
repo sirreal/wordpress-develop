@@ -1,3 +1,4 @@
+// Staging: touched to exercise the tests workflow and the stale-comment path.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
