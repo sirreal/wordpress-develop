@@ -1,13 +1,12 @@
 {
-  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
   "meta": {
     "title": "WordPress Core Code Reference preview",
     "author": "WordPress",
-    "description": "Latest successful Core Code Reference from sirreal/wordpress-develop@d5074d8608a9dc0f24ece0689d4e49f0c4b7e961. Generated 2026-08-10T05:43:59.988Z. https://github.com/sirreal/wordpress-develop/actions/runs/31359511436"
+    "description": "Latest successful Core Code Reference from sirreal/wordpress-develop@4277884c408f4b80e2123883a93c72d5a896c039. Generated 2026-09-08T05:53:53.805Z. https://github.com/sirreal/wordpress-develop/actions/runs/34192383016"
   },
   "preferredVersions": {
     "php": "8.4",
-    "wp": "7.1-RC2"
+    "wp": "7.1"
   },
   "landingPage": "/reference/",
   "login": false,
@@ -19,7 +18,7 @@
       "step": "unzip",
       "zipFile": {
         "resource": "url",
-        "url": "https://wordpress-playground-cors-proxy.net/https://github.com/sirreal/wordpress-develop/releases/download/code-reference-playground-preview/code-reference-trunk-d5074d8608a9dc0f24ece0689d4e49f0c4b7e961-31359511436-1.zip"
+        "url": "https://wordpress-playground-cors-proxy.net/https://github.com/sirreal/wordpress-develop/releases/download/code-reference-playground-preview/code-reference-trunk-4277884c408f4b80e2123883a93c72d5a896c039-34192383016-1.zip"
       },
       "extractToPath": "/"
     }
