@@ -419,6 +419,459 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that HTML elements inside MathML text integration points retain
+	 * the full path to their MathML parent.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::get_namespace
+	 */
+	public function test_reports_nested_anchor_breadcrumbs_inside_mathml_text_integration_point() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y' );
+
+		$this->assertTrue( $processor->next_tag( 'A' ), 'Failed to find the outer A element.' );
+		$this->assertTrue( $processor->next_tag( 'A' ), 'Failed to find the inner A element.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ),
+			$processor->get_breadcrumbs(),
+			'The inner A element should remain nested inside the MathML MI element.'
+		);
+
+		$this->assertSame(
+			'html',
+			$processor->get_namespace(),
+			'The inner A element should be an HTML element inside the MathML text integration point.'
+		);
+
+		$this->assertTrue( $processor->next_token(), 'Failed to find the text following the inner A element.' );
+
+		$this->assertSame(
+			'#text',
+			$processor->get_token_name(),
+			'The inner A element should contain the following text node.'
+		);
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A', '#text' ),
+			$processor->get_breadcrumbs(),
+			'The text after the inner A element should remain nested inside that A element.'
+		);
+
+		$this->assertSame(
+			'y',
+			$processor->get_modifiable_text(),
+			'The inner A element should contain the expected text.'
+		);
+	}
+
+	/**
+	 * Ensures that an outer A element removed from the stack of open elements
+	 * is removed from breadcrumbs after its existing child subtree closes.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::matches_breadcrumbs
+	 */
+	public function test_removes_outer_anchor_breadcrumb_after_mathml_text_integration_point_closes() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y</a></mi></math>z<span target>t' );
+
+		$this->assertTrue( $processor->next_tag( 'SPAN' ), 'Failed to find the SPAN element after the MathML subtree.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'SPAN' ),
+			$processor->get_breadcrumbs(),
+			'The SPAN element after the MathML subtree should not remain nested inside the removed outer A element.'
+		);
+
+		$this->assertFalse(
+			$processor->matches_breadcrumbs( array( 'A', 'SPAN' ) ),
+			'The SPAN element should not match breadcrumbs inside the removed outer A element.'
+		);
+	}
+
+	/**
+	 * Ensures that a removed outer A element's breadcrumb is not confused with
+	 * a same-named foreign element between it and the integration point.
+	 *
+	 * Foreign A elements never participate in the active formatting elements,
+	 * so the removed node is the outer HTML A element, not the foreign one.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::matches_breadcrumbs
+	 *
+	 * @dataProvider data_intervening_foreign_anchor_html
+	 *
+	 * @param string $html HTML with a foreign A element between the removed outer A element and the integration point.
+	 */
+	public function test_removes_outer_anchor_breadcrumb_with_intervening_foreign_anchor( string $html ) {
+		$processor = WP_HTML_Processor::create_fragment( $html );
+
+		$this->assertTrue( $processor->next_tag( 'SPAN' ), 'Failed to find the SPAN element after the foreign subtree.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'SPAN' ),
+			$processor->get_breadcrumbs(),
+			'The SPAN element after the foreign subtree should not remain nested inside the removed outer A element.'
+		);
+
+		$this->assertFalse(
+			$processor->matches_breadcrumbs( array( 'A', 'SPAN' ) ),
+			'The SPAN element should not match breadcrumbs inside the removed outer A element.'
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_intervening_foreign_anchor_html() {
+		return array(
+			'MathML A before text integration point' => array( '<a><math><a><mtext>x<a>y</a></mtext></a></math>z<span>t' ),
+			'SVG A before integration point'         => array( '<a><svg><a><foreignObject>x<a>y</a></foreignObject></a></svg>z<span>t' ),
+		);
+	}
+
+	/**
+	 * Ensures that an HTML heading end tag inside a MathML text integration
+	 * point is ignored, so following content stays inside the integration point.
+	 *
+	 * The `</h2>` is dispatched through the foreign-content rules, which walk up
+	 * to the HTML-namespace `H2` and hand off to the "in body" heading end-tag
+	 * steps. Those require the heading to be in scope, but a MathML text
+	 * integration point (`MI`) is a scope boundary, so `H2` is not in scope and
+	 * the end tag is dropped. The following `<x-0>` is therefore inserted into
+	 * `MI` rather than becoming a sibling of `H2`.
+	 *
+	 * This matches the HTML specification and browsers (verified against
+	 * Chromium); PHP's `Dom\HTMLDocument` reparents `<x-0>` out of `MI`, which is
+	 * a limitation of that parser, not of the HTML API.
+	 *
+	 * @see https://software.hixie.ch/utilities/js/live-dom-viewer/?%3Ch2%3E%3Cmath%3E%3Cmi%3Ea%3C%2Fh2%3E%3Cx-0%3Eb%3C%2Fx-0%3E
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 */
+	public function test_heading_end_tag_in_mathml_text_integration_point_is_ignored() {
+		$processor = WP_HTML_Processor::create_fragment( '<h2><math><mi>a</h2><x-0>b</x-0>' );
+
+		$this->assertTrue( $processor->next_tag( 'X-0' ), 'Failed to find the X-0 element following the ignored heading end tag.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'H2', 'MATH', 'MI', 'X-0' ),
+			$processor->get_breadcrumbs(),
+			'The X-0 element should remain inside the MathML MI text integration point because the </h2> end tag is not in scope and is ignored.'
+		);
+	}
+
+	/**
+	 * Ensures that an outer A element removed from the stack of open elements
+	 * remains visitable as a virtual closer after its existing child subtree closes.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::is_tag_closer
+	 */
+	public function test_visits_outer_anchor_virtual_closer_after_mathml_text_integration_point_closes() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y</a></mi></math>z' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the outer A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The first A should be the outer A opener.' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The second A should be the inner A opener.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ),
+			$processor->get_breadcrumbs(),
+			'The inner A opener should remain nested inside the MathML MI element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The third A should be the inner A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI' ),
+			$processor->get_breadcrumbs(),
+			'The inner A closer should report its parent breadcrumbs.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the virtual outer A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The fourth A should be the virtual outer A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY' ),
+			$processor->get_breadcrumbs(),
+			'The virtual outer A closer should report its parent breadcrumbs.'
+		);
+	}
+
+	/**
+	 * Ensures that the removed outer A element's virtual closer is visited
+	 * before a new same-name opener immediately following the subtree.
+	 *
+	 * This is the one input where the adjusted-current-node guard and the
+	 * same-name next-event lookahead in the virtual-closer queueing must
+	 * cooperate: the new A opener shares the removed element's tag name, but
+	 * the virtual closer must still fire first so the new element opens as a
+	 * sibling, not a child.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::is_tag_closer
+	 */
+	public function test_visits_outer_anchor_virtual_closer_before_same_name_opener() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y</a></mi></math><a>z' );
+
+		$visits = array();
+		while ( $processor->next_tag(
+			array(
+				'tag_name'    => 'A',
+				'tag_closers' => 'visit',
+			)
+		) ) {
+			$visits[] = array(
+				$processor->is_tag_closer() ? 'closer' : 'opener',
+				$processor->get_breadcrumbs(),
+			);
+		}
+
+		$this->assertSame(
+			array(
+				array( 'opener', array( 'HTML', 'BODY', 'A' ) ),
+				array( 'opener', array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ) ),
+				array( 'closer', array( 'HTML', 'BODY', 'A', 'MATH', 'MI' ) ),
+				array( 'closer', array( 'HTML', 'BODY' ) ),
+				array( 'opener', array( 'HTML', 'BODY', 'A' ) ),
+				array( 'closer', array( 'HTML', 'BODY' ) ),
+			),
+			$visits,
+			'Expected the removed outer A virtual closer to be visited before the new same-name A opener.'
+		);
+	}
+
+	/**
+	 * Ensures that an outer A element removed from the stack of open elements
+	 * remains visitable as a virtual closer when the fragment ends inside its
+	 * existing child subtree.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::is_tag_closer
+	 */
+	public function test_visits_outer_anchor_virtual_closer_at_end_of_fragment() {
+		$processor = WP_HTML_Processor::create_fragment( '<a><math><mi>x<a>y' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the outer A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The first A should be the outer A opener.' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The second A should be the inner A opener.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ),
+			$processor->get_breadcrumbs(),
+			'The inner A opener should remain nested inside the MathML MI element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The third A should be the inner A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI' ),
+			$processor->get_breadcrumbs(),
+			'The inner A closer should report its parent breadcrumbs.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the virtual outer A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The fourth A should be the virtual outer A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY' ),
+			$processor->get_breadcrumbs(),
+			'The virtual outer A closer should report its parent breadcrumbs.'
+		);
+	}
+
+	/**
+	 * Ensures that an outer A element removed from the stack of open elements
+	 * remains visitable as a virtual closer before full-parser EOF closers.
+	 *
+	 * @ticket 61576
+	 *
+	 * @covers WP_HTML_Processor::get_breadcrumbs
+	 * @covers WP_HTML_Processor::is_tag_closer
+	 */
+	public function test_visits_outer_anchor_virtual_closer_before_full_parser_eof_closers() {
+		$processor = WP_HTML_Processor::create_full_parser( '<!DOCTYPE html><a><math><mi>x<a>y' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the outer A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The first A should be the outer A opener.' );
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A opener.'
+		);
+
+		$this->assertFalse( $processor->is_tag_closer(), 'The second A should be the inner A opener.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI', 'A' ),
+			$processor->get_breadcrumbs(),
+			'The inner A opener should remain nested inside the MathML MI element.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the inner A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The third A should be the inner A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY', 'A', 'MATH', 'MI' ),
+			$processor->get_breadcrumbs(),
+			'The inner A closer should report its parent breadcrumbs.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'A',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the virtual outer A closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The fourth A should be the virtual outer A closer.' );
+
+		$this->assertSame(
+			array( 'HTML', 'BODY' ),
+			$processor->get_breadcrumbs(),
+			'The virtual outer A closer should report its parent breadcrumbs.'
+		);
+
+		$this->assertTrue(
+			$processor->next_tag(
+				array(
+					'tag_name'    => 'BODY',
+					'tag_closers' => 'visit',
+				)
+			),
+			'Failed to find the full-parser BODY closer.'
+		);
+
+		$this->assertTrue( $processor->is_tag_closer(), 'The BODY token should be a closer.' );
+
+		$this->assertSame(
+			array( 'HTML' ),
+			$processor->get_breadcrumbs(),
+			'The BODY closer should not consume the stale outer A breadcrumb.'
+		);
+	}
+
+	/**
 	 * Ensures that the ability to set attributes isn't broken by the HTML Processor.
 	 *
 	 * @since 6.4.0

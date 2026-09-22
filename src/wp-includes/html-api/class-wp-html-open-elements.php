@@ -581,7 +581,7 @@ class WP_HTML_Open_Elements {
 
 			$position_from_start = $this->count() - $position_from_end - 1;
 			array_splice( $this->stack, $position_from_start, 1 );
-			$this->after_element_pop( $item );
+			$this->after_element_pop( $item, 0 === $position_from_end );
 			return true;
 		}
 
@@ -725,9 +725,10 @@ class WP_HTML_Open_Elements {
 	 *
 	 * @since 6.4.0
 	 *
-	 * @param WP_HTML_Token $item Element that was removed from the stack of open elements.
+	 * @param WP_HTML_Token $item               Element that was removed from the stack of open elements.
+	 * @param bool          $invoke_pop_handler Whether to call the pop handler.
 	 */
-	public function after_element_pop( WP_HTML_Token $item ): void {
+	public function after_element_pop( WP_HTML_Token $item, bool $invoke_pop_handler = true ): void {
 		/*
 		 * When adding support for new elements, expand this switch to trap
 		 * cases where the precalculated value needs to change.
@@ -762,7 +763,7 @@ class WP_HTML_Open_Elements {
 				break;
 		}
 
-		if ( null !== $this->pop_handler ) {
+		if ( $invoke_pop_handler && null !== $this->pop_handler ) {
 			call_user_func( $this->pop_handler, $item );
 		}
 	}
