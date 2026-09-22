@@ -79,6 +79,22 @@ class WP_HTML_Token {
 	public $integration_node_type = null;
 
 	/**
+	 * Indicates if the node was inserted via foster parenting.
+	 *
+	 * When content appears inside a table context where it isn't allowed, the
+	 * parser inserts it at a location in the document before the table. Such
+	 * a node remains above the table on the stack of open elements, but the
+	 * table context is not part of its document ancestry.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 *
+	 * @var bool
+	 */
+	public $is_foster_parented = false;
+
+	/**
 	 * Called when token is garbage-collected or otherwise destroyed.
 	 *
 	 * @var callable|null

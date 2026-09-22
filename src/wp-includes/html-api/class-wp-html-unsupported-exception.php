@@ -34,7 +34,7 @@ class WP_HTML_Unsupported_Exception extends Exception {
 	 *
 	 * This does not imply that the token itself was unsupported, but it
 	 * may have been the case that the token triggered part of the HTML
-	 * parsing that isn't supported, such as the adoption agency algorithm.
+	 * parsing that isn't supported, such as foster parenting.
 	 *
 	 * @since 6.7.0
 	 *

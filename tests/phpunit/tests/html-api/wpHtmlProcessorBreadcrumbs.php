@@ -195,14 +195,9 @@ class Tests_HtmlApi_WpHtmlProcessorBreadcrumbs extends WP_UnitTestCase {
 	 */
 	public static function data_unsupported_markup() {
 		return array(
-			'A with formatting following unclosed A' => array(
-				'<a><strong>Click <span supported><a unsupported><big>Here</big></a></strong></a>',
-				'Unclosed formatting requires complicated reconstruction.',
-			),
-
-			'A after unclosed A inside DIV'          => array(
-				'<a><div supported><a unsupported></div></a>',
-				'A is a formatting element, which requires more complicated reconstruction.',
+			'PLAINTEXT element' => array(
+				'<div supported><plaintext unsupported>',
+				'PLAINTEXT elements swallow the remainder of the document, which is not supported.',
 			),
 		);
 	}

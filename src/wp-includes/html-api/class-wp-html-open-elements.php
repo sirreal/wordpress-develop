@@ -30,6 +30,45 @@
  */
 class WP_HTML_Open_Elements {
 	/**
+	 * Elements which terminate the search when determining whether an
+	 * element is "in scope".
+	 *
+	 * > The stack of open elements is said to have a particular element in
+	 * > scope when it has that element in the specific scope consisting of
+	 * > the following element types: …
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#has-an-element-in-scope
+	 * @see WP_HTML_Open_Elements::has_element_in_scope
+	 * @see WP_HTML_Open_Elements::has_node_in_scope
+	 *
+	 * @var string[]
+	 */
+	const ELEMENT_IN_SCOPE_TERMINATION_LIST = array(
+		'APPLET',
+		'CAPTION',
+		'HTML',
+		'TABLE',
+		'TD',
+		'TH',
+		'MARQUEE',
+		'OBJECT',
+		'TEMPLATE',
+
+		'math MI',
+		'math MO',
+		'math MN',
+		'math MS',
+		'math MTEXT',
+		'math ANNOTATION-XML',
+
+		'svg FOREIGNOBJECT',
+		'svg DESC',
+		'svg TITLE',
+	);
+
+	/**
 	 * Holds the stack of open element references.
 	 *
 	 * @since 6.4.0
@@ -302,32 +341,42 @@ class WP_HTML_Open_Elements {
 	 * @return bool Whether given element is in scope.
 	 */
 	public function has_element_in_scope( string $tag_name ): bool {
-		return $this->has_element_in_specific_scope(
-			$tag_name,
-			array(
-				'APPLET',
-				'CAPTION',
-				'HTML',
-				'TABLE',
-				'TD',
-				'TH',
-				'MARQUEE',
-				'OBJECT',
-				'SELECT',
-				'TEMPLATE',
+		return $this->has_element_in_specific_scope( $tag_name, self::ELEMENT_IN_SCOPE_TERMINATION_LIST );
+	}
 
-				'math MI',
-				'math MO',
-				'math MN',
-				'math MS',
-				'math MTEXT',
-				'math ANNOTATION-XML',
+	/**
+	 * Returns whether a specific node is in scope.
+	 *
+	 * Whereas {@see self::has_element_in_scope} reports whether *any* element
+	 * of a given tag name is in scope, this reports whether the given node
+	 * itself is. The two may disagree when multiple elements sharing the tag
+	 * name are in the stack of open elements: the adoption agency algorithm,
+	 * for example, must determine whether a specific formatting element is in
+	 * scope, regardless of other elements with the same tag name.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#has-an-element-in-scope
+	 *
+	 * @param WP_HTML_Token $token Check whether this node is in scope.
+	 * @return bool Whether the given node is in scope.
+	 */
+	public function has_node_in_scope( WP_HTML_Token $token ): bool {
+		foreach ( $this->walk_up() as $node ) {
+			if ( $token === $node ) {
+				return true;
+			}
 
-				'svg FOREIGNOBJECT',
-				'svg DESC',
-				'svg TITLE',
-			)
-		);
+			$namespaced_name = 'html' === $node->namespace
+				? $node->node_name
+				: "{$node->namespace} {$node->node_name}";
+
+			if ( in_array( $namespaced_name, self::ELEMENT_IN_SCOPE_TERMINATION_LIST, true ) ) {
+				return false;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -781,9 +830,12 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TABLE' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TABLE' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -805,11 +857,14 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_body_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TBODY' === $item->node_name ||
-				'TFOOT' === $item->node_name ||
-				'THEAD' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TBODY' === $item->node_name ||
+					'TFOOT' === $item->node_name ||
+					'THEAD' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}
@@ -831,9 +886,12 @@ class WP_HTML_Open_Elements {
 	public function clear_to_table_row_context(): void {
 		foreach ( $this->walk_up() as $item ) {
 			if (
-				'TR' === $item->node_name ||
-				'TEMPLATE' === $item->node_name ||
-				'HTML' === $item->node_name
+				'html' === $item->namespace &&
+				(
+					'TR' === $item->node_name ||
+					'TEMPLATE' === $item->node_name ||
+					'HTML' === $item->node_name
+				)
 			) {
 				break;
 			}

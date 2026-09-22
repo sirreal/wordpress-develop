@@ -99,16 +99,16 @@
  *
  * The HTML Processor supports all elements other than a specific set:
  *
- *  - Any element inside a TABLE.
- *  - Any element inside foreign content, including SVG and MATH.
- *  - Any element outside the IN BODY insertion mode, e.g. doctype declarations, meta, links.
+ *  - PLAINTEXT elements.
+ *  - FRAMESET documents.
+ *  - Non-table content found inside a TABLE element whose relocation is
+ *    discovered beyond the deferral bound; see
+ *    {@see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS} and
+ *    {@see WP_HTML_Processor::enable_source_order_foster_parenting}.
+ *  - Content found after closing the BODY or HTML elements which reopens them.
+ *  - META tags which change the document encoding, when parsing a full document.
  *
  * ### Supported markup
- *
- * Some kinds of non-normative HTML involve reconstruction of formatting elements and
- * re-parenting of mis-nested elements. For example, a DIV tag found inside a TABLE
- * may in fact belong _before_ the table in the DOM. If the HTML Processor encounters
- * such a case it will stop processing.
  *
  * The following list illustrates some common examples of unexpected HTML inputs that
  * the HTML Processor properly parses and represents:
@@ -120,6 +120,20 @@
  *  - Elements containing text that looks like other tags but isn't, e.g. `<title>The <img> is plaintext</title>`.
  *  - SCRIPT and STYLE tags containing text that looks like HTML but isn't, e.g. `<script>document.write('<p>Hi</p>');</script>`.
  *  - SCRIPT content which has been escaped, e.g. `<script><!-- document.write('<script>console.log("hi")</script>') --></script>`.
+ *  - Misnested formatting elements, e.g. `<b>bold <i>both</b> italic</i>`, including
+ *    reconstruction of implicitly-closed formatting elements and the adoption agency
+ *    algorithm. Formatting elements reopened by the parser appear as "virtual" nodes:
+ *    they report the attributes of the tag which opened the original element, but
+ *    cannot be modified.
+ *  - Non-table content found inside a TABLE element, e.g. `<table>lost<td>found`,
+ *    which is inserted at a location in the document before the table ("foster
+ *    parenting"). By default such content is visited in document order, before
+ *    the table, by deferring the table's contents within a bound. In
+ *    source-order mode fostered nodes are instead visited where they were found
+ *    in the input HTML, with no bound; their breadcrumbs report their document
+ *    ancestry in every mode. See
+ *    {@see WP_HTML_Processor::enable_source_order_foster_parenting} and
+ *    {@see WP_HTML_Processor::is_foster_parented}.
  *
  * ### Unsupported Features
  *
@@ -131,9 +145,17 @@
  * parser does not add those additional attributes.
  *
  * In certain situations, elements are moved to a different part of the document in
- * a process called "adoption" and "fostering." Because the nodes move to a location
- * in the document that the parser had already processed, this parser does not support
- * these situations and will bail.
+ * processes called "adoption" and "fostering." Because a single-pass parser visits
+ * each node once, nodes which have already been visited cannot move: when adoption
+ * relocates such nodes, they are reported where they were originally found, while
+ * every node visited afterwards is reported with the path a browser would report
+ * for it. Fostered nodes are new nodes and are always reported with the document
+ * ancestry a browser would report. By default they are also visited in document
+ * order — the parser defers each table's contents, within a bound, until the
+ * table closes — and the parser aborts when mis-nested content is discovered
+ * beyond that bound. Enabling source-order foster parenting removes the bound
+ * and the deferral: fostered nodes are then visited where they were found in
+ * the input HTML, after the table element they precede in the document.
  *
  * The parser does not implement the "maybe clone an option into selectedcontent" algorithm.
  * SELECTEDCONTENT elements may not reflect the actual selected content.
@@ -157,6 +179,31 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var int
 	 */
 	const MAX_BOOKMARKS = 10_000;
+
+	/**
+	 * Bound on deferred stack events per table window in document-order mode.
+	 *
+	 * By default the processor visits every node in document order. Content
+	 * which foster parenting relocates to a document location before its
+	 * enclosing TABLE requires deferring the table's contents until the
+	 * table closes; this constant bounds that deferral. When ordinary table
+	 * content exceeds the bound, the deferred events are flushed in order
+	 * and the parse continues undeferred — well-formed tables of any size
+	 * always parse — but foster parenting encountered afterwards can no
+	 * longer be presented in document order and aborts the parse.
+	 *
+	 * Each element contributes two events (a push and a pop) and each text
+	 * or comment node two more, so this bound covers tables of roughly two
+	 * to three hundred cells. Mis-nested table content is overwhelmingly
+	 * discovered near a table's start, far within this bound.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
+	 *
+	 * @var int
+	 */
+	const MAX_BUFFERED_TABLE_EVENTS = 1000;
 
 	/**
 	 * Holds the working state of the parser, including the stack of
@@ -241,6 +288,170 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	private $breadcrumbs = array();
 
 	/**
+	 * Stores the breadcrumb segments hidden by open foster-parented nodes,
+	 * keyed by the bookmark name of the fostered node.
+	 *
+	 * A foster-parented node's document ancestry bypasses its enclosing
+	 * table context. While such a node is open, the breadcrumbs of the
+	 * bypassed table context are set aside here; when it closes, they are
+	 * restored.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Stack_Event::$foster_bypass_count
+	 *
+	 * @var array<string, string[]>
+	 */
+	private $fostered_breadcrumb_segments = array();
+
+	/**
+	 * Indicates whether this processor visits foster-parented nodes at the
+	 * place they were found in the input HTML instead of deferring table
+	 * contents to preserve document order.
+	 *
+	 * By default the processor guarantees that nodes are visited in document
+	 * order, deferring the contents of each TABLE in a bounded buffer until
+	 * the table closes so that foster-parented content may be visited first.
+	 * In source-order mode nothing is deferred: fostered nodes are visited
+	 * after the TABLE they precede in the document, with no size bound.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
+	 *
+	 * @var bool
+	 */
+	private $is_source_order_foster_parenting_enabled = false;
+
+	/**
+	 * Deferred stack events of the currently-open table window, held in
+	 * document order until the window's TABLE element closes, or `null`
+	 * when no window is open.
+	 *
+	 * In document-order mode, the contents of each outermost TABLE element
+	 * are deferred here so that content which foster parenting relocates to
+	 * a document location before the table may be visited first. Fostered
+	 * events are inserted at their document position within this buffer;
+	 * flushing it front-to-back therefore presents the window in document
+	 * order by construction.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @var WP_HTML_Stack_Event[]|null
+	 */
+	private $table_window_events = null;
+
+	/**
+	 * The TABLE element whose subtree the open table window defers, or
+	 * `null` when no window is open. Its pop event flushes the window.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var WP_HTML_Token|null
+	 */
+	private $table_window_table = null;
+
+	/**
+	 * Indicates that the open table window exceeded its buffering bound and
+	 * flushed early: its remaining events present immediately, and foster
+	 * parenting can no longer be presented in document order.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $table_window_overflowed = false;
+
+	/**
+	 * Stack of open fostered runs within the table window.
+	 *
+	 * A fostered run begins when a foster-parented element is inserted and
+	 * ends when that element pops from the stack of open elements; every
+	 * stack event in between belongs to the run and is inserted
+	 * consecutively at the run's document position. Each entry holds:
+	 *
+	 *     @type WP_HTML_Token       $root       The foster-parented element which began the run.
+	 *     @type string              $anchor     'table' or 'template'.
+	 *     @type WP_HTML_Token       $anchor_token The run's foster anchor element.
+	 *     @type WP_HTML_Stack_Event $last_event The run's most recently inserted event.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array[]
+	 */
+	private $table_window_runs = array();
+
+	/**
+	 * Deferred events fostered into a TEMPLATE element's contents, keyed by
+	 * the bookmark name of the template's "host child": the element directly
+	 * above the TEMPLATE on the stack of open elements when the fostering
+	 * occurred.
+	 *
+	 * Template contents receive fostered content after their last child —
+	 * the host child — so these events are held aside and presented
+	 * immediately after the host child's pop event, following its entire
+	 * subtree, and before template children inserted afterwards.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var array<string, WP_HTML_Stack_Event[]>
+	 */
+	private $table_window_template_pending = array();
+
+	/**
+	 * Number of stack events which have been visited, used to order
+	 * bookmarks by visitation.
+	 *
+	 * In document-order mode the visitation order of tokens and the byte
+	 * order of their syntax can disagree: content deferred in a table
+	 * window is visited after content whose syntax follows it. Seeking
+	 * therefore compares positions by visitation, not by byte offset.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var int
+	 */
+	private $visitation_index = 0;
+
+	/**
+	 * Visitation index recorded for each bookmark, keyed by bookmark name.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see WP_HTML_Processor::$visitation_index
+	 *
+	 * @var array<string, int>
+	 */
+	private $bookmark_visitation_indices = array();
+
+	/**
+	 * Indicates that visiting a deferred event moved the lexer away from
+	 * the parse frontier: before parsing may continue, the lexer must be
+	 * repositioned to the token it last parsed.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $lexer_repositioned_for_presentation = false;
+
+	/**
+	 * Indicates that the lexer is being repositioned internally.
+	 *
+	 * The Tag Processor's seek() lexes the token at its destination through
+	 * a call to next_token(), which this class overrides to visit queued
+	 * stack events. While repositioning, next_token() must instead lex
+	 * plainly: repositioning must never consume a queued event.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $is_repositioning_lexer = false;
+
+	/**
 	 * Current stack event, if set, representing a matched token.
 	 *
 	 * Because the parser may internally point to a place further along in a document
@@ -260,6 +471,50 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @var WP_HTML_Token|null
 	 */
 	private $context_node = null;
+
+	/**
+	 * Indicates whether the token currently being processed has already
+	 * produced a stack event of "real" provenance.
+	 *
+	 * Each token in the input HTML must be presented to a visitor of the
+	 * document at most once. Algorithms such as the adoption agency
+	 * algorithm, however, may pop multiple elements whose tag name matches
+	 * a single closing tag in the input HTML: this flag records that a tag
+	 * closer has already been matched with a popped element so that the
+	 * others are reported as closing "virtual" nodes.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var bool
+	 */
+	private $current_token_produced_real_event = false;
+
+	/**
+	 * Reads attributes from the source tag referenced by a virtual node.
+	 *
+	 * Virtual nodes created for the tokens of existing tags, such as the
+	 * formatting elements reconstructed from the list of active formatting
+	 * elements, share the attributes of the tag which created their original
+	 * token. This processor reads those attributes on demand and is cached
+	 * here while the same virtual node remains matched.
+	 *
+	 * @see WP_HTML_Processor::get_virtual_node_attribute_reader()
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var WP_HTML_Tag_Processor|null
+	 */
+	private $virtual_node_attribute_reader = null;
+
+	/**
+	 * Bookmark name of the token for which the virtual-node attribute reader
+	 * was created, indicating when the reader must be re-created.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @var string|null
+	 */
+	private $virtual_node_attribute_reader_bookmark = null;
 
 	/*
 	 * Public Interface Functions
@@ -404,10 +659,93 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_push_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || $this->is_tag_closer();
-				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
-				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $provenance );
+				/*
+				 * A push event is "real" when it pushes the token currently being
+				 * processed and that token is a tag opener found in the input HTML.
+				 * All other pushes open "virtual" nodes: elements implied by context,
+				 * formatting elements reconstructed from the list of active formatting
+				 * elements, or clones created by the adoption agency algorithm.
+				 *
+				 * Token identity is compared instead of the tag name because multiple
+				 * nodes sharing the current token's tag name may be pushed while
+				 * processing a single token. For example, when a "B" formatting element
+				 * is reconstructed while processing the opening tag of another "B"
+				 * element, only the push for the latter is real.
+				 */
+				$is_real = (
+					isset( $this->state->current_token ) &&
+					$token === $this->state->current_token &&
+					! $this->is_tag_closer()
+				);
+
+				$push_event = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::PUSH, $is_real ? 'real' : 'virtual' );
+
+				/*
+				 * In source-order mode, a foster-parented node remains above
+				 * its table context on the stack of open elements even though
+				 * that context is not part of its document ancestry. Count how
+				 * many elements below the node its ancestry bypasses:
+				 * everything above (and including) the nearest TABLE below it
+				 * on the stack, or everything above the nearest TEMPLATE when
+				 * fostered content belongs inside template contents instead.
+				 *
+				 * The count is recorded on the push event because the stack may
+				 * change again before the event is visited, e.g. when the
+				 * adoption agency algorithm rearranges the stack.
+				 *
+				 * In document-order mode no count is needed: presentation
+				 * itself is reordered, so breadcrumbs are exact without
+				 * bypassing anything.
+				 */
+				if ( $token->is_foster_parented && $this->is_source_order_foster_parenting_enabled ) {
+					$bypass_count      = 0;
+					$has_foster_parent = false;
+					foreach ( $this->state->stack_of_open_elements->walk_up( $token ) as $node ) {
+						++$bypass_count;
+
+						if ( 'html' !== $node->namespace ) {
+							continue;
+						}
+
+						if ( 'TABLE' === $node->node_name ) {
+							$has_foster_parent = true;
+							break;
+						}
+
+						/*
+						 * > If there is a last template and either there is no last table,
+						 * > or there is one, but last template is lower (more recently added)
+						 * > than last table in the stack of open elements, then: let adjusted
+						 * > insertion location be inside last template's template contents,
+						 * > after its last child (if any) […]
+						 *
+						 * The TEMPLATE element is the fostered node's parent: only the
+						 * elements above it are bypassed.
+						 */
+						if ( 'TEMPLATE' === $node->node_name ) {
+							--$bypass_count;
+							$has_foster_parent = true;
+							break;
+						}
+					}
+
+					if ( ! $has_foster_parent ) {
+						/*
+						 * > If there is no last table, then let adjusted insertion location be
+						 * > inside the first element in the stack of open elements (the html
+						 * > element), after its last child (if any), and abort these steps.
+						 * > (fragment case)
+						 *
+						 * This is only reachable when parsing a fragment whose context is a
+						 * table-section element; no supported fragment context creates one.
+						 */
+						$this->bail( 'Foster parenting without a TABLE on the stack of open elements is not supported.' );
+					}
+
+					$push_event->foster_bypass_count = $bypass_count;
+				}
+
+				$this->route_stack_event( $push_event );
 
 				$this->change_parsing_namespace( $token->integration_node_type ? 'html' : $token->namespace );
 			}
@@ -415,10 +753,40 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 		$this->state->stack_of_open_elements->set_pop_handler(
 			function ( WP_HTML_Token $token ): void {
-				$is_virtual            = ! isset( $this->state->current_token ) || ! $this->is_tag_closer();
-				$same_node             = isset( $this->state->current_token ) && $token->node_name === $this->state->current_token->node_name;
-				$provenance            = ( ! $same_node || $is_virtual ) ? 'virtual' : 'real';
-				$this->element_queue[] = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $provenance );
+				/*
+				 * A pop event is "real" when the token currently being processed is
+				 * a tag closer found in the input HTML whose tag name matches the
+				 * popped node, and when no real event has been produced for the
+				 * current token yet. All other pops close "virtual" nodes.
+				 *
+				 * At most one popped node may be matched with a given tag closer.
+				 * The adoption agency algorithm, for example, may pop multiple
+				 * elements sharing the tag name of the closing tag it processes:
+				 * only the first of them corresponds to the tag in the input HTML.
+				 */
+				$is_real = (
+					! $this->current_token_produced_real_event &&
+					isset( $this->state->current_token ) &&
+					$this->is_tag_closer() &&
+					$token->node_name === $this->state->current_token->node_name
+				);
+				if ( $is_real ) {
+					$this->current_token_produced_real_event = true;
+				}
+
+				$pop_event = new WP_HTML_Stack_Event( $token, WP_HTML_Stack_Event::POP, $is_real ? 'real' : 'virtual' );
+
+				/*
+				 * A real pop is produced by a closing tag in the input HTML.
+				 * Record that closer's token: when the pop event is deferred
+				 * in a table window and visited later, the lexer repositions
+				 * to the closing tag's own syntax.
+				 */
+				if ( $is_real ) {
+					$pop_event->closer_token = $this->state->current_token;
+				}
+
+				$this->route_stack_event( $pop_event );
 
 				$adjusted_current_node = $this->get_adjusted_current_node();
 
@@ -780,7 +1148,364 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether a token was parsed.
 	 */
 	public function next_token(): bool {
+		if ( $this->is_repositioning_lexer ) {
+			return parent::next_token();
+		}
+
 		return $this->next_visitable_token();
+	}
+
+	/**
+	 * Routes a stack event to its presentation position.
+	 *
+	 * In document-order mode (the default), the contents of each outermost
+	 * TABLE element are deferred in a bounded table window until the table
+	 * closes, so that content which foster parenting relocates to a document
+	 * location before the table may be visited first: fostered events are
+	 * inserted at their document position within the window, and flushing
+	 * the window front-to-back presents everything in document order.
+	 *
+	 * In source-order mode every event is presented as it happens.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When foster parenting cannot be
+	 *                                       presented in document order.
+	 *
+	 * @param WP_HTML_Stack_Event $event Stack event to route.
+	 */
+	private function route_stack_event( WP_HTML_Stack_Event $event ): void {
+		if ( $this->is_source_order_foster_parenting_enabled ) {
+			$this->element_queue[] = $event;
+			return;
+		}
+
+		$token   = $event->token;
+		$is_push = WP_HTML_Stack_Event::PUSH === $event->operation;
+
+		// Events inside an open fostered run follow their run, wherever it is deferred.
+		$open_run_index = count( $this->table_window_runs ) - 1;
+		if ( $open_run_index >= 0 ) {
+			if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+				$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+			}
+
+			$this->insert_deferred_event( $event, $this->table_window_runs[ $open_run_index ]['last_event'], false );
+			$this->table_window_runs[ $open_run_index ]['last_event'] = $event;
+
+			// The run ends when the fostered element which began it pops.
+			if ( ! $is_push && $token === $this->table_window_runs[ $open_run_index ]['root'] ) {
+				array_pop( $this->table_window_runs );
+			}
+			return;
+		}
+
+		// A fostered push begins a new run at its anchor's document position.
+		if ( $is_push && $token->is_foster_parented ) {
+			if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+				$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+			}
+
+			$anchor = $this->resolve_foster_anchor( $token );
+
+			if ( 'template' === $anchor['kind'] ) {
+				/*
+				 * Template contents receive fostered content after their last
+				 * child, the "host child": the element directly above the
+				 * TEMPLATE on the stack of open elements. The fostered run is
+				 * held aside and presented after the host child's subtree.
+				 */
+				$this->table_window_template_pending[ $anchor['host_child']->bookmark_name ][] = $event;
+			} else {
+				/*
+				 * Content fostered before a TABLE requires the table's push
+				 * event to still be deferred; once presented — no window, or
+				 * a window flushed by overflow — nothing can precede it.
+				 */
+				$anchor_push = null === $this->table_window_events || $this->table_window_overflowed
+					? null
+					: $this->find_deferred_push_event( $anchor['token'] );
+				if ( null === $anchor_push ) {
+					$this->bail( 'Foster parenting exceeded the deferral buffer before the mis-nested content was resolved: enable source-order foster parenting to process it out of document order.' );
+				}
+				$this->insert_deferred_event( $event, $anchor_push, true );
+			}
+
+			$this->table_window_runs[] = array(
+				'root'       => $token,
+				'last_event' => $event,
+			);
+			return;
+		}
+
+		if ( null === $this->table_window_events ) {
+			// An outermost TABLE element opens a table window over its subtree.
+			if ( $is_push && 'html' === $token->namespace && 'TABLE' === $token->node_name ) {
+				$this->table_window_events = array( $event );
+				$this->table_window_table  = $token;
+				return;
+			}
+
+			$this->element_queue[] = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		// The pop of the window's own TABLE flushes and closes the window.
+		if ( ! $is_push && $token === $this->table_window_table ) {
+			$this->flush_table_window();
+			$this->element_queue[] = $event;
+			$this->present_pending_fostered_content( $token );
+			$this->table_window_events     = null;
+			$this->table_window_table      = null;
+			$this->table_window_overflowed = false;
+			return;
+		}
+
+		if ( $this->table_window_overflowed ) {
+			$this->element_queue[] = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		// Ordinary table content appends; on overflow the window flushes and stops deferring.
+		if ( $this->count_deferred_table_events() >= static::MAX_BUFFERED_TABLE_EVENTS ) {
+			$this->flush_table_window();
+			$this->table_window_overflowed = true;
+			$this->element_queue[]         = $event;
+			if ( ! $is_push ) {
+				$this->present_pending_fostered_content( $token );
+			}
+			return;
+		}
+
+		$this->table_window_events[] = $event;
+
+		// A host child's pop is followed by the fostered content its template received.
+		if ( ! $is_push && isset( $this->table_window_template_pending[ $token->bookmark_name ] ) ) {
+			foreach ( $this->table_window_template_pending[ $token->bookmark_name ] as $pending_event ) {
+				$this->table_window_events[] = $pending_event;
+			}
+			unset( $this->table_window_template_pending[ $token->bookmark_name ] );
+		}
+	}
+
+	/**
+	 * Presents every deferred event of the open table window, in order.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 */
+	private function flush_table_window(): void {
+		foreach ( $this->table_window_events as $deferred_event ) {
+			$deferred_event->is_deferred = true;
+			$this->element_queue[]       = $deferred_event;
+		}
+		$this->table_window_events = array();
+		$this->table_window_runs   = array();
+	}
+
+	/**
+	 * Counts the deferred events of the open table window, including
+	 * events held for template contents.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @return int Number of deferred events.
+	 */
+	private function count_deferred_table_events(): int {
+		$count = null === $this->table_window_events ? 0 : count( $this->table_window_events );
+		foreach ( $this->table_window_template_pending as $pending_events ) {
+			$count += count( $pending_events );
+		}
+		return $count;
+	}
+
+	/**
+	 * Presents the fostered content held for the given host child, directly
+	 * after its pop event, when that pop presents immediately: outside any
+	 * table window, after an overflow, or when the window closes.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::$table_window_template_pending
+	 *
+	 * @param WP_HTML_Token $host_child Element whose pop was just enqueued.
+	 */
+	private function present_pending_fostered_content( WP_HTML_Token $host_child ): void {
+		if ( ! isset( $this->table_window_template_pending[ $host_child->bookmark_name ] ) ) {
+			return;
+		}
+
+		foreach ( $this->table_window_template_pending[ $host_child->bookmark_name ] as $pending_event ) {
+			$pending_event->is_deferred = true;
+			$this->element_queue[]      = $pending_event;
+		}
+		unset( $this->table_window_template_pending[ $host_child->bookmark_name ] );
+	}
+
+	/**
+	 * Finds the foster anchor of a foster-parented node: the TABLE element
+	 * it belongs immediately before, or the TEMPLATE element whose contents
+	 * receive it.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When no anchor exists on the stack of open elements.
+	 *
+	 * @param WP_HTML_Token $token Foster-parented node, already on the stack of open elements.
+	 * @return array {
+	 *     @type string        $kind  'table' or 'template'.
+	 *     @type WP_HTML_Token $token The anchor element.
+	 * }
+	 */
+	private function resolve_foster_anchor( WP_HTML_Token $token ): array {
+		$previous_node = null;
+		foreach ( $this->state->stack_of_open_elements->walk_up( $token ) as $node ) {
+			if ( 'html' !== $node->namespace ) {
+				$previous_node = $node;
+				continue;
+			}
+
+			if ( 'TABLE' === $node->node_name ) {
+				return array(
+					'kind'  => 'table',
+					'token' => $node,
+				);
+			}
+
+			if ( 'TEMPLATE' === $node->node_name ) {
+				if ( null === $previous_node ) {
+					/*
+					 * Unreachable: foster parenting requires a table-part
+					 * target between the fostered node and the TEMPLATE.
+					 */
+					$this->bail( 'Foster parenting into a TEMPLATE without an open child is not supported.' );
+				}
+
+				return array(
+					'kind'       => 'template',
+					'token'      => $node,
+					'host_child' => $previous_node,
+				);
+			}
+
+			$previous_node = $node;
+		}
+
+		$this->bail( 'Foster parenting without a TABLE on the stack of open elements is not supported.' );
+	}
+
+	/**
+	 * Finds the deferred push event for the given token among the open
+	 * table window's events, including events held for template contents.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token $token Token whose push event to find.
+	 * @return WP_HTML_Stack_Event|null The push event, if deferred.
+	 */
+	private function find_deferred_push_event( WP_HTML_Token $token ): ?WP_HTML_Stack_Event {
+		foreach ( $this->table_window_events as $deferred_event ) {
+			if ( WP_HTML_Stack_Event::PUSH === $deferred_event->operation && $token === $deferred_event->token ) {
+				return $deferred_event;
+			}
+		}
+
+		foreach ( $this->table_window_template_pending as $pending_events ) {
+			foreach ( $pending_events as $pending_event ) {
+				if ( WP_HTML_Stack_Event::PUSH === $pending_event->operation && $token === $pending_event->token ) {
+					return $pending_event;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Inserts a deferred event relative to a reference event, wherever
+	 * among the open table window's lists the reference is deferred.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @throws WP_HTML_Unsupported_Exception When the reference event cannot be found.
+	 *
+	 * @param WP_HTML_Stack_Event $event     Event to insert.
+	 * @param WP_HTML_Stack_Event $reference Event next to which to insert.
+	 * @param bool                $before    Whether to insert before the reference instead of after it.
+	 */
+	private function insert_deferred_event( WP_HTML_Stack_Event $event, WP_HTML_Stack_Event $reference, bool $before ): void {
+		$at = null === $this->table_window_events ? false : array_search( $reference, $this->table_window_events, true );
+		if ( false !== $at ) {
+			array_splice( $this->table_window_events, $before ? $at : $at + 1, 0, array( $event ) );
+			return;
+		}
+
+		foreach ( $this->table_window_template_pending as &$pending_events ) {
+			$at = array_search( $reference, $pending_events, true );
+			if ( false !== $at ) {
+				array_splice( $pending_events, $before ? $at : $at + 1, 0, array( $event ) );
+				return;
+			}
+		}
+		unset( $pending_events );
+
+		$this->bail( 'Could not locate the deferred table event next to which a node belongs.' );
+	}
+
+	/**
+	 * Repositions the lexer to a token's syntax so that a deferred event may
+	 * be visited as if it were visited when it was parsed.
+	 *
+	 * Internal repositioning is unrelated to the caller's use of seek() and
+	 * doesn't count against its budget. Before parsing continues, the lexer
+	 * returns to the parse frontier.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::$lexer_repositioned_for_presentation
+	 *
+	 * @param WP_HTML_Token $token Token to whose syntax the lexer moves.
+	 * @return bool Whether the lexer was repositioned.
+	 */
+	private function reposition_lexer_to_token( WP_HTML_Token $token ): bool {
+		$seek_count_before            = $this->seek_count;
+		$this->is_repositioning_lexer = true;
+		$did_reposition               = parent::seek( $token->bookmark_name );
+		$this->is_repositioning_lexer = false;
+		$this->seek_count             = $seek_count_before;
+
+		if ( ! $did_reposition ) {
+			$this->last_error = self::ERROR_UNSUPPORTED;
+			return false;
+		}
+
+		/*
+		 * Text nodes are subdivided when first parsed; re-lexing a text
+		 * token from its starting byte reproduces the same subdivision.
+		 */
+		if ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state ) {
+			parent::subdivide_text_appropriately();
+		}
+
+		$this->lexer_repositioned_for_presentation = true;
+		return true;
 	}
 
 	/**
@@ -811,33 +1536,46 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		/*
 		 * Prime the events if there are none.
 		 *
-		 * @todo In some cases, probably related to the adoption agency
-		 *       algorithm, this call to step() doesn't create any new
-		 *       events. Calling it again creates them. Figure out why
-		 *       this is and if it's inherent or if it's a bug. Looping
-		 *       until there are events or until there are no more
-		 *       tokens works in the meantime and isn't obviously wrong.
+		 * Some tokens never create presentable stack events: tokens which the
+		 * HTML specification directs the parser to ignore, such as a stray
+		 * closing tag or a DOCTYPE found inside BODY, and tokens whose events
+		 * are deferred inside an open table window. Stepping past such a
+		 * token succeeds but leaves the queue empty, so this method steps
+		 * until an event appears or the document is exhausted.
 		 */
-		if ( empty( $this->element_queue ) ) {
-			if ( $this->step() ) {
-				return $this->next_visitable_token();
+		while ( empty( $this->element_queue ) ) {
+			if ( ! $this->step() ) {
+				break;
 			}
+		}
 
-			if ( isset( $this->last_error ) ) {
-				return false;
-			}
+		if ( isset( $this->last_error ) ) {
+			return false;
 		}
 
 		// Process the next event on the queue.
 		$this->current_element = array_shift( $this->element_queue );
 		if ( ! isset( $this->current_element ) ) {
-			// There are no tokens left, so close all remaining open elements.
-			while ( $this->state->stack_of_open_elements->pop() ) {
-				continue;
+			/*
+			 * There are no tokens left, so close all remaining open elements.
+			 *
+			 * Routing the pop events can refuse to proceed, e.g. when an open
+			 * fostered run exceeds the deferral buffer while the document's
+			 * unclosed elements unwind; the abort is recorded by bail() before
+			 * it throws.
+			 */
+			try {
+				while ( $this->state->stack_of_open_elements->pop() ) {
+					continue;
+				}
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				return false;
 			}
 
 			return empty( $this->element_queue ) ? false : $this->next_visitable_token();
 		}
+
+		++$this->visitation_index;
 
 		$is_pop = WP_HTML_Stack_Event::POP === $this->current_element->operation;
 
@@ -853,13 +1591,59 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// Adjust the breadcrumbs for this event.
 		if ( $is_pop ) {
 			array_pop( $this->breadcrumbs );
+
+			/*
+			 * When a foster-parented node closes, restore the breadcrumbs of
+			 * the table context which its document ancestry bypassed.
+			 */
+			$bookmark_name = $this->current_element->token->bookmark_name;
+			if (
+				$this->current_element->token->is_foster_parented &&
+				isset( $this->fostered_breadcrumb_segments[ $bookmark_name ] )
+			) {
+				$this->breadcrumbs = array_merge( $this->breadcrumbs, $this->fostered_breadcrumb_segments[ $bookmark_name ] );
+				unset( $this->fostered_breadcrumb_segments[ $bookmark_name ] );
+			}
 		} else {
+			/*
+			 * A foster-parented node is inserted at a location before the
+			 * table whose context it was found in: set aside the breadcrumbs
+			 * of the bypassed table context while the node is open so that
+			 * its breadcrumbs report its document ancestry.
+			 */
+			$foster_bypass_count = $this->current_element->foster_bypass_count;
+			if ( isset( $foster_bypass_count ) && $foster_bypass_count > 0 ) {
+				$hidden_segment = array_splice( $this->breadcrumbs, -$foster_bypass_count );
+
+				$this->fostered_breadcrumb_segments[ $this->current_element->token->bookmark_name ] = $hidden_segment;
+			}
+
 			$this->breadcrumbs[] = $this->current_element->token->node_name;
 		}
 
 		// Avoid sending close events for elements which don't expect a closing.
 		if ( $is_pop && ! $this->expects_closer( $this->current_element->token ) ) {
 			return $this->next_visitable_token();
+		}
+
+		/*
+		 * An event deferred in a table window is visited after the lexer
+		 * moved past its syntax: reposition the lexer so that the token's
+		 * syntax may be read and modified as if it were visited when it
+		 * was parsed. Any real event visited while the lexer is displaced
+		 * needs the same, e.g. the pop of the window's own TABLE, visited
+		 * directly after the flushed events which displaced the lexer.
+		 * Only real events correspond to syntax in the input; a real pop's
+		 * syntax is its closing tag.
+		 */
+		if (
+			'real' === $this->current_element->provenance &&
+			( $this->current_element->is_deferred || $this->lexer_repositioned_for_presentation )
+		) {
+			$syntax_token = $is_pop ? $this->current_element->closer_token : $this->current_element->token;
+			if ( ! $this->reposition_lexer_to_token( $syntax_token ) ) {
+				return false;
+			}
 		}
 
 		return true;
@@ -901,6 +1685,108 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			isset( $this->current_element->provenance ) &&
 			'virtual' === $this->current_element->provenance
 		);
+	}
+
+	/**
+	 * Presents foster-parented nodes at the place they were found in the
+	 * input HTML, trading the guarantee that nodes are visited in document
+	 * order for unbounded foster parenting support with no deferral.
+	 *
+	 * When content appears inside a table context where it isn't allowed, e.g.
+	 * a DIV element directly inside a TABLE, a parser inserts that content at
+	 * a location in the document before the table. This is known as "foster
+	 * parenting".
+	 *
+	 * By default the processor visits every node in document order: the
+	 * contents of each TABLE are deferred, within a bound, until the table
+	 * closes, so that fostered content may be visited first; when mis-nested
+	 * content is discovered beyond that bound the processor aborts. Code
+	 * which walks a document relying on the order and depth of what it
+	 * visits, e.g. to find where an element's subtree ends, is always safe
+	 * in the default mode.
+	 *
+	 * In source-order mode nothing is deferred and there is no bound, but a
+	 * foster-parented node is visited after the TABLE element which follows
+	 * it in the document: the sequence of visited nodes is no longer a
+	 * pre-order traversal of the document. Consumers must account for this,
+	 * e.g. via {@see WP_HTML_Processor::is_foster_parented}, before enabling
+	 * this mode. It suits order-independent processing of arbitrary input:
+	 * per-node reads and in-place modifications keyed on tag names,
+	 * attributes, or breadcrumbs.
+	 *
+	 * Every node, in both modes, is always reported with its exact document
+	 * ancestry: breadcrumbs are unaffected by visitation order.
+	 *
+	 * Source-order mode must be enabled before the processor starts scanning.
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === '#text'; // "misplaced", visited before the TABLE.
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->enable_source_order_foster_parenting() === true;
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE'; // "misplaced" is visited after it.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 * @see WP_HTML_Processor::is_foster_parented
+	 * @see WP_HTML_Processor::MAX_BUFFERED_TABLE_EVENTS
+	 *
+	 * @return bool Whether source-order mode was enabled: it cannot be
+	 *              enabled once the processor has started scanning.
+	 */
+	public function enable_source_order_foster_parenting(): bool {
+		if ( WP_HTML_Tag_Processor::STATE_READY !== $this->parser_state ) {
+			return false;
+		}
+
+		$this->is_source_order_foster_parenting_enabled = true;
+		return true;
+	}
+
+	/**
+	 * Indicates if the currently-matched node was inserted via foster parenting.
+	 *
+	 * When content appears inside a table context where it isn't allowed, e.g.
+	 * a DIV element directly inside a TABLE, the parser inserts that content at
+	 * a location in the document before the table. This is known as "foster
+	 * parenting". The breadcrumbs of a foster-parented node report its document
+	 * ancestry, which does not contain the table context enclosing it in the
+	 * input HTML.
+	 *
+	 * The marker's practical reading depends on the presentation mode. By
+	 * default nodes are visited in document order, and the marker means that
+	 * this node's syntax lies inside table markup which follows it in the
+	 * visited stream — relevant when reasoning about raw spans. In
+	 * source-order mode it additionally means that this node was visited out
+	 * of document order: it precedes, in the document, the TABLE element
+	 * which was already visited.
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_HTML_Processor::create_fragment( '<table>misplaced<td>cell</td></table>' );
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === '#text';
+	 *     $processor->is_foster_parented() === true;
+	 *     $processor->get_breadcrumbs() === array( 'HTML', 'BODY', '#text' );
+	 *
+	 *     $processor->next_token();
+	 *     $processor->get_token_name() === 'TABLE';
+	 *     $processor->is_foster_parented() === false;
+	 *
+	 * @since 7.1.0
+	 *
+	 * @see https://html.spec.whatwg.org/#foster-parenting
+	 * @see WP_HTML_Processor::enable_source_order_foster_parenting
+	 *
+	 * @return bool Whether the currently-matched node was foster-parented.
+	 */
+	public function is_foster_parented(): bool {
+		return isset( $this->current_element ) && $this->current_element->token->is_foster_parented;
 	}
 
 	/**
@@ -1023,6 +1909,36 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
+		/*
+		 * Visiting an event deferred in a table window repositions the lexer
+		 * to the deferred token's syntax. Before parsing continues, return
+		 * the lexer to the parse frontier: the token it last parsed.
+		 */
+		if ( $this->lexer_repositioned_for_presentation ) {
+			$this->lexer_repositioned_for_presentation = false;
+			if ( isset( $this->state->current_token ) ) {
+				$seek_count_before            = $this->seek_count;
+				$this->is_repositioning_lexer = true;
+				parent::seek( $this->state->current_token->bookmark_name );
+				$this->is_repositioning_lexer = false;
+				$this->seek_count             = $seek_count_before;
+
+				if ( WP_HTML_Tag_Processor::STATE_TEXT_NODE === $this->parser_state ) {
+					parent::subdivide_text_appropriately();
+				}
+			}
+		}
+
+		/*
+		 * The foster parenting flag only applies while processing the token
+		 * for which the "in table" insertion mode enabled it. Handlers which
+		 * ignore a token step to the next one or reprocess the current token
+		 * in another insertion mode without returning through the "in table"
+		 * handler which set the flag; clearing it here prevents it from
+		 * leaking beyond the token which enabled it.
+		 */
+		$this->state->foster_parenting = false;
+
 		if ( self::REPROCESS_CURRENT_NODE !== $node_to_process ) {
 			/*
 			 * Void elements still hop onto the stack of open elements even though
@@ -1032,10 +1948,18 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 *
 			 * When moving on to the next node, therefore, if the bottom-most element
 			 * on the stack is a void element, it must be closed.
+			 *
+			 * Routing the pop event can refuse to proceed, e.g. when an open
+			 * fostered run exceeds the deferral buffer; the abort is recorded
+			 * by bail() before it throws.
 			 */
-			$top_node = $this->state->stack_of_open_elements->current_node();
-			if ( isset( $top_node ) && ! $this->expects_closer( $top_node ) ) {
-				$this->state->stack_of_open_elements->pop();
+			try {
+				$top_node = $this->state->stack_of_open_elements->current_node();
+				if ( isset( $top_node ) && ! $this->expects_closer( $top_node ) ) {
+					$this->state->stack_of_open_elements->pop();
+				}
+			} catch ( WP_HTML_Unsupported_Exception $e ) {
+				return false;
 			}
 		}
 
@@ -1075,6 +1999,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				$this->has_self_closing_flag(),
 				$this->release_internal_bookmark_on_destruct
 			);
+
+			$this->current_token_produced_real_event = false;
 		}
 
 		$parse_in_current_insertion_mode = (
@@ -1252,6 +2178,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
+	 *  - Content found inside a TABLE where it isn't allowed is moved to
+	 *    its document location before the table.
 	 *
 	 * Example:
 	 *
@@ -1292,6 +2220,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *    and invalid UTF-8 replaced with U+FFFD.
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
+	 *  - Content found inside a TABLE where it isn't allowed is serialized
+	 *    at its document location before the table: parsing the output needs
+	 *    no foster parenting. In source-order mode it is instead serialized
+	 *    where its syntax was found, inside the table markup; parsing that
+	 *    output foster-parents it again to the same document location, and
+	 *    whitespace which was separated from it only by ignored syntax joins
+	 *    it when the output is parsed.
 	 *
 	 * Example:
 	 *
@@ -2752,13 +3687,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					/*
 					 * > If node is null or if the stack of open elements does not have node
 					 * > in scope, then this is a parse error; return and ignore the token.
-					 *
-					 * @todo It's necessary to check if the form token itself is in scope, not
-					 *       simply whether any FORM is in scope.
 					 */
 					if (
 						null === $node ||
-						! $this->state->stack_of_open_elements->has_element_in_scope( 'FORM' )
+						! $this->state->stack_of_open_elements->has_node_in_scope( $node )
 					) {
 						/*
 						 * Parse error: ignore the token.
@@ -2777,10 +3709,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					$this->generate_implied_end_tags();
 					if ( $node !== $this->state->stack_of_open_elements->current_node() ) {
 						// @todo Indicate a parse error once it's possible. This error does not impact the logic here.
-						$this->bail( 'Cannot close a FORM when other elements remain open as this would throw off the breadcrumbs for the following tokens.' );
 					}
 
-					$this->state->stack_of_open_elements->remove_node( $node );
+					$this->remove_node_from_stack_of_open_elements( $node );
 					return true;
 				} else {
 					/*
@@ -2898,16 +3829,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 							break 2;
 
 						case 'A':
+							/*
+							 * > …run the adoption agency algorithm for the token, then remove that
+							 * > element from the list of active formatting elements and the stack
+							 * > of open elements if the adoption agency algorithm didn't already
+							 * > remove it (it might not have if the element is not in table scope).
+							 *
+							 * The adoption agency algorithm cannot require "any other end tag"
+							 * treatment here: it searches the same span of the list of active
+							 * formatting elements in which this A element was just found.
+							 */
 							$this->run_adoption_agency_algorithm();
 							$this->state->active_formatting_elements->remove_node( $item );
-							$this->state->stack_of_open_elements->remove_node( $item );
+							$this->remove_node_from_stack_of_open_elements( $item );
 							break 2;
 					}
 				}
 
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2928,7 +3869,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '+U':
 				$this->reconstruct_active_formatting_elements();
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2944,7 +3885,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 
 				$this->insert_html_element( $this->state->current_token );
-				$this->state->active_formatting_elements->push( $this->state->current_token );
+				$this->push_onto_active_formatting_elements( $this->state->current_token );
 				return true;
 
 			/*
@@ -2965,7 +3906,13 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			case '-STRONG':
 			case '-TT':
 			case '-U':
-				$this->run_adoption_agency_algorithm();
+				if ( ! $this->run_adoption_agency_algorithm() ) {
+					/*
+					 * > If there is no such element, then return and instead act as
+					 * > described in the "any other end tag" entry above.
+					 */
+					return $this->in_body_any_other_end_tag();
+				}
 				return true;
 
 			/*
@@ -3472,9 +4419,9 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					/*
 					 * This follows the rules for "in table text" insertion mode.
 					 *
-					 * Whitespace-only text nodes are inserted in-place. Otherwise
-					 * foster parenting is enabled and the nodes would be
-					 * inserted out-of-place.
+					 * Whitespace-only text nodes are inserted in-place; text
+					 * containing other characters is a parse error and is
+					 * foster-parented following the "anything else" rules below.
 					 *
 					 * > If any of the tokens in the pending table character tokens
 					 * > list are character tokens that are not ASCII whitespace,
@@ -3486,15 +4433,26 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 					 * > Otherwise, insert the characters given by the pending table
 					 * > character tokens list.
 					 *
+					 * Because this parser visits text nodes as a single token, the
+					 * pending table character tokens list is approximated by the
+					 * current text token plus a check of the text which directly
+					 * follows it: text is subdivided so that a leading run of
+					 * whitespace (or of NULL bytes) forms its own token, yet a
+					 * browser collects the entire run into the pending list before
+					 * deciding. When any part of the pending run is not whitespace,
+					 * the whole run is foster-parented, including its leading
+					 * whitespace.
+					 *
 					 * @see https://html.spec.whatwg.org/#parsing-main-intabletext
 					 */
-					if ( parent::TEXT_IS_WHITESPACE === $this->text_node_classification ) {
+					if (
+						parent::TEXT_IS_WHITESPACE === $this->text_node_classification &&
+						! $this->pending_table_character_tokens_contain_non_whitespace()
+					) {
 						$this->insert_html_element( $this->state->current_token );
 						return true;
 					}
 
-					// Non-whitespace would trigger fostering, unsupported at this time.
-					$this->bail( 'Foster parenting is not supported.' );
 					break;
 				}
 				break;
@@ -3674,10 +4632,78 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		 * > Parse error. Enable foster parenting, process the token using the rules for the
 		 * > "in body" insertion mode, and then disable foster parenting.
 		 *
+		 * The flag is also cleared on entry to `step()`: "in body" handlers
+		 * which ignore the token advance to the next token, and handlers which
+		 * switch the insertion mode may reprocess the current token in the new
+		 * mode; in both cases processing proceeds without returning here, and
+		 * foster parenting must not apply to those insertions.
+		 *
 		 * @todo Indicate a parse error once it's possible.
 		 */
 		anything_else:
-		$this->bail( 'Foster parenting is not supported.' );
+		$this->state->foster_parenting = true;
+		$step_result                   = $this->step_in_body();
+		$this->state->foster_parenting = false;
+		return $step_result;
+	}
+
+	/**
+	 * Indicates if the text which directly follows the current whitespace-only
+	 * text token, in the same run of text, contains non-whitespace characters.
+	 *
+	 * The "in table text" rules collect an entire run of text into the pending
+	 * table character tokens list before deciding where it belongs: when any of
+	 * it is not whitespace, all of it is foster-parented, including a leading
+	 * run of whitespace. This parser subdivides a run of text so that leading
+	 * whitespace forms its own token, so when handling a whitespace-only text
+	 * token in a table context it must look ahead to the rest of the run to
+	 * make the same decision a browser would make for the entire run.
+	 *
+	 * NULL bytes are skipped because the "in table text" rules drop them from
+	 * the pending table character tokens list; character references which
+	 * decode to whitespace are treated as whitespace. The scan stops at "<"
+	 * without examining whether it opens a tag: in the rare case that it
+	 * doesn't, e.g. `<table> < b`, the leading whitespace is kept inside the
+	 * table context while a browser would have foster-parented it.
+	 *
+	 * This must only be called when the current token is a whitespace-only
+	 * text token: only then does the parser's position point at the rest of
+	 * the text run.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#parsing-main-intabletext
+	 *
+	 * @return bool Whether non-whitespace text directly follows the current
+	 *              whitespace-only text token in the same run of text.
+	 */
+	private function pending_table_character_tokens_contain_non_whitespace(): bool {
+		$html          = $this->html;
+		$current_token = $this->bookmarks[ $this->state->current_token->bookmark_name ];
+		$at            = $current_token->start + $current_token->length;
+		$end           = strlen( $html );
+
+		while ( $at < $end ) {
+			$at += strspn( $html, " \t\f\r\n\x00", $at, $end - $at );
+
+			if ( $at >= $end || '<' === $html[ $at ] ) {
+				return false;
+			}
+
+			if ( '&' === $html[ $at ] ) {
+				$matched_byte_length = null;
+				$replacement         = WP_HTML_Decoder::read_character_reference( 'data', $html, $at, $matched_byte_length );
+				if ( isset( $replacement ) && 1 === strspn( $replacement, " \t\f\r\n" ) ) {
+					$at += $matched_byte_length;
+					continue;
+				}
+			}
+
+			return true;
+		}
+
+		return false;
 	}
 
 	/**
@@ -5304,7 +6330,56 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return string|true|null Value of attribute or `null` if not available. Boolean attributes return `true`.
 	 */
 	public function get_attribute( $name ) {
-		return $this->is_virtual() ? null : parent::get_attribute( $name );
+		if ( ! $this->is_virtual() ) {
+			return parent::get_attribute( $name );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_attribute( $name ) : null;
+	}
+
+	/**
+	 * Returns a reader stopped at the source tag referenced by the currently-
+	 * matched virtual node, if the node refers to a tag in the input HTML.
+	 *
+	 * Virtual nodes created for elements implied by context, such as missing
+	 * HTML, HEAD, or BODY tags, do not refer to any tag in the input HTML and
+	 * have no attributes: for these, no reader exists.
+	 *
+	 * Nodes created by active format reconstruction or by the adoption agency
+	 * algorithm, however, are created for the tokens of tags in the input HTML
+	 * and share their attributes: reading such a node's attributes reads the
+	 * attributes of its source tag.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @return WP_HTML_Tag_Processor|null Reader stopped at the source tag, if one exists.
+	 */
+	private function get_virtual_node_attribute_reader(): ?WP_HTML_Tag_Processor {
+		$token = $this->current_element->token;
+
+		if ( ! isset( $token->bookmark_name, $this->bookmarks[ $token->bookmark_name ] ) ) {
+			return null;
+		}
+
+		$span = $this->bookmarks[ $token->bookmark_name ];
+		if ( 0 === $span->length ) {
+			return null;
+		}
+
+		if ( $token->bookmark_name !== $this->virtual_node_attribute_reader_bookmark ) {
+			$reader              = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+			$reader->compat_mode = $this->compat_mode;
+			$reader->change_parsing_namespace( $token->namespace );
+			if ( ! $reader->next_token() ) {
+				return null;
+			}
+
+			$this->virtual_node_attribute_reader          = $reader;
+			$this->virtual_node_attribute_reader_bookmark = $token->bookmark_name;
+		}
+
+		return $this->virtual_node_attribute_reader;
 	}
 
 	/**
@@ -5382,7 +6457,32 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return array|null List of attribute names, or `null` when no tag opener is matched.
 	 */
 	public function get_attribute_names_with_prefix( $prefix ): ?array {
-		return $this->is_virtual() ? null : parent::get_attribute_names_with_prefix( $prefix );
+		if ( ! $this->is_virtual() ) {
+			return parent::get_attribute_names_with_prefix( $prefix );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_attribute_names_with_prefix( $prefix ) : null;
+	}
+
+	/**
+	 * Returns the adjusted attribute name for a given attribute, taking into
+	 * account the current parsing context, whether HTML, SVG, or MathML.
+	 *
+	 * @since 7.1.0 Subclassed for the HTML Processor.
+	 *
+	 * @see WP_HTML_Tag_Processor::get_qualified_attribute_name
+	 *
+	 * @param string $attribute_name Which attribute to adjust.
+	 * @return string|null Adjusted attribute name, or `null` when no tag opener is matched.
+	 */
+	public function get_qualified_attribute_name( $attribute_name ): ?string {
+		if ( ! $this->is_virtual() ) {
+			return parent::get_qualified_attribute_name( $attribute_name );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->get_qualified_attribute_name( $attribute_name ) : null;
 	}
 
 	/**
@@ -5413,16 +6513,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Returns if a matched tag contains the given ASCII case-insensitive class name.
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
-	 *
-	 * @todo When reconstructing active formatting elements with attributes, find a way
-	 *       to indicate if the virtually-reconstructed formatting elements contain the
-	 *       wanted class name.
+	 * @since 7.1.0 Reports class names for reconstructed formatting elements,
+	 *              which contain the class names of their source tag.
 	 *
 	 * @param string $wanted_class Look for this CSS class name, ASCII case-insensitive.
 	 * @return bool|null Whether the matched tag contains the given class name, or null if not matched.
 	 */
 	public function has_class( $wanted_class ): ?bool {
-		return $this->is_virtual() ? null : parent::has_class( $wanted_class );
+		if ( ! $this->is_virtual() ) {
+			return parent::has_class( $wanted_class );
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->has_class( $wanted_class ) : null;
 	}
 
 	/**
@@ -5448,7 +6551,12 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 */
 	public function class_list() {
-		return $this->is_virtual() ? null : parent::class_list();
+		if ( ! $this->is_virtual() ) {
+			return parent::class_list();
+		}
+
+		$reader = $this->get_virtual_node_attribute_reader();
+		return null !== $reader ? $reader->class_list() : null;
 	}
 
 	/**
@@ -5510,6 +6618,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * @return bool Whether the bookmark already existed before removal.
 	 */
 	public function release_bookmark( $bookmark_name ): bool {
+		unset( $this->bookmark_visitation_indices[ "_{$bookmark_name}" ] );
 		return parent::release_bookmark( "_{$bookmark_name}" );
 	}
 
@@ -5535,11 +6644,17 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$this->get_updated_html();
 
 		$actual_bookmark_name = "_{$bookmark_name}";
-		$processor_started_at = $this->state->current_token
-			? $this->bookmarks[ $this->state->current_token->bookmark_name ]->start
-			: 0;
 		$bookmark_starts_at   = $this->bookmarks[ $actual_bookmark_name ]->start;
-		$direction            = $bookmark_starts_at > $processor_started_at ? 'forward' : 'backward';
+
+		/*
+		 * Direction is decided by visitation order, not byte order: in
+		 * document-order mode a node deferred in a table window is visited
+		 * after nodes whose syntax follows it, so byte offsets would walk
+		 * the wrong way. Every bookmark records the visitation index of the
+		 * node it was set on.
+		 */
+		$bookmark_visited_at = $this->bookmark_visitation_indices[ $actual_bookmark_name ] ?? 0;
+		$direction           = $bookmark_visited_at > $this->visitation_index ? 'forward' : 'backward';
 
 		/*
 		 * If seeking backwards, it's possible that the sought-after bookmark exists within an element
@@ -5573,6 +6688,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		if ( 'backward' === $direction ) {
 
 			/*
+			 * Deferred-presentation state is cleared before the stacks: the
+			 * events which clearing the stacks generates are all discarded,
+			 * and routing them through open table windows or fostered runs
+			 * could otherwise abort a legitimate seek.
+			 */
+			$this->table_window_events                 = null;
+			$this->table_window_table                  = null;
+			$this->table_window_overflowed             = false;
+			$this->table_window_runs                   = array();
+			$this->table_window_template_pending       = array();
+			$this->lexer_repositioned_for_presentation = false;
+
+			/*
 			 * When moving backward, stateful stacks should be cleared.
 			 */
 			foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
@@ -5589,12 +6717,21 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * would appear on a subsequent call to `next_token()`.
 			 */
 			$this->state->frameset_ok                       = true;
+			$this->state->foster_parenting                  = false;
 			$this->state->stack_of_template_insertion_modes = array();
 			$this->state->head_element                      = null;
 			$this->state->form_element                      = null;
 			$this->state->current_token                     = null;
 			$this->current_element                          = null;
 			$this->element_queue                            = array();
+			$this->fostered_breadcrumb_segments             = array();
+			$this->table_window_events                      = null;
+			$this->table_window_table                       = null;
+			$this->table_window_overflowed                  = false;
+			$this->table_window_runs                        = array();
+			$this->table_window_template_pending            = array();
+			$this->visitation_index                         = 0;
+			$this->lexer_repositioned_for_presentation      = false;
 
 			/*
 			 * The absence of a context node indicates a full parse.
@@ -5653,7 +6790,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			if ( $this->is_virtual() ) {
 				continue;
 			}
-			if ( $bookmark_starts_at === $this->bookmarks[ $this->state->current_token->bookmark_name ]->start ) {
+
+			/*
+			 * The visited token is identified through the visited event: in
+			 * document-order mode a deferred token may be visited while the
+			 * parser's most recently parsed token lies beyond it.
+			 */
+			if (
+				isset( $this->current_element ) &&
+				$bookmark_starts_at === $this->bookmarks[ $this->current_element->token->bookmark_name ]->start
+			) {
 				return true;
 			}
 		} while ( $this->next_token() );
@@ -5755,7 +6901,19 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			);
 			return false;
 		}
-		return parent::set_bookmark( "_{$bookmark_name}" );
+
+		$did_set = parent::set_bookmark( "_{$bookmark_name}" );
+
+		/*
+		 * Record when the bookmarked node was visited: seeking orders
+		 * positions by visitation, which in document-order mode may
+		 * disagree with the byte order of deferred tokens.
+		 */
+		if ( $did_set ) {
+			$this->bookmark_visitation_indices[ "_{$bookmark_name}" ] = $this->visitation_index;
+		}
+
+		return $did_set;
 	}
 
 	/**
@@ -5894,10 +7052,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * > in the current body, cell, or caption (whichever is youngest) that haven't
 	 * > been explicitly closed.
 	 *
+	 * Reconstructed elements are reported as "virtual" nodes: they open where the
+	 * reconstruction occurs, and reading their attributes reports the attributes
+	 * of the tag which created the formatting element being reconstructed.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Full implementation: reconstructs formatting elements instead
+	 *              of bailing when reconstruction is required.
 	 * @ignore
 	 *
-	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
+	 * @throws Exception When unable to allocate requisite bookmarks.
 	 *
 	 * @see https://html.spec.whatwg.org/#reconstruct-the-active-formatting-elements
 	 *
@@ -5931,7 +7095,47 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			return false;
 		}
 
-		$this->bail( 'Cannot reconstruct active formatting elements when advancing and rewinding is required.' );
+		/*
+		 * > Let entry be the last (most recently added) element in the list of active formatting elements.
+		 * > Rewind: If there are no entries before entry in the list of active formatting elements,
+		 * >         then jump to the step labeled create.
+		 * > Let entry be the entry one earlier than entry in the list of active formatting elements.
+		 * > If entry is neither a marker nor an element that is also in the stack of open elements,
+		 * > go to the step labeled rewind.
+		 * > Advance: Let entry be the element one later than entry in the list of active formatting elements.
+		 *
+		 * The rewind and advance steps find the run of entries at the end of the list which are
+		 * neither markers nor elements in the stack of open elements. These represent formatting
+		 * elements which were implicitly closed and must be reopened, in the order in which they
+		 * were originally opened.
+		 */
+		$entries_to_reconstruct = array();
+		foreach ( $this->state->active_formatting_elements->walk_up() as $entry ) {
+			if (
+				'marker' === $entry->node_name ||
+				$this->state->stack_of_open_elements->contains_node( $entry )
+			) {
+				break;
+			}
+
+			$entries_to_reconstruct[] = $entry;
+		}
+
+		/*
+		 * > Create: Insert an HTML element for the token for which the element entry was created,
+		 * >         to obtain new element.
+		 * > Replace the entry for entry in the list with an entry for new element.
+		 * > If the entry for new element in the list of active formatting elements is not the last
+		 * > entry in the list, return to the step labeled advance.
+		 */
+		for ( $i = count( $entries_to_reconstruct ) - 1; $i >= 0; $i-- ) {
+			$entry       = $entries_to_reconstruct[ $i ];
+			$new_element = $this->clone_token( $entry );
+			$this->insert_html_element( $new_element );
+			$this->state->active_formatting_elements->replace_node( $entry, $new_element );
+		}
+
+		return true;
 	}
 
 	/**
@@ -6091,34 +7295,61 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Runs the adoption agency algorithm.
 	 *
+	 * This algorithm handles misnested formatting elements, deciding how
+	 * formatting elements are closed and reopened ("adopted") so that
+	 * formatting applies as a browser would apply it.
+	 *
+	 * Because the HTML Processor visits a document in a single pass, nodes
+	 * which have already been visited cannot be moved: where a browser would
+	 * re-parent nodes found before the misnesting was discovered, this
+	 * processor reports them where they were originally visited. The stack of
+	 * open elements and the list of active formatting elements are maintained
+	 * as the specification demands, however, so every token visited after
+	 * this algorithm runs is reported with the ancestor chain a browser would
+	 * report for it at the same place in the document.
+	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Full implementation: handles the furthest block case and
+	 *              "any other end tag" fallback instead of bailing.
 	 * @ignore
 	 *
-	 * @throws WP_HTML_Unsupported_Exception When encountering unsupported HTML input.
+	 * @throws Exception When unable to allocate requisite bookmarks.
 	 *
 	 * @see https://html.spec.whatwg.org/#adoption-agency-algorithm
+	 *
+	 * @return bool False when the current token must instead be treated as in
+	 *              the "any other end tag" entry of the "in body" insertion
+	 *              mode, true otherwise.
 	 */
-	private function run_adoption_agency_algorithm(): void {
-		$budget       = 1000;
-		$subject      = $this->get_tag();
-		$current_node = $this->state->stack_of_open_elements->current_node();
+	private function run_adoption_agency_algorithm(): bool {
+		$stack = $this->state->stack_of_open_elements;
+		$afe   = $this->state->active_formatting_elements;
 
+		// > Let subject be token's tag name.
+		$subject = $this->get_tag();
+
+		/*
+		 * > If the current node is an HTML element whose tag name is subject, and the current
+		 * > node is not in the list of active formatting elements, then pop the current node
+		 * > off the stack of open elements and return.
+		 */
+		$current_node = $stack->current_node();
 		if (
-			// > If the current node is an HTML element whose tag name is subject
-			$current_node && $subject === $current_node->node_name &&
-			// > the current node is not in the list of active formatting elements
-			! $this->state->active_formatting_elements->contains_node( $current_node )
+			null !== $current_node &&
+			'html' === $current_node->namespace &&
+			$subject === $current_node->node_name &&
+			! $afe->contains_node( $current_node )
 		) {
-			$this->state->stack_of_open_elements->pop();
-			return;
+			$stack->pop();
+			return true;
 		}
 
-		$outer_loop_counter = 0;
-		while ( $budget-- > 0 ) {
-			if ( $outer_loop_counter++ >= 8 ) {
-				return;
-			}
-
+		/*
+		 * > Let outer loop counter be 0.
+		 * > While true: If outer loop counter is greater than or equal to 8, then return.
+		 * >             Increment outer loop counter by 1.
+		 */
+		for ( $outer_loop_counter = 0; $outer_loop_counter < 8; $outer_loop_counter++ ) {
 			/*
 			 * > Let formatting element be the last element in the list of active formatting elements that:
 			 * >   - is between the end of the list and the last marker in the list,
@@ -6126,7 +7357,7 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 			 * >   - and has the tag name subject.
 			 */
 			$formatting_element = null;
-			foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
+			foreach ( $afe->walk_up() as $item ) {
 				if ( 'marker' === $item->node_name ) {
 					break;
 				}
@@ -6137,64 +7368,229 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 				}
 			}
 
-			// > If there is no such element, then return and instead act as described in the "any other end tag" entry above.
+			/*
+			 * > If there is no such element, then return and instead act as described in the
+			 * > "any other end tag" entry above.
+			 */
 			if ( null === $formatting_element ) {
-				$this->bail( 'Cannot run adoption agency when "any other end tag" is required.' );
-			}
-
-			// > If formatting element is not in the stack of open elements, then this is a parse error; remove the element from the list, and return.
-			if ( ! $this->state->stack_of_open_elements->contains_node( $formatting_element ) ) {
-				$this->state->active_formatting_elements->remove_node( $formatting_element );
-				return;
-			}
-
-			// > If formatting element is in the stack of open elements, but the element is not in scope, then this is a parse error; return.
-			if ( ! $this->state->stack_of_open_elements->has_element_in_scope( $formatting_element->node_name ) ) {
-				return;
+				return false;
 			}
 
 			/*
-			 * > Let furthest block be the topmost node in the stack of open elements that is lower in the stack
-			 * > than formatting element, and is an element in the special category. There might not be one.
+			 * > If formatting element is not in the stack of open elements, then this is a
+			 * > parse error; remove the element from the list, and return.
 			 */
-			$is_above_formatting_element = true;
-			$furthest_block              = null;
-			foreach ( $this->state->stack_of_open_elements->walk_down() as $item ) {
-				if ( $is_above_formatting_element && $formatting_element->bookmark_name !== $item->bookmark_name ) {
-					continue;
-				}
+			if ( ! $stack->contains_node( $formatting_element ) ) {
+				$afe->remove_node( $formatting_element );
+				return true;
+			}
 
-				if ( $is_above_formatting_element ) {
-					$is_above_formatting_element = false;
-					continue;
-				}
+			/*
+			 * > If formatting element is in the stack of open elements, but the element is
+			 * > not in scope, then this is a parse error; return.
+			 */
+			if ( ! $stack->has_node_in_scope( $formatting_element ) ) {
+				return true;
+			}
 
-				if ( self::is_special( $item ) ) {
-					$furthest_block = $item;
+			/*
+			 * > If formatting element is not the current node, this is a parse error. (But do not return.)
+			 */
+
+			/*
+			 * > Let furthest block be the topmost node in the stack of open elements that is lower in the
+			 * > stack than formatting element, and is an element in the special category. There might not
+			 * > be one.
+			 *
+			 * The stack is copied into a working array: while there is a furthest block, this algorithm
+			 * removes, replaces, and inserts nodes in a random-access fashion which the stack of open
+			 * elements cannot directly express. The working array is reconciled with the stack at the
+			 * end of the loop.
+			 */
+			$working_stack            = $stack->stack;
+			$formatting_element_index = array_search( $formatting_element, $working_stack, true );
+			$furthest_block           = null;
+			$furthest_block_index     = null;
+			for ( $i = $formatting_element_index + 1, $stack_size = count( $working_stack ); $i < $stack_size; $i++ ) {
+				if ( self::is_special( $working_stack[ $i ] ) ) {
+					$furthest_block       = $working_stack[ $i ];
+					$furthest_block_index = $i;
 					break;
 				}
 			}
 
 			/*
-			 * > If there is no furthest block, then the UA must first pop all the nodes from the bottom of the
-			 * > stack of open elements, from the current node up to and including formatting element, then
-			 * > remove formatting element from the list of active formatting elements, and finally return.
+			 * > If there is no furthest block, then the UA must first pop all the nodes from the bottom of
+			 * > the stack of open elements, from the current node up to and including formatting element,
+			 * > then remove formatting element from the list of active formatting elements, and finally
+			 * > return.
 			 */
 			if ( null === $furthest_block ) {
-				foreach ( $this->state->stack_of_open_elements->walk_up() as $item ) {
-					$this->state->stack_of_open_elements->pop();
+				foreach ( $stack->walk_up() as $item ) {
+					$stack->pop();
 
-					if ( $formatting_element->bookmark_name === $item->bookmark_name ) {
-						$this->state->active_formatting_elements->remove_node( $formatting_element );
-						return;
+					if ( $formatting_element === $item ) {
+						break;
 					}
 				}
+
+				$afe->remove_node( $formatting_element );
+				return true;
 			}
 
-			$this->bail( 'Cannot extract common ancestor in adoption agency algorithm.' );
+			/*
+			 * > Let common ancestor be the element immediately above formatting element in the stack
+			 * > of open elements.
+			 *
+			 * The common ancestor is the target when re-parenting the node this algorithm leaves
+			 * behind as the last node; it determines whether that placement is redirected by
+			 * foster parenting.
+			 */
+			$common_ancestor = $working_stack[ $formatting_element_index - 1 ] ?? null;
+
+			// > Let a bookmark note the position of formatting element in the list of active formatting elements.
+			$bookmark = $afe->position_of( $formatting_element );
+
+			// > Let node and last node be furthest block.
+			$node_index         = $furthest_block_index;
+			$last_node          = $furthest_block;
+			$inner_loop_counter = 0;
+
+			while ( true ) {
+				// > Increment inner loop counter by 1.
+				++$inner_loop_counter;
+
+				/*
+				 * > Let node be the element immediately above node in the stack of open elements,
+				 * > or if node is no longer in the stack of open elements (e.g. because it got
+				 * > removed by this algorithm), the element that was immediately above node in
+				 * > the stack of open elements at the time when node was removed.
+				 *
+				 * Removed nodes are spliced out of the working array, so the element which was
+				 * above a removed node is found at the removed node's old index.
+				 */
+				$node = $working_stack[ --$node_index ];
+
+				// > If node is formatting element, then break out of the inner loop.
+				if ( $node === $formatting_element ) {
+					break;
+				}
+
+				/*
+				 * > If inner loop counter is greater than 3 and node is in the list of active
+				 * > formatting elements, then remove node from the list of active formatting elements.
+				 */
+				$node_afe_position = $afe->position_of( $node );
+				if ( $inner_loop_counter > 3 && null !== $node_afe_position ) {
+					$afe->remove_at( $node_afe_position );
+					if ( $node_afe_position < $bookmark ) {
+						--$bookmark;
+					}
+					$node_afe_position = null;
+				}
+
+				/*
+				 * > If node is not in the list of active formatting elements, then remove node
+				 * > from the stack of open elements and continue.
+				 */
+				if ( null === $node_afe_position ) {
+					array_splice( $working_stack, $node_index, 1 );
+					continue;
+				}
+
+				/*
+				 * > Create an element for the token for which the element node was created, in the
+				 * > HTML namespace, with common ancestor as the intended parent; replace the entry
+				 * > for node in the list of active formatting elements with an entry for the new
+				 * > element, replace the entry for node in the stack of open elements with an entry
+				 * > for the new element, and let node be the new element.
+				 */
+				$node_clone = $this->clone_token( $node );
+				$afe->replace_node( $node, $node_clone );
+				$working_stack[ $node_index ] = $node_clone;
+				$node                         = $node_clone;
+
+				/*
+				 * > If last node is furthest block, then move the aforementioned bookmark to be
+				 * > immediately after the new node in the list of active formatting elements.
+				 */
+				if ( $last_node === $furthest_block ) {
+					$bookmark = $node_afe_position + 1;
+				}
+
+				/*
+				 * > Insert last node into node, first removing it from its previous parent node if any.
+				 *
+				 * This re-parents a node which has already been visited: it has no effect on the
+				 * stack of open elements or on the tokens which have yet to be visited.
+				 */
+
+				// > Let last node be node.
+				$last_node = $node;
+			}
+
+			/*
+			 * > Insert whatever last node ended up being in the previous step at the appropriate place
+			 * > for inserting a node, but using common ancestor as the override target.
+			 *
+			 * As above, this re-parents a node which has already been visited: where it moved from
+			 * doesn't affect the parse of the remaining document. Where it moved to can: when the
+			 * placement is redirected by foster parenting, last node remains an open element whose
+			 * document ancestry bypasses its enclosing table context, and the content which follows
+			 * inside of it must report the ancestor chain a browser would report.
+			 */
+			if (
+				$this->state->foster_parenting &&
+				isset( $common_ancestor ) &&
+				$this->is_foster_parenting_target( $common_ancestor )
+			) {
+				$last_node->is_foster_parented = true;
+			}
+
+			/*
+			 * > Create an element for the token for which formatting element was created, in the HTML
+			 * > namespace, with furthest block as the intended parent.
+			 * > Take all of the child nodes of furthest block and append them to the element created
+			 * > in the last step.
+			 * > Append that new element to furthest block.
+			 *
+			 * The children of the furthest block have already been visited and moving them has no
+			 * effect on the remaining parse. The new element itself, however, becomes an open element
+			 * below the furthest block, where content which follows will be found.
+			 */
+			$formatting_clone = $this->clone_token( $formatting_element );
+
+			/*
+			 * > Remove formatting element from the list of active formatting elements, and insert the
+			 * > new element into the list of active formatting elements at the position of the
+			 * > aforementioned bookmark.
+			 */
+			$formatting_element_afe_position = $afe->position_of( $formatting_element );
+			$afe->remove_at( $formatting_element_afe_position );
+			if ( $formatting_element_afe_position < $bookmark ) {
+				--$bookmark;
+			}
+			$afe->insert_at( $bookmark, $formatting_clone );
+
+			/*
+			 * > Remove formatting element from the stack of open elements, and insert the new element
+			 * > into the stack of open elements immediately below the position of furthest block in
+			 * > that stack.
+			 */
+			array_splice( $working_stack, array_search( $formatting_element, $working_stack, true ), 1 );
+			array_splice( $working_stack, array_search( $furthest_block, $working_stack, true ) + 1, 0, array( $formatting_clone ) );
+
+			/*
+			 * The working stack now describes the stack of open elements after this iteration of the
+			 * algorithm: reconcile the stack of open elements so that the rearrangement is expressed
+			 * as properly-nested closing and opening events.
+			 */
+			$this->reconcile_stack_of_open_elements( $working_stack );
+
+			// > Jump back to the step labeled outer loop.
 		}
 
-		$this->bail( 'Cannot run adoption agency when looping required.' );
+		return true;
 	}
 
 	/**
@@ -6217,7 +7613,10 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		// @todo Parse error if the current node is a "td" or "th" element.
 		foreach ( $this->state->stack_of_open_elements->walk_up() as $element ) {
 			$this->state->stack_of_open_elements->pop();
-			if ( 'TD' === $element->node_name || 'TH' === $element->node_name ) {
+			if (
+				'html' === $element->namespace &&
+				( 'TD' === $element->node_name || 'TH' === $element->node_name )
+			) {
 				break;
 			}
 		}
@@ -6229,14 +7628,63 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * Inserts an HTML element on the stack of open elements.
 	 *
 	 * @since 6.4.0
+	 * @since 7.1.0 Marks the token as foster-parented when it's inserted at
+	 *              the appropriate place for inserting a node and the foster
+	 *              parenting flag redirects the insertion location.
 	 * @ignore
 	 *
 	 * @see https://html.spec.whatwg.org/#insert-a-foreign-element
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
 	 *
 	 * @param WP_HTML_Token $token Name of bookmark pointing to element in original input HTML.
 	 */
 	private function insert_html_element( WP_HTML_Token $token ): void {
+		/*
+		 * > If foster parenting is enabled and target is a table, tbody, tfoot,
+		 * > thead, or tr element […] let adjusted insertion location be inside
+		 * > last table's parent node, immediately before last table […]
+		 *
+		 * The node is marked before it's pushed so that the push handler can
+		 * record how much of the stack of open elements its document ancestry
+		 * bypasses.
+		 */
+		if ( $this->state->foster_parenting ) {
+			$target = $this->state->stack_of_open_elements->current_node();
+			if ( isset( $target ) && $this->is_foster_parenting_target( $target ) ) {
+				$token->is_foster_parented = true;
+			}
+		}
+
 		$this->state->stack_of_open_elements->push( $token );
+	}
+
+	/**
+	 * Indicates if inserting a node with the given element as its target would
+	 * be redirected to a location before the table, were the foster parenting
+	 * flag enabled.
+	 *
+	 * > If foster parenting is enabled and target is a table, tbody, tfoot,
+	 * > thead, or tr element […]
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
+	 *
+	 * @param WP_HTML_Token $target Target element of a node insertion.
+	 * @return bool Whether foster parenting would redirect the insertion.
+	 */
+	private function is_foster_parenting_target( WP_HTML_Token $target ): bool {
+		return (
+			'html' === $target->namespace &&
+			(
+				'TABLE' === $target->node_name ||
+				'TBODY' === $target->node_name ||
+				'TFOOT' === $target->node_name ||
+				'THEAD' === $target->node_name ||
+				'TR' === $target->node_name
+			)
+		);
 	}
 
 	/**
@@ -6301,6 +7749,220 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 		$token = new WP_HTML_Token( $name, $token_name, false );
 		$this->insert_html_element( $token );
 		return $token;
+	}
+
+	/**
+	 * Creates a token that is a clone of a given element token, as when the
+	 * HTML parsing algorithms create a new element for an existing token.
+	 *
+	 * The clone receives its own bookmark spanning the same input HTML as the
+	 * original token so that its attributes may be read: reading an attribute
+	 * of a reconstructed element reports the attribute of the tag which
+	 * created its original token. The clone remains a distinct node, however,
+	 * and modifying it is not supported.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @throws Exception When unable to allocate requisite bookmark.
+	 *
+	 * @param WP_HTML_Token $token Create a clone of this token.
+	 * @return WP_HTML_Token Clone of the given token.
+	 */
+	private function clone_token( WP_HTML_Token $token ): WP_HTML_Token {
+		$name = $this->bookmark_token();
+		$here = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
+
+		$this->bookmarks[ $name ] = null !== $here
+			? new WP_HTML_Span( $here->start, $here->length )
+			: new WP_HTML_Span( $this->bookmarks[ $this->state->current_token->bookmark_name ]->start, 0 );
+
+		$clone                        = new WP_HTML_Token( $name, $token->node_name, $token->has_self_closing_flag, $this->release_internal_bookmark_on_destruct );
+		$clone->namespace             = $token->namespace;
+		$clone->integration_node_type = $token->integration_node_type;
+
+		return $clone;
+	}
+
+	/**
+	 * Updates the stack of open elements to contain a given arrangement of
+	 * nodes, expressing the transformation as a properly-nested sequence of
+	 * closing and opening events.
+	 *
+	 * The HTML Processor reports a document as a stream of tokens whose
+	 * nesting structure is implied by the order of the opening and closing
+	 * events for each element. Algorithms such as the adoption agency
+	 * algorithm rearrange the stack of open elements in a random-access
+	 * fashion, which has no direct representation in a stream of properly-
+	 * nested events. This method expresses such rearrangements by closing
+	 * elements down to the deepest ancestor shared with the desired
+	 * arrangement and then opening the desired elements below it.
+	 *
+	 * Nodes which have already been visited cannot be re-parented: they were
+	 * reported where they were originally found. Every token visited after
+	 * this update, however, is reported with breadcrumbs matching the
+	 * ancestor chain a browser would report at the same place in the document.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token[] $desired_stack Nodes the stack of open elements should contain, in order.
+	 */
+	private function reconcile_stack_of_open_elements( array $desired_stack ): void {
+		$stack = $this->state->stack_of_open_elements;
+
+		$shared_depth = 0;
+		$max_shared   = min( $stack->count(), count( $desired_stack ) );
+		while ( $shared_depth < $max_shared && $stack->stack[ $shared_depth ] === $desired_stack[ $shared_depth ] ) {
+			++$shared_depth;
+		}
+
+		for ( $i = $stack->count(); $i > $shared_depth; $i-- ) {
+			$stack->pop();
+		}
+
+		for ( $i = $shared_depth, $desired_depth = count( $desired_stack ); $i < $desired_depth; $i++ ) {
+			$stack->push( $desired_stack[ $i ] );
+		}
+	}
+
+	/**
+	 * Removes a node from the stack of open elements, expressing the removal
+	 * as a properly-nested sequence of closing and opening events when the
+	 * node is not the current node.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see WP_HTML_Processor::reconcile_stack_of_open_elements
+	 *
+	 * @param WP_HTML_Token $token Node to remove from the stack of open elements.
+	 * @return bool Whether the node was found and removed.
+	 */
+	private function remove_node_from_stack_of_open_elements( WP_HTML_Token $token ): bool {
+		$desired_stack = $this->state->stack_of_open_elements->stack;
+		$position      = array_search( $token, $desired_stack, true );
+		if ( false === $position ) {
+			return false;
+		}
+
+		array_splice( $desired_stack, $position, 1 );
+		$this->reconcile_stack_of_open_elements( $desired_stack );
+		return true;
+	}
+
+	/**
+	 * Pushes an element onto the list of active formatting elements, limiting
+	 * the number of equivalent elements as required by the "Noah's Ark clause".
+	 *
+	 * > If there are already three elements in the list of active formatting
+	 * > elements after the last marker, if any, or anywhere in the list if
+	 * > there are no markers, that have the same tag name, namespace, and
+	 * > attributes as element, then remove the earliest such element from the
+	 * > list of active formatting elements. For these purposes, the attributes
+	 * > must be compared as they were when the elements were created by the
+	 * > parser; two elements have the same attributes if all their parsed
+	 * > attributes can be paired such that the two attributes in each pair
+	 * > have identical names, namespaces, and values (the order of the
+	 * > attributes does not matter).
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @see https://html.spec.whatwg.org/#push-onto-the-list-of-active-formatting-elements
+	 *
+	 * @param WP_HTML_Token $token Push this node onto the list of active formatting elements.
+	 */
+	private function push_onto_active_formatting_elements( WP_HTML_Token $token ): void {
+		/*
+		 * Find entries which might be equivalent to the pushed element.
+		 * Attributes are only compared once three or more entries share the
+		 * tag name and namespace, because comparing attributes requires
+		 * parsing each candidate's source tag.
+		 */
+		$candidates = array();
+		foreach ( $this->state->active_formatting_elements->walk_up() as $item ) {
+			if ( 'marker' === $item->node_name ) {
+				break;
+			}
+
+			if ( $token->node_name === $item->node_name && $token->namespace === $item->namespace ) {
+				$candidates[] = $item;
+			}
+		}
+
+		if ( count( $candidates ) >= 3 ) {
+			$signature      = $this->get_attribute_comparison_signature( $token );
+			$earliest_match = null;
+			$match_count    = 0;
+
+			// Candidates were collected from the end of the list: the last match found is the earliest.
+			foreach ( $candidates as $candidate ) {
+				if ( $signature === $this->get_attribute_comparison_signature( $candidate ) ) {
+					++$match_count;
+					$earliest_match = $candidate;
+				}
+			}
+
+			if ( $match_count >= 3 ) {
+				$this->state->active_formatting_elements->remove_node( $earliest_match );
+			}
+		}
+
+		// > Add element to the list of active formatting elements.
+		$this->state->active_formatting_elements->push( $token );
+	}
+
+	/**
+	 * Builds a canonical representation of the attribute set of a token's
+	 * source tag, for determining whether two elements have the same
+	 * attributes as required by the "Noah's Ark clause".
+	 *
+	 * Attribute names are unique within a tag, so sorting the name/value
+	 * pairs by name produces a stable representation: two tags receive the
+	 * same signature if and only if their parsed attribute sets are the same.
+	 * Attribute namespaces need not be represented: elements subject to this
+	 * comparison are HTML formatting elements, whose attributes are never
+	 * placed in a foreign namespace.
+	 *
+	 * @since 7.1.0
+	 * @ignore
+	 *
+	 * @param WP_HTML_Token $token Token whose source tag's attributes are represented.
+	 * @return string Canonical representation of the tag's attribute set.
+	 */
+	private function get_attribute_comparison_signature( WP_HTML_Token $token ): string {
+		if ( $token === $this->state->current_token ) {
+			// The parser is stopped at this tag: read its attributes directly.
+			$reader = $this;
+			$names  = parent::get_attribute_names_with_prefix( '' );
+		} else {
+			$span = isset( $token->bookmark_name ) ? ( $this->bookmarks[ $token->bookmark_name ] ?? null ) : null;
+			if ( null === $span || 0 === $span->length ) {
+				return '';
+			}
+
+			$reader = new WP_HTML_Tag_Processor( substr( $this->html, $span->start, $span->length ) );
+			if ( ! $reader->next_token() ) {
+				return '';
+			}
+			$names = $reader->get_attribute_names_with_prefix( '' );
+		}
+
+		if ( null === $names || array() === $names ) {
+			return '';
+		}
+
+		sort( $names, SORT_STRING );
+
+		$attributes = array();
+		foreach ( $names as $name ) {
+			$attributes[ $name ] = $reader === $this
+				? parent::get_attribute( $name )
+				: $reader->get_attribute( $name );
+		}
+
+		return serialize( $attributes );
 	}
 
 	/*
