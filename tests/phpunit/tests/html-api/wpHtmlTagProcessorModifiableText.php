@@ -40,6 +40,261 @@ class Tests_HtmlApi_WpHtmlTagProcessorModifiableText extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensures that a bookmarked PRE or LISTING text node replays its leading-newline handling after seeking.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_get_modifiable_text_replays_leading_newline_after_seeking_to_text( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<{$html_tag}>\n \n\n><{$html_tag}>" );
+
+		$this->assertTrue( $processor->next_token(), "Should have found the {$tag_name} opener." );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have found the {$tag_name} opener: check test setup." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the first text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the first text node: check test setup.' );
+
+		$first = $processor->get_modifiable_text();
+		$this->assertSame( " \n\n>", $first, "Should have stripped the leading newline from the {$tag_name} text on first traversal." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have advanced to the next {$tag_name} opener: check test setup." );
+
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the {$tag_name} text node." );
+		$this->assertSame(
+			$first,
+			$processor->get_modifiable_text(),
+			"Should have replayed the leading-newline handling after seeking back to the {$tag_name} text node."
+		);
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_token_names_ignoring_leading_newline() {
+		return array(
+			'PRE'     => array( 'PRE' ),
+			'LISTING' => array( 'LISTING' ),
+		);
+	}
+
+	/**
+	 * Ensures that bookmarked text remains seekable after updating the same text node.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_seeks_to_bookmarked_text_after_modifiable_text_update( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<{$html_tag}>\nabc</{$html_tag}><span>" );
+
+		$this->assertTrue( $processor->next_token(), "Should have found the {$tag_name} opener." );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have found the {$tag_name} opener: check test setup." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the first text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the first text node: check test setup.' );
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should have stripped the leading newline from the {$tag_name} text on first traversal." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$this->assertTrue( $processor->set_modifiable_text( 'xyz' ), "Should have updated the {$tag_name} text node." );
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have advanced to the {$tag_name} closer: check test setup." );
+		$this->assertSame( "<{$html_tag}>xyz</{$html_tag}><span>", $processor->get_updated_html(), "Should have updated the {$tag_name} text node." );
+
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the updated {$tag_name} text node." );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have sought back to the text node.' );
+		$this->assertSame(
+			'xyz',
+			$processor->get_modifiable_text(),
+			"Should have replayed the updated {$tag_name} text node after seeking."
+		);
+	}
+
+	/**
+	 * Ensures that a leading-newline text bookmark can be set after earlier updates are flushed.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_bookmarks_leading_newline_text_after_flushing_prior_update( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<div></div><{$html_tag}>\nabc</{$html_tag}><span>" );
+
+		$this->assertTrue( $processor->next_tag( 'DIV' ), 'Should have found the DIV opener: check test setup.' );
+		$processor->add_class( 'x' );
+
+		while ( $processor->next_token() && '#text' !== $processor->get_token_name() ) {
+			continue;
+		}
+
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should have stripped the leading newline from the {$tag_name} text before flushing updates." );
+		$this->assertSame(
+			"<div class=\"x\"></div><{$html_tag}>\nabc</{$html_tag}><span>",
+			$processor->get_updated_html(),
+			'Should have applied the prior DIV update.'
+		);
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should still strip the leading newline from the {$tag_name} text after flushing updates." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the {$tag_name} text node." );
+		$this->assertSame(
+			'abc',
+			$processor->get_modifiable_text(),
+			"Should have replayed the leading-newline handling after seeking back to the {$tag_name} text node."
+		);
+	}
+
+	/**
+	 * Ensures that skipped-newline state is shifted once when flushing multiple updates.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_bookmarks_leading_newline_text_after_flushing_prior_and_text_updates( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new WP_HTML_Tag_Processor( "<{$html_tag}>\nabc</{$html_tag}><span>" );
+
+		$this->assertTrue( $processor->next_token(), "Should have found the {$tag_name} opener." );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have found the {$tag_name} opener: check test setup." );
+		$processor->add_class( 'x' );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the first text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the first text node: check test setup.' );
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should have stripped the leading newline from the {$tag_name} text before flushing updates." );
+		$this->assertTrue( $processor->set_modifiable_text( "\nxy" ), "Should have updated the {$tag_name} text node." );
+
+		$this->assertSame(
+			"<{$html_tag} class=\"x\">\nxy</{$html_tag}><span>",
+			$processor->get_updated_html(),
+			"Should have applied the {$tag_name} opener and text updates."
+		);
+		$this->assertSame( 'xy', $processor->get_modifiable_text(), "Should still strip the leading newline from the updated {$tag_name} text after flushing updates." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the {$tag_name} text node." );
+		$this->assertSame(
+			'xy',
+			$processor->get_modifiable_text(),
+			"Should have replayed the leading-newline handling after seeking back to the updated {$tag_name} text node."
+		);
+	}
+
+	/**
+	 * Ensures that inserted markup at the bookmarked text start cancels leading-newline handling.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_bookmarked_leading_newline_text_after_insertion_at_start( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new class( "<{$html_tag}>\nabc</{$html_tag}><span>" ) extends WP_HTML_Tag_Processor {
+			/**
+			 * Inserts HTML at the start of the given bookmark.
+			 *
+			 * @param string $bookmark_name Bookmark name.
+			 * @param string $html          HTML to insert.
+			 */
+			public function insert_html_at_bookmark_start( string $bookmark_name, string $html ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+					$this->bookmarks[ $bookmark_name ]->start,
+					0,
+					$html
+				);
+			}
+		};
+
+		$this->assertTrue( $processor->next_token(), "Should have found the {$tag_name} opener." );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have found the {$tag_name} opener: check test setup." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the first text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the first text node: check test setup.' );
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should have stripped the leading newline from the {$tag_name} text on first traversal." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$processor->insert_html_at_bookmark_start( 'text', '<b></b>' );
+		$this->assertSame(
+			"<{$html_tag}><b></b>\nabc</{$html_tag}><span>",
+			$processor->get_updated_html(),
+			"Should have inserted markup at the start of the {$tag_name} text node."
+		);
+
+		while ( $processor->next_token() && '#text' !== $processor->get_token_name() ) {
+			continue;
+		}
+
+		$normal_scan_text = $processor->get_modifiable_text();
+		$this->assertSame( "\nabc", $normal_scan_text, "Should not strip the newline after inserting markup before the {$tag_name} text." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the {$tag_name} text node." );
+		$this->assertSame(
+			$normal_scan_text,
+			$processor->get_modifiable_text(),
+			"Should have replayed the same {$tag_name} text after seeking."
+		);
+	}
+
+	/**
+	 * Ensures that a no-op update at the bookmarked text start preserves leading-newline handling.
+	 *
+	 * @dataProvider data_token_names_ignoring_leading_newline
+	 *
+	 * @param string $tag_name Tag name whose first text node ignores a leading newline.
+	 */
+	public function test_bookmarked_leading_newline_text_after_noop_at_start( string $tag_name ) {
+		$html_tag  = strtolower( $tag_name );
+		$processor = new class( "<{$html_tag}>\nabc</{$html_tag}><span>" ) extends WP_HTML_Tag_Processor {
+			/**
+			 * Enqueues a no-op update at the start of the given bookmark.
+			 *
+			 * @param string $bookmark_name Bookmark name.
+			 */
+			public function enqueue_noop_at_bookmark_start( string $bookmark_name ): void {
+				$this->lexical_updates[] = new WP_HTML_Text_Replacement(
+					$this->bookmarks[ $bookmark_name ]->start,
+					0,
+					''
+				);
+			}
+		};
+
+		$this->assertTrue( $processor->next_token(), "Should have found the {$tag_name} opener." );
+		$this->assertSame( $tag_name, $processor->get_token_name(), "Should have found the {$tag_name} opener: check test setup." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have found the first text node.' );
+		$this->assertSame( '#text', $processor->get_token_name(), 'Should have found the first text node: check test setup.' );
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should have stripped the leading newline from the {$tag_name} text on first traversal." );
+		$this->assertTrue( $processor->set_bookmark( 'text' ), "Should have bookmarked the {$tag_name} text node." );
+
+		$processor->enqueue_noop_at_bookmark_start( 'text' );
+		$this->assertSame(
+			"<{$html_tag}>\nabc</{$html_tag}><span>",
+			$processor->get_updated_html(),
+			'Should not have changed the HTML.'
+		);
+		$this->assertSame( 'abc', $processor->get_modifiable_text(), "Should still strip the leading newline from the {$tag_name} text after the no-op update." );
+
+		$this->assertTrue( $processor->next_token(), 'Should have advanced away from the bookmarked text node.' );
+		$this->assertTrue( $processor->seek( 'text' ), "Should have sought back to the {$tag_name} text node." );
+		$this->assertSame(
+			'abc',
+			$processor->get_modifiable_text(),
+			"Should have replayed the leading-newline handling after seeking back to the {$tag_name} text node."
+		);
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return array[]
@@ -324,14 +579,10 @@ HTML
 		);
 
 		$processor->seek( 'listing' );
-		if ( "\ngone" === $processor->get_modifiable_text() ) {
-			$this->markTestSkipped( "There's no support currently for handling the leading newline after seeking." );
-		}
-
 		$this->assertSame(
 			'gone',
 			$processor->get_modifiable_text(),
-			'Should have remembered to remote leading newline from LISTING element after seeking around it.'
+			'Should have remembered to remove the leading newline from LISTING element after seeking around it.'
 		);
 
 		$processor->seek( 'div' );
