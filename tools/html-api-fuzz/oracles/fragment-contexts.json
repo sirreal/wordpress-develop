@@ -1,0 +1,19 @@
+[
+  "body",
+  "div",
+  "p",
+  "td",
+  "tr",
+  "table",
+  "caption",
+  "colgroup",
+  "select",
+  "option",
+  "template",
+  "title",
+  "textarea",
+  "script",
+  "style",
+  "svg",
+  "math"
+]

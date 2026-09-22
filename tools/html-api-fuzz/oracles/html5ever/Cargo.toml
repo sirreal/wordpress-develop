@@ -1,0 +1,16 @@
+[package]
+name = "html5ever-tree-oracle"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+html5ever = "=0.39.0"
+# Cargo ignores SemVer build metadata in version requirements. The lockfile
+# resolves this exact requirement to 0.39.0+unofficial and pins its checksum.
+markup5ever_rcdom = "=0.39.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
