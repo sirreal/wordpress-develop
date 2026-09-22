@@ -97,7 +97,7 @@ class WP_Application_Passwords_List_Table extends WP_List_Table {
 		if ( empty( $item['last_ip'] ) ) {
 			echo '&mdash;';
 		} else {
-			echo $item['last_ip'];
+			echo esc_html( $item['last_ip'] );
 		}
 	}
 

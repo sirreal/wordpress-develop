@@ -448,7 +448,7 @@ if ( ! function_exists( 'wp_mail' ) ) :
 		try {
 			$phpmailer->setFrom( $from_email, $from_name, false );
 		} catch ( PHPMailer\PHPMailer\Exception $e ) {
-			$mail_error_data                             = compact( 'to', 'subject', 'message', 'headers', 'attachments' );
+			$mail_error_data                             = compact( 'to', 'subject', 'message', 'headers', 'attachments', 'embeds' );
 			$mail_error_data['phpmailer_exception_code'] = $e->getCode();
 
 			/** This filter is documented in wp-includes/pluggable.php */

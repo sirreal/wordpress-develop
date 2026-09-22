@@ -1,0 +1,3693 @@
+<?php
+namespace ComponentFuzz\Surfaces;
+
+/**
+ * Fuzzes remote-directory REST controllers with no live WordPress.org or site HTTP calls.
+ */
+final class RestDirectoryServicesSurface {
+	public const NAME = 'rest-directory-services';
+
+	private const SAMPLE_BYTES = 220;
+
+	/** @var array<string,bool> */
+	private static array $granted_caps = array();
+
+	/** @var array<string,bool> */
+	private static array $denied_caps = array();
+
+	public static function run( \ComponentFuzz\FuzzContext $ctx ): array {
+		$missing = self::missing_requirements();
+		if ( array() !== $missing ) {
+			return array(
+				self::skip(
+					$ctx,
+					'rest-directory-services.bootstrap-apis-available',
+					'Required REST directory service APIs are unavailable.',
+					array( 'missing' => $missing )
+				),
+			);
+		}
+
+		$snapshot           = self::snapshot_state();
+		$before_fingerprint = self::state_fingerprint();
+		$rows               = array();
+		$ob_level           = ob_get_level();
+
+		try {
+			self::reset_runtime_state();
+			self::install_scoped_filters();
+
+			$rows[] = self::check_route_and_schema_contracts( $ctx->fork( 'routes' ) );
+			$rows[] = self::check_direct_plugin_theme_directory_api_contracts( $ctx->fork( 'direct-plugin-theme-api' ) );
+			$rows[] = self::check_generated_plugin_theme_directory_api_matrix( $ctx->fork( 'generated-direct-api' ) );
+			$rows[] = self::check_block_directory_controller( $ctx->fork( 'block-directory' ) );
+			$rows[] = self::check_block_directory_fields_and_links( $ctx->fork( 'block-directory-fields' ) );
+			$rows[] = self::check_pattern_directory_controller( $ctx->fork( 'pattern-directory' ) );
+			$rows[] = self::check_pattern_directory_fields_and_prepare_response( $ctx->fork( 'pattern-directory-fields' ) );
+			$rows[] = self::check_url_details_controller( $ctx->fork( 'url-details' ) );
+		} catch ( \Throwable $e ) {
+			$rows[] = self::row(
+				$ctx,
+				'rest-directory-services.surface-no-throw',
+				false,
+				array( 'throwable' => self::describe_throwable( $e ) )
+			);
+		} finally {
+			while ( ob_get_level() > $ob_level ) {
+				ob_end_clean();
+			}
+
+			self::reset_static_state();
+			self::restore_state( $snapshot );
+
+			$after_fingerprint = self::state_fingerprint();
+			$rows[]            = self::row(
+				$ctx,
+				'rest-directory-services.state-restored',
+				$before_fingerprint === $after_fingerprint,
+				array(
+					'before'     => $before_fingerprint,
+					'after'      => $after_fingerprint,
+					'difference' => $before_fingerprint === $after_fingerprint
+						? null
+						: self::first_difference( $before_fingerprint, $after_fingerprint ),
+				)
+			);
+		}
+
+		return $rows;
+	}
+
+	public static function filter_user_has_cap( array $allcaps, array $caps = array() ): array {
+		foreach ( self::$granted_caps as $cap => $grant ) {
+			if ( $grant ) {
+				$allcaps[ $cap ] = true;
+			}
+		}
+
+		foreach ( $caps as $cap ) {
+			if ( isset( self::$granted_caps[ $cap ] ) && self::$granted_caps[ $cap ] ) {
+				$allcaps[ $cap ] = true;
+			}
+		}
+
+		foreach ( self::$denied_caps as $cap => $deny ) {
+			if ( $deny ) {
+				$allcaps[ $cap ] = false;
+			}
+		}
+
+		foreach ( $caps as $cap ) {
+			if ( isset( self::$denied_caps[ $cap ] ) && self::$denied_caps[ $cap ] ) {
+				$allcaps[ $cap ] = false;
+			}
+		}
+
+		if ( isset( self::$denied_caps['do_not_allow'] ) ) {
+			$allcaps['do_not_allow'] = false;
+		}
+
+		return $allcaps;
+	}
+
+	private static function missing_requirements(): array {
+		$missing = array();
+
+		foreach (
+			array(
+				'Component_Fuzz_WPDB_Stub',
+				'WP_Error',
+				'WP_Http',
+				'WP_Post_Type',
+				'WP_REST_Block_Directory_Controller',
+				'WP_REST_Pattern_Directory_Controller',
+				'WP_REST_Request',
+				'WP_REST_Response',
+				'WP_REST_Server',
+				'WP_REST_URL_Details_Controller',
+				'WP_User',
+			) as $class
+		) {
+			if ( ! class_exists( $class ) ) {
+				$missing[] = "class {$class}";
+			}
+		}
+
+		foreach (
+			array(
+				'__',
+				'add_query_arg',
+				'add_filter',
+				'apply_filters',
+				'current_user_can',
+				'delete_site_transient',
+				'get_plugins',
+				'get_post_types',
+				'get_site_transient',
+				'get_user_locale',
+				'has_filter',
+				'home_url',
+				'is_wp_error',
+				'plugins_api',
+				'register_post_type',
+				'register_rest_route',
+				'remove_filter',
+				'rest_authorization_required_code',
+				'rest_ensure_response',
+				'rest_is_field_included',
+				'rest_url',
+				'rest_validate_value_from_schema',
+				'sanitize_text_field',
+				'sanitize_url',
+				'set_url_scheme',
+				'set_site_transient',
+				'themes_api',
+				'wp_cache_flush',
+				'wp_cache_delete',
+				'wp_cache_set',
+				'wp_doing_ajax',
+				'wp_get_wp_version',
+				'wp_http_validate_url',
+				'wp_http_supports',
+				'wp_insert_user',
+				'wp_is_json_request',
+				'wp_json_encode',
+				'wp_kses_post',
+				'wp_parse_args',
+				'wp_remote_get',
+				'wp_remote_retrieve_body',
+				'wp_remote_retrieve_response_code',
+				'wp_safe_remote_get',
+				'wp_set_current_user',
+				'wp_strip_all_tags',
+				'wp_trigger_error',
+				'wp_trim_words',
+			) as $function
+		) {
+			if ( ! function_exists( $function ) ) {
+				$missing[] = "function {$function}";
+			}
+		}
+
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			$missing[] = 'global wpdb Component_Fuzz_WPDB_Stub';
+		}
+
+		return $missing;
+	}
+
+	private static function check_route_and_schema_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$failures           = array();
+		$server             = self::fresh_server();
+		$block_controller   = new \WP_REST_Block_Directory_Controller();
+		$pattern_controller = new \WP_REST_Pattern_Directory_Controller();
+		$url_controller     = new \WP_REST_URL_Details_Controller();
+
+		$block_controller->register_routes();
+		$pattern_controller->register_routes();
+		$url_controller->register_routes();
+
+		$routes        = $server->get_routes();
+		$block_route   = '/wp/v2/block-directory/search';
+		$pattern_route = '/wp/v2/pattern-directory/patterns';
+		$url_route     = '/wp-block-editor/v1/url-details';
+
+		$block_data   = $server->get_data_for_route( $block_route, $routes[ $block_route ] ?? array(), 'help' );
+		$pattern_data = $server->get_data_for_route( $pattern_route, $routes[ $pattern_route ] ?? array(), 'help' );
+		$url_data     = $server->get_data_for_route( $url_route, $routes[ $url_route ] ?? array(), 'help' );
+
+		$block_params   = $block_controller->get_collection_params();
+		$pattern_params = $pattern_controller->get_collection_params();
+		$url_endpoint   = self::route_data_endpoint_for_methods( $url_data, array( 'GET' ) );
+		$url_raw_args   = isset( $routes[ $url_route ][0]['args'] ) && is_array( $routes[ $url_route ][0]['args'] )
+			? $routes[ $url_route ][0]['args']
+			: array();
+
+		self::collect_failure(
+			$failures,
+			isset( $routes[ $block_route ], $routes[ $pattern_route ], $routes[ $url_route ] )
+				&& array( 'GET' ) === self::route_methods( $routes[ $block_route ] )
+				&& array( 'GET' ) === self::route_methods( $routes[ $pattern_route ] )
+				&& array( 'GET' ) === self::route_methods( $routes[ $url_route ] ),
+			'directory service routes register as readable REST routes',
+			array(
+				'blockMethods'   => isset( $routes[ $block_route ] ) ? self::route_methods( $routes[ $block_route ] ) : null,
+				'patternMethods' => isset( $routes[ $pattern_route ] ) ? self::route_methods( $routes[ $pattern_route ] ) : null,
+				'urlMethods'     => isset( $routes[ $url_route ] ) ? self::route_methods( $routes[ $url_route ] ) : null,
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::schema_has_properties(
+				$block_controller->get_item_schema(),
+				array(
+					'name',
+					'title',
+					'description',
+					'id',
+					'rating',
+					'rating_count',
+					'active_installs',
+					'author_block_rating',
+					'author_block_count',
+					'author',
+					'icon',
+					'last_updated',
+					'humanized_updated',
+				)
+			)
+				&& isset( $block_params['term'] )
+				&& true === ( $block_params['term']['required'] ?? false )
+				&& 1 === (int) ( $block_params['term']['minLength'] ?? 0 )
+				&& 'view' === ( $block_params['context']['default'] ?? null )
+				&& ! isset( $block_params['search'] )
+				&& self::route_data_schema_has_properties( $block_data, array( 'name', 'rating', 'last_updated' ) )
+				&& self::route_data_endpoint_has_args( $block_data, array( 'GET' ), array( 'term', 'page', 'per_page', 'context' ) ),
+			'block directory route exposes required term arg and 13-property schema',
+			array(
+				'params'      => self::interesting_params( $block_params, array( 'term', 'search', 'context', 'page', 'per_page' ) ),
+				'routeSchema' => self::schema_property_keys( $block_data ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::schema_has_properties(
+				$pattern_controller->get_item_schema(),
+				array( 'id', 'title', 'content', 'categories', 'keywords', 'description', 'viewport_width', 'block_types' )
+			)
+				&& 100 === (int) ( $pattern_params['per_page']['default'] ?? 0 )
+				&& 1 === (int) ( $pattern_params['search']['minLength'] ?? 0 )
+				&& 'view' === ( $pattern_params['context']['default'] ?? null )
+				&& 1 === (int) ( $pattern_params['category']['minimum'] ?? 0 )
+				&& 1 === (int) ( $pattern_params['keyword']['minimum'] ?? 0 )
+				&& 'array' === ( $pattern_params['slug']['type'] ?? null )
+				&& array( 'asc', 'desc' ) === array_values( $pattern_params['order']['enum'] ?? array() )
+				&& in_array( 'favorite_count', $pattern_params['orderby']['enum'] ?? array(), true )
+				&& self::route_data_schema_has_properties( $pattern_data, array( 'id', 'content', 'block_types' ) )
+				&& self::route_data_endpoint_has_args( $pattern_data, array( 'GET' ), array( 'search', 'category', 'keyword', 'slug', 'order', 'orderby' ) ),
+			'pattern directory route exposes collection args, defaults, enums, and schema',
+			array(
+				'params'      => self::interesting_params( $pattern_params, array( 'per_page', 'search', 'context', 'category', 'keyword', 'slug', 'order', 'orderby' ) ),
+				'routeSchema' => self::schema_property_keys( $pattern_data ),
+			)
+		);
+
+		self::collect_failure(
+			$failures,
+			self::schema_has_properties( $url_controller->get_item_schema(), array( 'title', 'icon', 'description', 'image' ) )
+				&& null !== $url_endpoint
+				&& isset( $url_endpoint['args']['url'] )
+				&& true === ( $url_endpoint['args']['url']['required'] ?? false )
+				&& 'wp_http_validate_url' === self::callable_name( $url_raw_args['url']['validate_callback'] ?? null )
+				&& 'sanitize_url' === self::callable_name( $url_raw_args['url']['sanitize_callback'] ?? null )
+				&& 'uri' === ( $url_endpoint['args']['url']['format'] ?? null )
+				&& true === ( $url_controller->get_item_schema()['properties']['title']['readonly'] ?? false )
+				&& 'uri' === ( $url_controller->get_item_schema()['properties']['image']['format'] ?? null ),
+			'URL details route exposes safe URL validator/sanitizer and readonly metadata schema',
+			array(
+				'urlArg'     => isset( $url_endpoint['args']['url'] ) ? self::describe_value( $url_endpoint['args']['url'] ) : null,
+				'rawUrlArg'  => isset( $url_raw_args['url'] ) ? self::describe_value( $url_raw_args['url'] ) : null,
+				'schemaKeys' => array_keys( $url_controller->get_item_schema()['properties'] ?? array() ),
+			)
+		);
+
+		$delete_response = self::dispatch( $server, self::request( 'DELETE', $url_route ) );
+		self::collect_failure(
+			$failures,
+			self::response_error_ok( $delete_response, 'rest_no_route', 404 ),
+			'unsupported methods fail before callbacks',
+			array( 'delete' => $delete_response )
+		);
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.route-args-schema-contracts',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_direct_plugin_theme_directory_api_contracts( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$failures            = array();
+		$token               = self::token( $ctx, 'direct-api' );
+		$plugin_slug         = 'cfz-direct-plugin-' . $token;
+		$theme_slug          = 'cfz-direct-theme-' . $token;
+		$plugin_search       = 'plugin search ' . $token;
+		$theme_search        = 'theme search ' . $token;
+		$expected_locale     = \get_user_locale();
+		$expected_wp_version = substr( \wp_get_wp_version(), 0, 3 );
+		$expected_home       = \home_url( '/' );
+		$ssl_supported       = \wp_http_supports( array( 'ssl' ) );
+		$active_mode         = '';
+		$http_mode           = 'none';
+		$http_mode_hits      = array();
+		$http_calls          = array();
+		$plugin_args_events  = array();
+		$plugin_api_events   = array();
+		$plugin_result_events = array();
+		$theme_args_events   = array();
+		$theme_api_events    = array();
+		$theme_result_events = array();
+		$plugin_short_circuit = false;
+		$theme_short_circuit = false;
+
+		$last_event = static function ( array $events, string $action, string $mode ) {
+			for ( $i = count( $events ) - 1; $i >= 0; --$i ) {
+				if ( $action === ( $events[ $i ]['action'] ?? null ) && $mode === ( $events[ $i ]['mode'] ?? null ) ) {
+					return $events[ $i ];
+				}
+			}
+			return null;
+		};
+
+		$events_for_http_mode = static function ( array $events, string $mode ): array {
+			return array_values(
+				array_filter(
+					$events,
+					static fn ( array $event ): bool => $mode === ( $event['mode'] ?? null )
+				)
+			);
+		};
+
+		$schemes_for_calls = static function ( array $events ): array {
+			return array_values(
+				array_map(
+					static fn ( array $event ): ?string => $event['scheme'] ?? null,
+					$events
+				)
+			);
+		};
+
+		$plugins_args_filter = static function ( $args, string $action ) use ( &$active_mode, &$plugin_args_events ) {
+			$was_object = is_object( $args );
+			if ( ! $was_object ) {
+				$args = (object) $args;
+			}
+
+			$args->component_fuzz_marker = 'plugin-' . $action;
+			$plugin_args_events[]        = array(
+				'mode'      => $active_mode,
+				'action'    => $action,
+				'wasObject' => $was_object,
+				'marker'    => $args->component_fuzz_marker,
+				'slug'      => $args->slug ?? null,
+				'search'    => $args->search ?? null,
+				'perPage'   => $args->per_page ?? null,
+				'locale'    => $args->locale ?? null,
+				'wpVersion' => $args->wp_version ?? null,
+			);
+
+			return $args;
+		};
+
+		$plugins_api_filter = static function ( $result, string $action, $args ) use ( &$active_mode, &$plugin_api_events, &$plugin_short_circuit, $plugin_slug ) {
+			$plugin_api_events[] = array(
+				'mode'      => $active_mode,
+				'action'    => $action,
+				'marker'    => is_object( $args ) ? ( $args->component_fuzz_marker ?? null ) : null,
+				'default'   => $result,
+				'shortMode' => $plugin_short_circuit,
+			);
+
+			if ( $plugin_short_circuit && 'plugin_information' === $action ) {
+				return (object) array(
+					'name'    => 'Short-circuited Plugin ' . $plugin_slug,
+					'slug'    => is_object( $args ) ? ( $args->slug ?? $plugin_slug ) : $plugin_slug,
+					'version' => '9.9.9',
+				);
+			}
+
+			return $result;
+		};
+
+		$plugins_result_filter = static function ( $result, string $action, $args ) use ( &$active_mode, &$plugin_result_events ) {
+			$plugin_result_events[] = array(
+				'mode'       => $active_mode,
+				'action'     => $action,
+				'argsMarker' => is_object( $args ) ? ( $args->component_fuzz_marker ?? null ) : null,
+				'resultType' => \is_wp_error( $result ) ? 'WP_Error' : gettype( $result ),
+				'errorCode'  => \is_wp_error( $result ) ? $result->get_error_code() : null,
+				'external'   => is_object( $result ) && isset( $result->external ) ? $result->external : null,
+			);
+
+			return $result;
+		};
+
+		$themes_args_filter = static function ( $args, string $action ) use ( &$active_mode, &$theme_args_events ) {
+			$was_object = is_object( $args );
+			if ( ! $was_object ) {
+				$args = (object) $args;
+			}
+
+			$args->component_fuzz_marker = 'theme-' . $action;
+			$theme_args_events[]         = array(
+				'mode'      => $active_mode,
+				'action'    => $action,
+				'wasObject' => $was_object,
+				'marker'    => $args->component_fuzz_marker,
+				'slug'      => $args->slug ?? null,
+				'search'    => $args->search ?? null,
+				'perPage'   => $args->per_page ?? null,
+				'locale'    => $args->locale ?? null,
+				'wpVersion' => $args->wp_version ?? null,
+			);
+
+			return $args;
+		};
+
+		$themes_api_filter = static function ( $result, string $action, $args ) use ( &$active_mode, &$theme_api_events, &$theme_short_circuit, $theme_slug ) {
+			$theme_api_events[] = array(
+				'mode'      => $active_mode,
+				'action'    => $action,
+				'marker'    => is_object( $args ) ? ( $args->component_fuzz_marker ?? null ) : null,
+				'default'   => $result,
+				'shortMode' => $theme_short_circuit,
+			);
+
+			if ( $theme_short_circuit && 'theme_information' === $action ) {
+				return (object) array(
+					'name'    => 'Short-circuited Theme ' . $theme_slug,
+					'slug'    => is_object( $args ) ? ( $args->slug ?? $theme_slug ) : $theme_slug,
+					'version' => '9.9.9',
+				);
+			}
+
+			return $result;
+		};
+
+		$themes_result_filter = static function ( $result, string $action, $args ) use ( &$active_mode, &$theme_result_events ) {
+			$theme_result_events[] = array(
+				'mode'       => $active_mode,
+				'action'     => $action,
+				'argsMarker' => is_object( $args ) ? ( $args->component_fuzz_marker ?? null ) : null,
+				'resultType' => \is_wp_error( $result ) ? 'WP_Error' : gettype( $result ),
+				'errorCode'  => \is_wp_error( $result ) ? $result->get_error_code() : null,
+				'external'   => is_object( $result ) && isset( $result->external ) ? $result->external : null,
+			);
+
+			return $result;
+		};
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_mode, &$http_mode_hits, &$http_calls, $plugin_slug, $theme_slug, $ssl_supported ) {
+			unset( $preempt );
+
+			$parts = parse_url( $url );
+			$query = array();
+			if ( isset( $parts['query'] ) ) {
+				parse_str( $parts['query'], $query );
+			}
+
+			$http_mode_hits[ $http_mode ] = ( $http_mode_hits[ $http_mode ] ?? 0 ) + 1;
+			$hit                         = $http_mode_hits[ $http_mode ];
+			$event                       = array(
+				'mode'      => $http_mode,
+				'hit'       => $hit,
+				'url'       => $url,
+				'scheme'    => $parts['scheme'] ?? null,
+				'host'      => $parts['host'] ?? null,
+				'path'      => $parts['path'] ?? null,
+				'query'     => $query,
+				'timeout'   => $parsed_args['timeout'] ?? null,
+				'userAgent' => $parsed_args['user-agent'] ?? null,
+			);
+			$http_calls[]                = $event;
+
+			$is_plugin_url = 'api.wordpress.org' === ( $parts['host'] ?? null ) && '/plugins/info/1.2/' === ( $parts['path'] ?? null );
+			$is_theme_url  = 'api.wordpress.org' === ( $parts['host'] ?? null ) && '/themes/info/1.2/' === ( $parts['path'] ?? null );
+
+			if ( ! $is_plugin_url && ! $is_theme_url ) {
+				return new \WP_Error( 'component_fuzz_unregistered_directory_api_http', 'Unexpected directory API HTTP request: ' . $url );
+			}
+
+			if ( 'plugin-fallback' === $http_mode && $ssl_supported && 1 === $hit && 'https' === ( $parts['scheme'] ?? null ) ) {
+				return new \WP_Error( 'component_fuzz_plugin_https_failed', 'Synthetic plugin HTTPS failure.' );
+			}
+
+			if ( 'theme-fallback' === $http_mode && $ssl_supported && 1 === $hit && 'https' === ( $parts['scheme'] ?? null ) ) {
+				return new \WP_Error( 'component_fuzz_theme_https_failed', 'Synthetic theme HTTPS failure.' );
+			}
+
+			switch ( $http_mode ) {
+				case 'plugin-success':
+					return self::http_response(
+						\wp_json_encode(
+							array(
+								'info'    => array(
+									'page'    => 1,
+									'pages'   => 1,
+									'results' => 1,
+								),
+								'plugins' => array(
+									array(
+										'name'    => 'HTTP Plugin ' . $plugin_slug,
+										'slug'    => $plugin_slug,
+										'version' => '1.2.3',
+									),
+								),
+							)
+						),
+						200
+					);
+
+				case 'plugin-malformed':
+					return self::http_response( '{not-json', 200 );
+
+				case 'plugin-error':
+					return self::http_response( \wp_json_encode( array( 'error' => 'Synthetic plugin API error.' ) ), 200 );
+
+				case 'plugin-fallback':
+					return self::http_response(
+						\wp_json_encode(
+							array(
+								'name'    => 'Fallback Plugin ' . $plugin_slug,
+								'slug'    => $plugin_slug . '-fallback',
+								'version' => '2.0.0',
+							)
+						),
+						200
+					);
+
+				case 'theme-query-success':
+					return self::http_response(
+						\wp_json_encode(
+							array(
+								'info'   => array(
+									'page'    => 1,
+									'pages'   => 1,
+									'results' => 2,
+								),
+								'themes' => array(
+									array(
+										'name'    => 'HTTP Theme One ' . $theme_slug,
+										'slug'    => $theme_slug,
+										'version' => '1.0.0',
+									),
+									array(
+										'name'    => 'HTTP Theme Two ' . $theme_slug,
+										'slug'    => $theme_slug . '-two',
+										'version' => '1.0.1',
+									),
+								),
+							)
+						),
+						200
+					);
+
+				case 'theme-feature-list':
+					return self::http_response(
+						\wp_json_encode(
+							array(
+								'Colors'  => array(
+									'blue' => 'Blue',
+									'red'  => 'Red',
+								),
+								'Columns' => array(
+									'two' => 'Two Columns',
+								),
+							)
+						),
+						200
+					);
+
+				case 'theme-malformed':
+					return self::http_response( '{not-json', 200 );
+
+				case 'theme-error':
+					return self::http_response( \wp_json_encode( array( 'error' => 'Synthetic theme API error.' ) ), 200 );
+
+				case 'theme-fallback':
+					return self::http_response(
+						\wp_json_encode(
+							array(
+								'name'    => 'Fallback Theme ' . $theme_slug,
+								'slug'    => $theme_slug . '-fallback',
+								'version' => '2.0.0',
+							)
+						),
+						200
+					);
+			}
+
+			return new \WP_Error( 'component_fuzz_unregistered_directory_api_mode', 'Unexpected directory API HTTP mode: ' . $http_mode );
+		};
+
+		\add_filter( 'plugins_api_args', $plugins_args_filter, 10, 2 );
+		\add_filter( 'plugins_api', $plugins_api_filter, 10, 3 );
+		\add_filter( 'plugins_api_result', $plugins_result_filter, 10, 3 );
+		\add_filter( 'themes_api_args', $themes_args_filter, 10, 2 );
+		\add_filter( 'themes_api', $themes_api_filter, 10, 3 );
+		\add_filter( 'themes_api_result', $themes_result_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+		try {
+			$active_mode          = 'plugin-short-circuit';
+			$plugin_short_circuit = true;
+			$before_http_count    = count( $http_calls );
+			$plugin_short         = \plugins_api( 'plugin_information', array( 'slug' => $plugin_slug ) );
+			$plugin_short_circuit = false;
+			$plugin_short_args    = $last_event( $plugin_args_events, 'plugin_information', 'plugin-short-circuit' );
+			$plugin_short_result  = $last_event( $plugin_result_events, 'plugin_information', 'plugin-short-circuit' );
+
+			self::collect_failure(
+				$failures,
+				is_object( $plugin_short )
+					&& $plugin_slug === ( $plugin_short->slug ?? null )
+					&& true === ( $plugin_short->external ?? null )
+					&& count( $http_calls ) === $before_http_count
+					&& true === ( $plugin_short_args['wasObject'] ?? null )
+					&& null === ( $plugin_short_args['perPage'] ?? null )
+					&& $expected_locale === ( $plugin_short_args['locale'] ?? null )
+					&& $expected_wp_version === ( $plugin_short_args['wpVersion'] ?? null )
+					&& 'plugin-plugin_information' === ( $plugin_short_result['argsMarker'] ?? null )
+					&& true === ( $plugin_short_result['external'] ?? null ),
+				'plugins_api short-circuit receives normalized object args, adds defaults, avoids HTTP, and marks external results',
+				array(
+					'result'      => $plugin_short,
+					'argsEvent'   => $plugin_short_args,
+					'resultEvent' => $plugin_short_result,
+					'apiEvents'   => $plugin_api_events,
+				)
+			);
+
+			$active_mode       = 'plugin-http-success';
+			$http_mode         = 'plugin-success';
+			$plugin_query      = \plugins_api( 'query_plugins', array( 'search' => $plugin_search ) );
+			$plugin_query_args = $last_event( $plugin_args_events, 'query_plugins', 'plugin-http-success' );
+			$plugin_query_result = $last_event( $plugin_result_events, 'query_plugins', 'plugin-http-success' );
+			$plugin_query_calls = $events_for_http_mode( $http_calls, 'plugin-success' );
+			$plugin_query_call = $plugin_query_calls[0] ?? array();
+			$plugin_query_request = $plugin_query_call['query']['request'] ?? array();
+
+			self::collect_failure(
+				$failures,
+				is_object( $plugin_query )
+					&& is_array( $plugin_query->plugins ?? null )
+					&& $plugin_slug === ( $plugin_query->plugins[0]['slug'] ?? null )
+					&& true === ( $plugin_query_args['wasObject'] ?? null )
+					&& 24 === (int) ( $plugin_query_args['perPage'] ?? 0 )
+					&& $expected_locale === ( $plugin_query_args['locale'] ?? null )
+					&& $expected_wp_version === ( $plugin_query_args['wpVersion'] ?? null )
+					&& 'plugin-query_plugins' === ( $plugin_query_result['argsMarker'] ?? null )
+					&& 'api.wordpress.org' === ( $plugin_query_call['host'] ?? null )
+					&& '/plugins/info/1.2/' === ( $plugin_query_call['path'] ?? null )
+					&& 'query_plugins' === ( $plugin_query_call['query']['action'] ?? null )
+					&& $plugin_search === ( $plugin_query_request['search'] ?? null )
+					&& '24' === (string) ( $plugin_query_request['per_page'] ?? '' )
+					&& 'plugin-query_plugins' === ( $plugin_query_request['component_fuzz_marker'] ?? null )
+					&& 15 === (int) ( $plugin_query_call['timeout'] ?? 0 )
+					&& is_string( $plugin_query_call['userAgent'] ?? null )
+					&& str_contains( $plugin_query_call['userAgent'], 'WordPress/' )
+					&& str_contains( $plugin_query_call['userAgent'], $expected_home ),
+				'plugins_api HTTP path serializes filtered object args, applies query defaults, and uses the WordPress.org plugin endpoint',
+				array(
+					'result'      => $plugin_query,
+					'argsEvent'   => $plugin_query_args,
+					'resultEvent' => $plugin_query_result,
+					'httpCall'    => $plugin_query_call,
+				)
+			);
+
+			$active_mode      = 'plugin-http-malformed';
+			$http_mode        = 'plugin-malformed';
+			$plugin_malformed = \plugins_api( 'query_plugins', array( 'search' => $plugin_search . '-malformed' ) );
+
+			$active_mode  = 'plugin-http-error';
+			$http_mode    = 'plugin-error';
+			$plugin_error = \plugins_api( 'plugin_information', array( 'slug' => $plugin_slug . '-error' ) );
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $plugin_malformed )
+					&& 'plugins_api_failed' === $plugin_malformed->get_error_code()
+					&& '{not-json' === $plugin_malformed->get_error_data()
+					&& \is_wp_error( $plugin_error )
+					&& 'plugins_api_failed' === $plugin_error->get_error_code()
+					&& 'Synthetic plugin API error.' === $plugin_error->get_error_message(),
+				'plugins_api turns malformed JSON and API error JSON into plugins_api_failed WP_Error results',
+				array(
+					'malformed' => $plugin_malformed,
+					'apiError'  => $plugin_error,
+				)
+			);
+
+			$active_mode          = 'plugin-http-fallback';
+			$http_mode            = 'plugin-fallback';
+			$before_http_count    = count( $http_calls );
+			$had_accept           = array_key_exists( 'HTTP_ACCEPT', $_SERVER );
+			$previous_accept      = $_SERVER['HTTP_ACCEPT'] ?? null;
+			$_SERVER['HTTP_ACCEPT'] = 'application/json';
+			try {
+				$plugin_fallback = \plugins_api( 'plugin_information', array( 'slug' => $plugin_slug . '-fallback' ) );
+			} finally {
+				if ( $had_accept ) {
+					$_SERVER['HTTP_ACCEPT'] = $previous_accept;
+				} else {
+					unset( $_SERVER['HTTP_ACCEPT'] );
+				}
+			}
+			$plugin_fallback_calls            = array_slice( $http_calls, $before_http_count );
+			$expected_plugin_fallback_schemes = $ssl_supported ? array( 'https', 'http' ) : array( 'http' );
+
+			self::collect_failure(
+				$failures,
+				is_object( $plugin_fallback )
+					&& $plugin_slug . '-fallback' === ( $plugin_fallback->slug ?? null )
+					&& $expected_plugin_fallback_schemes === $schemes_for_calls( $plugin_fallback_calls ),
+				'plugins_api retries over HTTP after a synthetic HTTPS transport failure when SSL transport is available',
+				array(
+					'sslSupported' => $ssl_supported,
+					'result'       => $plugin_fallback,
+					'calls'        => $plugin_fallback_calls,
+				)
+			);
+
+			$active_mode         = 'theme-short-circuit';
+			$theme_short_circuit = true;
+			$before_http_count   = count( $http_calls );
+			$theme_short         = \themes_api( 'theme_information', array( 'slug' => $theme_slug ) );
+			$theme_short_circuit = false;
+			$theme_short_args    = $last_event( $theme_args_events, 'theme_information', 'theme-short-circuit' );
+			$theme_short_result  = $last_event( $theme_result_events, 'theme_information', 'theme-short-circuit' );
+
+			self::collect_failure(
+				$failures,
+				is_object( $theme_short )
+					&& $theme_slug === ( $theme_short->slug ?? null )
+					&& ! isset( $theme_short->external )
+					&& count( $http_calls ) === $before_http_count
+					&& true === ( $theme_short_args['wasObject'] ?? null )
+					&& null === ( $theme_short_args['perPage'] ?? null )
+					&& $expected_locale === ( $theme_short_args['locale'] ?? null )
+					&& $expected_wp_version === ( $theme_short_args['wpVersion'] ?? null )
+					&& 'theme-theme_information' === ( $theme_short_result['argsMarker'] ?? null )
+					&& null === ( $theme_short_result['external'] ?? null ),
+				'themes_api short-circuit receives normalized defaults, avoids HTTP, and does not add plugin-style external markers',
+				array(
+					'result'      => $theme_short,
+					'argsEvent'   => $theme_short_args,
+					'resultEvent' => $theme_short_result,
+					'apiEvents'   => $theme_api_events,
+				)
+			);
+
+			$active_mode        = 'theme-query-success';
+			$http_mode          = 'theme-query-success';
+			$theme_query        = \themes_api( 'query_themes', array( 'search' => $theme_search ) );
+			$theme_query_args   = $last_event( $theme_args_events, 'query_themes', 'theme-query-success' );
+			$theme_query_result = $last_event( $theme_result_events, 'query_themes', 'theme-query-success' );
+			$theme_query_calls  = $events_for_http_mode( $http_calls, 'theme-query-success' );
+			$theme_query_call   = $theme_query_calls[0] ?? array();
+			$theme_query_request = $theme_query_call['query']['request'] ?? array();
+
+			self::collect_failure(
+				$failures,
+				is_object( $theme_query )
+					&& is_array( $theme_query->themes ?? null )
+					&& isset( $theme_query->themes[0] )
+					&& is_object( $theme_query->themes[0] )
+					&& $theme_slug === ( $theme_query->themes[0]->slug ?? null )
+					&& true === ( $theme_query_args['wasObject'] ?? null )
+					&& 24 === (int) ( $theme_query_args['perPage'] ?? 0 )
+					&& $expected_locale === ( $theme_query_args['locale'] ?? null )
+					&& $expected_wp_version === ( $theme_query_args['wpVersion'] ?? null )
+					&& 'theme-query_themes' === ( $theme_query_result['argsMarker'] ?? null )
+					&& 'api.wordpress.org' === ( $theme_query_call['host'] ?? null )
+					&& '/themes/info/1.2/' === ( $theme_query_call['path'] ?? null )
+					&& 'query_themes' === ( $theme_query_call['query']['action'] ?? null )
+					&& $theme_search === ( $theme_query_request['search'] ?? null )
+					&& '24' === (string) ( $theme_query_request['per_page'] ?? '' )
+					&& 'theme-query_themes' === ( $theme_query_request['component_fuzz_marker'] ?? null )
+					&& 15 === (int) ( $theme_query_call['timeout'] ?? 0 )
+					&& is_string( $theme_query_call['userAgent'] ?? null )
+					&& str_contains( $theme_query_call['userAgent'], 'WordPress/' )
+					&& str_contains( $theme_query_call['userAgent'], $expected_home ),
+				'themes_api HTTP query serializes filtered args, applies defaults, and converts query_themes rows to objects',
+				array(
+					'result'      => $theme_query,
+					'argsEvent'   => $theme_query_args,
+					'resultEvent' => $theme_query_result,
+					'httpCall'    => $theme_query_call,
+				)
+			);
+
+			$active_mode          = 'theme-feature-list';
+			$http_mode            = 'theme-feature-list';
+			$theme_features       = \themes_api( 'feature_list', array() );
+			$theme_feature_args   = $last_event( $theme_args_events, 'feature_list', 'theme-feature-list' );
+			$theme_feature_result = $last_event( $theme_result_events, 'feature_list', 'theme-feature-list' );
+
+			self::collect_failure(
+				$failures,
+				is_array( $theme_features )
+					&& array( 'blue' => 'Blue', 'red' => 'Red' ) === ( $theme_features['Colors'] ?? null )
+					&& 'array' === ( $theme_feature_result['resultType'] ?? null )
+					&& null === ( $theme_feature_args['perPage'] ?? null )
+					&& 'theme-feature_list' === ( $theme_feature_args['marker'] ?? null )
+					&& $expected_locale === ( $theme_feature_args['locale'] ?? null )
+					&& $expected_wp_version === ( $theme_feature_args['wpVersion'] ?? null ),
+				'themes_api downgrades HTTP feature_list responses back to arrays while preserving default locale and version args',
+				array(
+					'features'    => $theme_features,
+					'argsEvent'   => $theme_feature_args,
+					'resultEvent' => $theme_feature_result,
+				)
+			);
+
+			$active_mode     = 'theme-http-malformed';
+			$http_mode       = 'theme-malformed';
+			$theme_malformed = \themes_api( 'query_themes', array( 'search' => $theme_search . '-malformed' ) );
+
+			$active_mode = 'theme-http-error';
+			$http_mode   = 'theme-error';
+			$theme_error = \themes_api( 'theme_information', array( 'slug' => $theme_slug . '-error' ) );
+
+			self::collect_failure(
+				$failures,
+				\is_wp_error( $theme_malformed )
+					&& 'themes_api_failed' === $theme_malformed->get_error_code()
+					&& '{not-json' === $theme_malformed->get_error_data()
+					&& \is_wp_error( $theme_error )
+					&& 'themes_api_failed' === $theme_error->get_error_code()
+					&& 'Synthetic theme API error.' === $theme_error->get_error_message(),
+				'themes_api turns malformed JSON and API error JSON into themes_api_failed WP_Error results',
+				array(
+					'malformed' => $theme_malformed,
+					'apiError'  => $theme_error,
+				)
+			);
+
+			$active_mode       = 'theme-http-fallback';
+			$http_mode         = 'theme-fallback';
+			$before_http_count = count( $http_calls );
+			$ajax_filter       = static function ( bool $doing_ajax ): bool {
+				unset( $doing_ajax );
+				return true;
+			};
+			\add_filter( 'wp_doing_ajax', $ajax_filter );
+			try {
+				$theme_fallback = \themes_api( 'theme_information', array( 'slug' => $theme_slug . '-fallback' ) );
+			} finally {
+				\remove_filter( 'wp_doing_ajax', $ajax_filter );
+			}
+			$theme_fallback_calls            = array_slice( $http_calls, $before_http_count );
+			$expected_theme_fallback_schemes = $ssl_supported ? array( 'https', 'http' ) : array( 'http' );
+
+			self::collect_failure(
+				$failures,
+				is_object( $theme_fallback )
+					&& $theme_slug . '-fallback' === ( $theme_fallback->slug ?? null )
+					&& $expected_theme_fallback_schemes === $schemes_for_calls( $theme_fallback_calls ),
+				'themes_api retries over HTTP after a synthetic HTTPS transport failure when SSL transport is available',
+				array(
+					'sslSupported' => $ssl_supported,
+					'result'       => $theme_fallback,
+					'calls'        => $theme_fallback_calls,
+				)
+			);
+		} finally {
+			\remove_filter( 'plugins_api_args', $plugins_args_filter, 10 );
+			\remove_filter( 'plugins_api', $plugins_api_filter, 10 );
+			\remove_filter( 'plugins_api_result', $plugins_result_filter, 10 );
+			\remove_filter( 'themes_api_args', $themes_args_filter, 10 );
+			\remove_filter( 'themes_api', $themes_api_filter, 10 );
+			\remove_filter( 'themes_api_result', $themes_result_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'plugins_api_args', $plugins_args_filter )
+				&& false === \has_filter( 'plugins_api', $plugins_api_filter )
+				&& false === \has_filter( 'plugins_api_result', $plugins_result_filter )
+				&& false === \has_filter( 'themes_api_args', $themes_args_filter )
+				&& false === \has_filter( 'themes_api', $themes_api_filter )
+				&& false === \has_filter( 'themes_api_result', $themes_result_filter )
+				&& false === \has_filter( 'pre_http_request', $http_filter ),
+			'direct plugin/theme directory API filters are removed after scoped checks',
+			array(
+				'pluginsArgs'   => \has_filter( 'plugins_api_args', $plugins_args_filter ),
+				'pluginsApi'    => \has_filter( 'plugins_api', $plugins_api_filter ),
+				'pluginsResult' => \has_filter( 'plugins_api_result', $plugins_result_filter ),
+				'themesArgs'    => \has_filter( 'themes_api_args', $themes_args_filter ),
+				'themesApi'     => \has_filter( 'themes_api', $themes_api_filter ),
+				'themesResult'  => \has_filter( 'themes_api_result', $themes_result_filter ),
+				'preHttp'       => \has_filter( 'pre_http_request', $http_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.direct-plugin-theme-api-contracts',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 9 ) )
+		);
+	}
+
+	private static function check_generated_plugin_theme_directory_api_matrix( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+
+		$failures            = array();
+		$cases               = self::directory_api_matrix_cases( $ctx );
+		$expected_home       = \home_url( '/' );
+		$expected_locale     = \get_user_locale();
+		$expected_wp_version = substr( \wp_get_wp_version(), 0, 3 );
+		$active_case         = null;
+		$events              = array(
+			'args'   => array(),
+			'api'    => array(),
+			'result' => array(),
+			'http'   => array(),
+		);
+
+		$args_filter = static function ( string $service, $args, string $action ) use ( &$active_case, &$events ) {
+			$was_object = is_object( $args );
+			if ( ! $was_object ) {
+				$args = (object) $args;
+			}
+
+			$args->component_fuzz_matrix_marker = $active_case['id'] ?? 'inactive';
+			if ( isset( $active_case['filterAdded'] ) ) {
+				$args->component_fuzz_filter_added = $active_case['filterAdded'];
+			}
+
+			$events['args'][] = array(
+				'id'         => $active_case['id'] ?? null,
+				'service'    => $service,
+				'action'     => $action,
+				'wasObject'  => $was_object,
+				'marker'     => $args->component_fuzz_matrix_marker,
+				'slug'       => $args->slug ?? null,
+				'search'     => $args->search ?? null,
+				'perPage'    => $args->per_page ?? null,
+				'locale'     => $args->locale ?? null,
+				'wpVersion'  => $args->wp_version ?? null,
+				'filterAdded'=> $args->component_fuzz_filter_added ?? null,
+			);
+
+			return $args;
+		};
+
+		$api_filter = static function ( string $service, $result, string $action, $args ) use ( &$active_case, &$events ) {
+			$events['api'][] = array(
+				'id'       => $active_case['id'] ?? null,
+				'service'  => $service,
+				'action'   => $action,
+				'default'  => $result,
+				'marker'   => is_object( $args ) ? ( $args->component_fuzz_matrix_marker ?? null ) : null,
+			);
+
+			if ( ( $active_case['service'] ?? null ) !== $service || ( $active_case['action'] ?? null ) !== $action ) {
+				return $result;
+			}
+
+			if ( 'short-error' === ( $active_case['mode'] ?? null ) ) {
+				return new \WP_Error( $active_case['shortErrorCode'], $active_case['errorMessage'], array( 'case' => $active_case['id'] ) );
+			}
+
+			if ( 'short' !== ( $active_case['mode'] ?? null ) ) {
+				return $result;
+			}
+
+			return self::directory_api_short_result( $active_case, $args );
+		};
+
+		$result_filter = static function ( string $service, $result, string $action, $args ) use ( &$active_case, &$events ) {
+			$events['result'][] = array(
+				'id'         => $active_case['id'] ?? null,
+				'service'    => $service,
+				'action'     => $action,
+				'marker'     => is_object( $args ) ? ( $args->component_fuzz_matrix_marker ?? null ) : null,
+				'type'       => self::directory_api_result_type( $result ),
+				'errorCode'  => \is_wp_error( $result ) ? $result->get_error_code() : null,
+				'external'   => is_object( $result ) && isset( $result->external ) ? $result->external : null,
+			);
+
+			return $result;
+		};
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$active_case, &$events ) {
+			unset( $preempt );
+
+			$parts = parse_url( $url );
+			$query = array();
+			if ( isset( $parts['query'] ) ) {
+				parse_str( $parts['query'], $query );
+			}
+
+			$events['http'][] = array(
+				'id'        => $active_case['id'] ?? null,
+				'url'       => $url,
+				'scheme'    => $parts['scheme'] ?? null,
+				'host'      => $parts['host'] ?? null,
+				'path'      => $parts['path'] ?? null,
+				'query'     => $query,
+				'timeout'   => $parsed_args['timeout'] ?? null,
+				'userAgent' => $parsed_args['user-agent'] ?? null,
+			);
+
+			if ( ! is_array( $active_case ) || ! in_array( $active_case['mode'] ?? null, array( 'http', 'fallback-error' ), true ) ) {
+				return new \WP_Error( 'component_fuzz_unexpected_directory_api_http', 'Unexpected directory API HTTP request.' );
+			}
+
+			$expected_path = 'plugin' === $active_case['service'] ? '/plugins/info/1.2/' : '/themes/info/1.2/';
+			if ( 'api.wordpress.org' !== ( $parts['host'] ?? null ) || $expected_path !== ( $parts['path'] ?? null ) ) {
+				return new \WP_Error( 'component_fuzz_unexpected_directory_api_endpoint', 'Unexpected directory API endpoint: ' . $url );
+			}
+
+			if ( 'malformed' === ( $active_case['httpResult'] ?? null ) ) {
+				return self::http_response( '{generated-not-json', 200 );
+			}
+
+			if ( 'api-error' === ( $active_case['httpResult'] ?? null ) ) {
+				return self::http_response( \wp_json_encode( array( 'error' => $active_case['errorMessage'] ) ), 200 );
+			}
+
+			if ( 'fallback-error' === ( $active_case['mode'] ?? null ) ) {
+				$hit = count(
+					array_filter(
+						$events['http'],
+						static fn ( array $event ): bool => ( $active_case['id'] ?? null ) === ( $event['id'] ?? null )
+					)
+				);
+				return new \WP_Error(
+					'component_fuzz_directory_transport_failed',
+					self::directory_api_terminal_transport_message( $active_case, $hit )
+				);
+			}
+
+			return self::http_response( \wp_json_encode( self::directory_api_http_payload( $active_case ) ), 200 );
+		};
+
+		$plugins_args_filter = static function ( $args, string $action ) use ( $args_filter ) {
+			return $args_filter( 'plugin', $args, $action );
+		};
+		$plugins_api_filter = static function ( $result, string $action, $args ) use ( $api_filter ) {
+			return $api_filter( 'plugin', $result, $action, $args );
+		};
+		$plugins_result_filter = static function ( $result, string $action, $args ) use ( $result_filter ) {
+			return $result_filter( 'plugin', $result, $action, $args );
+		};
+		$themes_args_filter = static function ( $args, string $action ) use ( $args_filter ) {
+			return $args_filter( 'theme', $args, $action );
+		};
+		$themes_api_filter = static function ( $result, string $action, $args ) use ( $api_filter ) {
+			return $api_filter( 'theme', $result, $action, $args );
+		};
+		$themes_result_filter = static function ( $result, string $action, $args ) use ( $result_filter ) {
+			return $result_filter( 'theme', $result, $action, $args );
+		};
+
+		\add_filter( 'plugins_api_args', $plugins_args_filter, 10, 2 );
+		\add_filter( 'plugins_api', $plugins_api_filter, 10, 3 );
+		\add_filter( 'plugins_api_result', $plugins_result_filter, 10, 3 );
+		\add_filter( 'themes_api_args', $themes_args_filter, 10, 2 );
+		\add_filter( 'themes_api', $themes_api_filter, 10, 3 );
+		\add_filter( 'themes_api_result', $themes_result_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+
+		try {
+			foreach ( $cases as $case ) {
+				$active_case       = $case;
+				$before_http_count = count( $events['http'] );
+				$had_accept        = array_key_exists( 'HTTP_ACCEPT', $_SERVER );
+				$previous_accept   = $_SERVER['HTTP_ACCEPT'] ?? null;
+				$ajax_filter       = null;
+				if ( 'fallback-error' === $case['mode'] && 'plugin' === $case['service'] ) {
+					$_SERVER['HTTP_ACCEPT'] = 'application/json';
+				}
+				if ( 'fallback-error' === $case['mode'] && 'theme' === $case['service'] ) {
+					$ajax_filter = static function ( bool $doing_ajax ): bool {
+						unset( $doing_ajax );
+						return true;
+					};
+					\add_filter( 'wp_doing_ajax', $ajax_filter );
+				}
+				try {
+					$result = 'plugin' === $case['service']
+						? \plugins_api( $case['action'], $case['args'] )
+						: \themes_api( $case['action'], $case['args'] );
+				} finally {
+					if ( null !== $ajax_filter ) {
+						\remove_filter( 'wp_doing_ajax', $ajax_filter );
+					}
+					if ( 'fallback-error' === $case['mode'] && 'plugin' === $case['service'] ) {
+						if ( $had_accept ) {
+							$_SERVER['HTTP_ACCEPT'] = $previous_accept;
+						} else {
+							unset( $_SERVER['HTTP_ACCEPT'] );
+						}
+					}
+				}
+				$http_events       = array_slice( $events['http'], $before_http_count );
+				$args_event        = self::last_directory_api_event( $events['args'], $case['id'] );
+				$api_event         = self::last_directory_api_event( $events['api'], $case['id'] );
+				$result_event      = self::last_directory_api_event( $events['result'], $case['id'] );
+
+				self::collect_failure(
+					$failures,
+					self::directory_api_matrix_case_matches(
+						$case,
+						$result,
+						$args_event,
+						$api_event,
+						$result_event,
+						$http_events,
+						$expected_locale,
+						$expected_wp_version,
+						$expected_home
+					),
+					"generated direct directory API case {$case['id']} preserves arguments, HTTP, and result contracts",
+					array(
+						'case'        => self::describe_directory_api_case( $case ),
+						'result'      => self::describe_value( $result ),
+						'argsEvent'   => $args_event,
+						'apiEvent'    => $api_event,
+						'resultEvent' => $result_event,
+						'httpEvents'  => $http_events,
+					)
+				);
+
+				if ( 'fallback-error' === $case['mode'] ) {
+					self::collect_failure(
+						$failures,
+						( 'plugin' !== $case['service'] || ( $had_accept ? $previous_accept === ( $_SERVER['HTTP_ACCEPT'] ?? null ) : ! array_key_exists( 'HTTP_ACCEPT', $_SERVER ) ) )
+							&& ( null === $ajax_filter || false === \has_filter( 'wp_doing_ajax', $ajax_filter ) ),
+						"generated direct directory API case {$case['id']} restores fallback request guards",
+						array(
+							'case'          => self::describe_directory_api_case( $case ),
+							'hadAccept'     => $had_accept,
+							'acceptAfter'   => $_SERVER['HTTP_ACCEPT'] ?? null,
+							'ajaxFilter'    => null === $ajax_filter ? null : \has_filter( 'wp_doing_ajax', $ajax_filter ),
+						)
+					);
+				}
+			}
+		} finally {
+			$active_case = null;
+			\remove_filter( 'plugins_api_args', $plugins_args_filter, 10 );
+			\remove_filter( 'plugins_api', $plugins_api_filter, 10 );
+			\remove_filter( 'plugins_api_result', $plugins_result_filter, 10 );
+			\remove_filter( 'themes_api_args', $themes_args_filter, 10 );
+			\remove_filter( 'themes_api', $themes_api_filter, 10 );
+			\remove_filter( 'themes_api_result', $themes_result_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		self::collect_failure(
+			$failures,
+			false === \has_filter( 'plugins_api_args', $plugins_args_filter )
+				&& false === \has_filter( 'plugins_api', $plugins_api_filter )
+				&& false === \has_filter( 'plugins_api_result', $plugins_result_filter )
+				&& false === \has_filter( 'themes_api_args', $themes_args_filter )
+				&& false === \has_filter( 'themes_api', $themes_api_filter )
+				&& false === \has_filter( 'themes_api_result', $themes_result_filter )
+				&& false === \has_filter( 'pre_http_request', $http_filter ),
+			'generated direct directory API matrix removes scoped filters',
+			array(
+				'pluginsArgs'   => \has_filter( 'plugins_api_args', $plugins_args_filter ),
+				'pluginsApi'    => \has_filter( 'plugins_api', $plugins_api_filter ),
+				'pluginsResult' => \has_filter( 'plugins_api_result', $plugins_result_filter ),
+				'themesArgs'    => \has_filter( 'themes_api_args', $themes_args_filter ),
+				'themesApi'     => \has_filter( 'themes_api', $themes_api_filter ),
+				'themesResult'  => \has_filter( 'themes_api_result', $themes_result_filter ),
+				'preHttp'       => \has_filter( 'pre_http_request', $http_filter ),
+			)
+		);
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.generated-plugin-theme-api-matrix',
+			array() === $failures,
+			array(
+				'cases'    => array_map( array( __CLASS__, 'describe_directory_api_case' ), $cases ),
+				'failures' => array_slice( $failures, 0, 8 ),
+			)
+		);
+	}
+
+	private static function check_block_directory_controller( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'block' );
+		self::set_granted_caps( array( 'activate_plugins', 'install_plugins' ) );
+
+		$failures     = array();
+		$case         = self::block_case( $ctx );
+		$mode         = 'success';
+		$plugin_calls = array();
+		$http_calls   = array();
+
+		$plugins_filter = static function ( $result, string $action, $args ) use ( &$plugin_calls, &$mode, $case ) {
+			$plugin_calls[] = array(
+				'action'   => $action,
+				'block'    => $args->block ?? null,
+				'per_page' => $args->per_page ?? null,
+				'page'     => $args->page ?? null,
+				'locale'   => $args->locale ?? null,
+			);
+
+			if ( 'query_plugins' !== $action ) {
+				return $result;
+			}
+
+			if ( 'error' === $mode ) {
+				return new \WP_Error( 'plugins_api_failed', 'Synthetic plugin API failure.' );
+			}
+
+			return (object) array(
+				'plugins' => array(
+					$case['plugin'],
+					$case['emptyBlocksPlugin'],
+				),
+			);
+		};
+
+		$http_guard = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls ) {
+			unset( $parsed_args );
+			$http_calls[] = $url;
+			return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from block directory.' );
+		};
+
+		\add_filter( 'plugins_api', $plugins_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_guard, 10, 3 );
+
+		try {
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Block_Directory_Controller();
+			$controller->register_routes();
+
+			$response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array(
+						'term'     => $case['term'],
+						'per_page' => $case['perPage'],
+						'page'     => $case['page'],
+					)
+				)
+			);
+			$data     = $response->get_data();
+			$item     = is_array( $data ) && isset( $data[0] ) && is_array( $data[0] ) ? $data[0] : array();
+
+			self::collect_failure(
+				$failures,
+				200 === $response->get_status()
+					&& 1 === count( is_array( $data ) ? $data : array() )
+					&& $case['firstBlockName'] === ( $item['name'] ?? null )
+					&& $case['plugin']['name'] === ( $item['title'] ?? null )
+					&& $case['plugin']['slug'] === ( $item['id'] ?? null )
+					&& $case['expectedDescription'] === ( $item['description'] ?? null )
+					&& 4.25 === ( $item['rating'] ?? null )
+					&& 3.5 === ( $item['author_block_rating'] ?? null )
+					&& $case['expectedAuthor'] === ( $item['author'] ?? null )
+					&& 'block-default' === ( $item['icon'] ?? null )
+					&& 17 === ( $item['rating_count'] ?? null )
+					&& 2500 === ( $item['active_installs'] ?? null )
+					&& 6 === ( $item['author_block_count'] ?? null )
+					&& $case['expectedLastUpdated'] === ( $item['last_updated'] ?? null )
+					&& self::schema_valid( $item, $controller->get_item_schema() ),
+				'block directory maps first block, skips empty block plugins, normalizes fields, and validates schema',
+				array(
+					'status' => $response->get_status(),
+					'data'   => $data,
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				1 === count( $plugin_calls )
+					&& $case['term'] === ( $plugin_calls[0]['block'] ?? null )
+					&& $case['perPage'] === (int) ( $plugin_calls[0]['per_page'] ?? 0 )
+					&& $case['page'] === (int) ( $plugin_calls[0]['page'] ?? 0 )
+					&& array() === $http_calls,
+				'block directory short-circuits plugins_api and never reaches WordPress.org HTTP',
+				array(
+					'pluginCalls' => $plugin_calls,
+					'httpCalls'   => $http_calls,
+				)
+			);
+
+			$link_request = self::request(
+				'GET',
+				'/wp/v2/block-directory/search',
+				array(
+					'term'     => $case['term'],
+					'per_page' => $case['perPage'],
+					'page'     => $case['page'],
+					'_fields'  => 'id,name,_links',
+				)
+			);
+			$links_item   = $controller->prepare_item_for_response( $case['plugin'], $link_request );
+			$install_href = $links_item instanceof \WP_REST_Response
+				? self::link_href( $links_item->get_links(), 'https://api.w.org/install-plugin' )
+				: null;
+
+			self::collect_failure(
+				$failures,
+				$links_item instanceof \WP_REST_Response
+					&& is_string( $install_href )
+					&& ( str_contains( $install_href, '/wp/v2/plugins' ) || str_contains( $install_href, 'rest_route=%2Fwp%2Fv2%2Fplugins' ) )
+					&& str_contains( $install_href, 'slug=' . rawurlencode( $case['plugin']['slug'] ) ),
+				'block directory prepared item exposes install-plugin link when _links are requested',
+				array(
+					'links'       => $links_item instanceof \WP_REST_Response ? $links_item->get_links() : null,
+					'installHref' => $install_href,
+				)
+			);
+
+			$mode           = 'error';
+			$error_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array(
+						'term'     => $case['term'] . '-error',
+						'per_page' => 1,
+						'page'     => 1,
+					)
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $error_response, 'plugins_api_failed', 500 ),
+				'block directory converts plugins_api WP_Error to a 500 REST error',
+				array( 'response' => $error_response )
+			);
+
+			$missing_term = self::dispatch( $server, self::request( 'GET', '/wp/v2/block-directory/search' ) );
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $missing_term, 'rest_missing_callback_param', 400 ),
+				'block directory rejects missing required term before callback',
+				array( 'response' => $missing_term )
+			);
+
+			self::set_granted_caps( array( 'activate_plugins', 'install_plugins' ) );
+			self::set_denied_caps( array( 'install_plugins' ) );
+			$deny_install = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array( 'term' => $case['term'] )
+				)
+			);
+
+			self::set_granted_caps( array( 'activate_plugins', 'install_plugins' ) );
+			self::set_denied_caps( array( 'activate_plugins' ) );
+			$deny_activate = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array( 'term' => $case['term'] )
+				)
+			);
+
+			self::clear_caps();
+			\wp_set_current_user( 0 );
+			$logged_out = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array( 'term' => $case['term'] )
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $deny_install, 'rest_block_directory_cannot_view', 403 )
+					&& self::response_error_ok( $deny_activate, 'rest_block_directory_cannot_view', 403 )
+					&& self::response_error_ok( $logged_out, 'rest_block_directory_cannot_view', 401 ),
+				'block directory permission requires both install_plugins and activate_plugins',
+				array(
+					'denyInstall'  => $deny_install,
+					'denyActivate' => $deny_activate,
+					'loggedOut'    => $logged_out,
+				)
+			);
+		} finally {
+			\remove_filter( 'plugins_api', $plugins_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_guard, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.block-directory-transform-permissions-network',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_block_directory_fields_and_links( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'block-fields' );
+		self::set_granted_caps( array( 'activate_plugins', 'install_plugins' ) );
+
+		$failures     = array();
+		$case         = self::block_case( $ctx );
+		$plugin_slug  = $case['plugin']['slug'];
+		$plugin_file  = $plugin_slug . '.php';
+		$plugin_calls = array();
+		$http_calls   = array();
+		$case['plugin']['icons']['1x']       = 'https://example.test/block-directory/icon-' . $case['token'] . '.svg';
+		$case['plugin']['blocks'][0]['title'] = 'Explicit Block Title ' . $case['token'];
+
+		$plugins_filter = static function ( $result, string $action, $args ) use ( &$plugin_calls, $case ) {
+			$plugin_calls[] = array(
+				'action'   => $action,
+				'block'    => $args->block ?? null,
+				'per_page' => $args->per_page ?? null,
+				'page'     => $args->page ?? null,
+			);
+
+			if ( 'query_plugins' !== $action ) {
+				return $result;
+			}
+
+			return (object) array( 'plugins' => array( $case['plugin'] ) );
+		};
+
+		$http_guard = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls ) {
+			unset( $parsed_args );
+			$http_calls[] = $url;
+			return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from block directory fields.' );
+		};
+
+		\add_filter( 'plugins_api', $plugins_filter, 10, 3 );
+		\add_filter( 'pre_http_request', $http_guard, 10, 3 );
+
+		try {
+			\wp_cache_set(
+				'plugins',
+				array(
+					'/' . $plugin_slug => array(
+						$plugin_file => array(
+							'Name'        => 'Installed Block Directory Plugin ' . $case['token'],
+							'PluginURI'   => 'https://example.test/plugins/' . $plugin_slug,
+							'Version'     => '1.0.0',
+							'Description' => 'Installed plugin fixture for block directory link discovery.',
+							'Author'      => 'Component Fuzz',
+						),
+					),
+				),
+				'plugins'
+			);
+
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Block_Directory_Controller();
+			$controller->register_routes();
+			$schema = $controller->get_item_schema();
+			$link_request = self::request(
+				'GET',
+				'/wp/v2/block-directory/search',
+				array(
+					'term'    => $case['term'],
+					'_fields' => 'id,name,title,icon,_links',
+				)
+			);
+			$links_item   = $controller->prepare_item_for_response( $case['plugin'], $link_request );
+			$install_href = $links_item instanceof \WP_REST_Response
+				? self::link_href( $links_item->get_links(), 'https://api.w.org/install-plugin' )
+				: null;
+			$plugin_href = $links_item instanceof \WP_REST_Response
+				? self::link_href( $links_item->get_links(), 'https://api.w.org/plugin' )
+				: null;
+
+			$field_request = self::request(
+				'GET',
+				'/wp/v2/block-directory/search',
+				array(
+					'term'     => $case['term'],
+					'per_page' => $case['perPage'],
+					'page'     => $case['page'],
+					'_fields'  => 'id,name,title,icon',
+				)
+			);
+			$field_response = self::dispatch( $server, $field_request );
+			$field_data     = $field_response->get_data();
+			$field_item     = is_array( $field_data ) && isset( $field_data[0] ) && is_array( $field_data[0] ) ? $field_data[0] : array();
+			$field_keys     = array_keys( $field_item );
+			sort( $field_keys );
+			$expected_keys = array( 'icon', 'id', 'name', 'title' );
+			sort( $expected_keys );
+
+			self::collect_failure(
+				$failures,
+				200 === $field_response->get_status()
+					&& self::schema_has_properties( $schema, array( 'id', 'name', 'title', 'icon' ) )
+					&& $expected_keys === $field_keys
+					&& $plugin_slug === ( $field_item['id'] ?? null )
+					&& $case['firstBlockName'] === ( $field_item['name'] ?? null )
+					&& $case['plugin']['blocks'][0]['title'] === ( $field_item['title'] ?? null )
+					&& $case['plugin']['icons']['1x'] === ( $field_item['icon'] ?? null )
+					&& ! array_key_exists( 'rating', $field_item )
+					&& ! array_key_exists( 'author', $field_item )
+					&& $links_item instanceof \WP_REST_Response
+					&& is_string( $install_href )
+					&& ( str_contains( $install_href, '/wp/v2/plugins' ) || str_contains( $install_href, 'rest_route=%2Fwp%2Fv2%2Fplugins' ) )
+					&& str_contains( $install_href, 'slug=' . rawurlencode( $plugin_slug ) )
+					&& is_string( $plugin_href )
+					&& ( str_contains( $plugin_href, '/wp/v2/plugins/' . $plugin_slug . '/' . $plugin_slug ) || str_contains( $plugin_href, 'rest_route=%2Fwp%2Fv2%2Fplugins%2F' . rawurlencode( $plugin_slug . '/' . $plugin_slug ) ) ),
+				'block directory dispatch honors _fields, explicit block title/icon mapping, and installed-plugin links',
+				array(
+					'status'           => $field_response->get_status(),
+					'item'             => $field_item,
+					'fieldKeys'        => $field_keys,
+					'fieldKeysText'    => implode( ',', $field_keys ),
+					'expectedKeysText' => implode( ',', $expected_keys ),
+					'installHref'      => $install_href,
+					'pluginHref'       => $plugin_href,
+					'links'            => $links_item instanceof \WP_REST_Response ? $links_item->get_links() : null,
+					'schemaKeys'       => array_keys( $schema['properties'] ?? array() ),
+				)
+			);
+
+			$minimal_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/block-directory/search',
+					array(
+						'term'    => $case['term'] . '-minimal',
+						'_fields' => 'id,name',
+					)
+				)
+			);
+			$minimal_data = $minimal_response->get_data();
+			$minimal_item = is_array( $minimal_data ) && isset( $minimal_data[0] ) && is_array( $minimal_data[0] ) ? $minimal_data[0] : array();
+			$minimal_keys = array_keys( $minimal_item );
+			sort( $minimal_keys );
+
+			self::collect_failure(
+				$failures,
+				200 === $minimal_response->get_status()
+					&& array( 'id', 'name' ) === $minimal_keys
+					&& 2 === count( $plugin_calls )
+					&& $case['term'] === ( $plugin_calls[0]['block'] ?? null )
+					&& $case['term'] . '-minimal' === ( $plugin_calls[1]['block'] ?? null )
+					&& array() === $http_calls,
+				'block directory prunes unrequested fields and keeps directory lookups on plugins_api without HTTP',
+				array(
+					'minimalStatus' => $minimal_response->get_status(),
+					'minimalItem'   => $minimal_item,
+					'pluginCalls'   => $plugin_calls,
+					'httpCalls'     => $http_calls,
+				)
+			);
+		} finally {
+			\remove_filter( 'plugins_api', $plugins_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_guard, 10 );
+			\wp_cache_delete( 'plugins', 'plugins' );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.block-directory-fields-links',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 6 ) )
+		);
+	}
+
+	private static function check_pattern_directory_controller( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'pattern' );
+		self::set_granted_caps( array( 'edit_posts' ) );
+
+		$failures       = array();
+		$case           = self::pattern_case( $ctx );
+		$mode           = 'success';
+		$http_calls     = array();
+		$transient_sets = array();
+		$prepare_calls  = array();
+		$params_calls   = 0;
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls, &$mode, $case ) {
+			unset( $preempt );
+			$parts = parse_url( $url );
+			if ( ! isset( $parts['host'], $parts['path'] ) || 'api.wordpress.org' !== $parts['host'] || '/patterns/1.0/' !== $parts['path'] ) {
+				return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from pattern directory: ' . $url );
+			}
+
+			$query = array();
+			if ( isset( $parts['query'] ) ) {
+				parse_str( $parts['query'], $query );
+			}
+
+			$http_calls[] = array(
+				'url'   => $url,
+				'query' => $query,
+				'args'  => $parsed_args,
+				'mode'  => $mode,
+			);
+
+			if ( 'transport-error' === $mode ) {
+				return new \WP_Error( 'component_fuzz_pattern_http_failed', 'Synthetic pattern directory transport failure.' );
+			}
+
+			if ( 'invalid-json' === $mode ) {
+				return self::http_response( '{not-json', 200 );
+			}
+
+			return self::http_response( \wp_json_encode( array( $case['rawPattern'] ) ), 200 );
+		};
+
+		$transient_action = static function ( string $transient, $value, int $expiration ) use ( &$transient_sets ): void {
+			$transient_sets[] = array(
+				'transient'  => $transient,
+				'expiration' => $expiration,
+				'valueType'   => is_object( $value ) ? get_class( $value ) : gettype( $value ),
+			);
+		};
+
+		$prepare_filter = static function ( \WP_REST_Response $response, $raw_pattern, \WP_REST_Request $request ) use ( &$prepare_calls ): \WP_REST_Response {
+			$prepare_calls[] = array(
+				'id'     => $raw_pattern->id ?? null,
+				'method' => $request->get_method(),
+			);
+			return $response;
+		};
+
+		$params_filter = static function ( array $params ) use ( &$params_calls ): array {
+			++$params_calls;
+			$params['component_fuzz_marker'] = array(
+				'type'        => 'string',
+				'description' => 'Component fuzz marker.',
+			);
+			return $params;
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_action( 'set_site_transient', $transient_action, 10, 3 );
+		\add_filter( 'rest_prepare_block_pattern', $prepare_filter, 10, 3 );
+		\add_filter( 'rest_pattern_directory_collection_params', $params_filter );
+
+		try {
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Pattern_Directory_Controller();
+			$controller->register_routes();
+
+			$params = $controller->get_collection_params();
+			self::collect_failure(
+				$failures,
+				isset( $params['component_fuzz_marker'] ) && $params_calls > 0,
+				'pattern directory collection params filter is applied',
+				array(
+					'paramsCalls' => $params_calls,
+					'hasMarker'   => isset( $params['component_fuzz_marker'] ),
+				)
+			);
+
+			$response = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $case['query'] ) );
+			$data     = $response->get_data();
+			$item     = is_array( $data ) && isset( $data[0] ) && is_array( $data[0] ) ? $data[0] : array();
+
+			self::collect_failure(
+				$failures,
+				200 === $response->get_status()
+					&& 1 === count( is_array( $data ) ? $data : array() )
+					&& $case['expected']['id'] === ( $item['id'] ?? null )
+					&& $case['expected']['title'] === ( $item['title'] ?? null )
+					&& $case['expected']['content'] === ( $item['content'] ?? null )
+					&& $case['expected']['categories'] === ( $item['categories'] ?? null )
+					&& $case['expected']['keywords'] === ( $item['keywords'] ?? null )
+					&& $case['expected']['description'] === ( $item['description'] ?? null )
+					&& $case['expected']['viewport_width'] === ( $item['viewport_width'] ?? null )
+					&& $case['expected']['block_types'] === ( $item['block_types'] ?? null )
+					&& ! array_key_exists( 'extra_remote_field', $item )
+					&& self::schema_valid( $item, $controller->get_item_schema() ),
+				'pattern directory sanitizes remote pattern fields, drops extras, and validates schema',
+				array(
+					'status' => $response->get_status(),
+					'item'   => $item,
+				)
+			);
+
+			$query = $http_calls[0]['query'] ?? array();
+			self::collect_failure(
+				$failures,
+				1 === count( $http_calls )
+					&& isset( $query['locale'], $query['wp-version'] )
+					&& $case['query']['category'] === (int) ( $query['pattern-categories'] ?? 0 )
+					&& $case['query']['keyword'] === (int) ( $query['pattern-keywords'] ?? 0 )
+					&& $case['query']['search'] === ( $query['search'] ?? null )
+					&& $case['query']['order'] === ( $query['order'] ?? null )
+					&& $case['query']['orderby'] === ( $query['orderby'] ?? null )
+					&& self::latest_transient_has( $transient_sets, 'wp_remote_block_patterns_', \HOUR_IN_SECONDS ),
+				'pattern directory remaps query args and caches valid WordPress.org responses for one hour',
+				array(
+					'httpCalls'     => $http_calls,
+					'transientSets' => $transient_sets,
+				)
+			);
+
+			$reordered_query         = $case['query'];
+			$reordered_query['slug'] = array_reverse( $case['query']['slug'] );
+			$cached_response         = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $reordered_query ) );
+			$head_response           = self::dispatch( $server, self::request( 'HEAD', '/wp/v2/pattern-directory/patterns', $reordered_query ) );
+
+			self::collect_failure(
+				$failures,
+				200 === $cached_response->get_status()
+					&& $data === $cached_response->get_data()
+					&& 1 === count( $http_calls )
+					&& 2 === count( $prepare_calls )
+					&& 200 === $head_response->get_status()
+					&& array() === $head_response->get_data()
+					&& 2 === count( $prepare_calls ),
+				'pattern directory cache key sorts slug arrays and HEAD returns cached empty data without prepare callbacks',
+				array(
+					'httpCallCount'    => count( $http_calls ),
+					'prepareCallCount' => count( $prepare_calls ),
+					'headData'         => $head_response->get_data(),
+				)
+			);
+
+			$hostile_query = array_merge(
+				$case['query'],
+				array(
+					'search'             => $case['query']['search'] . '-hostile',
+					'category'           => $case['query']['category'] + 100,
+					'keyword'            => $case['query']['keyword'] + 100,
+					'locale'             => 'zz_ZZ',
+					'wp-version'         => '0.0-hostile',
+					'pattern-categories' => '999999',
+					'pattern-keywords'   => '999998',
+					'unknown-proxy-key'  => 'must-not-leak',
+				)
+			);
+			$hostile_response = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $hostile_query ) );
+			$hostile_call     = $http_calls[ count( $http_calls ) - 1 ] ?? array();
+			$hostile_url_args = $hostile_call['query'] ?? array();
+
+			self::collect_failure(
+				$failures,
+				200 === $hostile_response->get_status()
+					&& 2 === count( $http_calls )
+					&& $hostile_query['search'] === ( $hostile_url_args['search'] ?? null )
+					&& $hostile_query['category'] === (int) ( $hostile_url_args['pattern-categories'] ?? 0 )
+					&& $hostile_query['keyword'] === (int) ( $hostile_url_args['pattern-keywords'] ?? 0 )
+					&& 'zz_ZZ' !== ( $hostile_url_args['locale'] ?? null )
+					&& '0.0-hostile' !== ( $hostile_url_args['wp-version'] ?? null )
+					&& ! array_key_exists( 'category', $hostile_url_args )
+					&& ! array_key_exists( 'keyword', $hostile_url_args )
+					&& ! array_key_exists( 'unknown-proxy-key', $hostile_url_args ),
+				'pattern directory proxies only allowlisted query args and overwrites client-supplied derived WordPress.org args',
+				array(
+					'hostileQuery' => $hostile_query,
+					'httpCall'     => $hostile_call,
+				)
+			);
+
+			$mode         = 'invalid-json';
+			$invalid_json = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/pattern-directory/patterns',
+					array_merge( $case['query'], array( 'search' => $case['query']['search'] . '-invalid' ) )
+				)
+			);
+
+			$mode            = 'transport-error';
+			$transport_error = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp/v2/pattern-directory/patterns',
+					array_merge( $case['query'], array( 'search' => $case['query']['search'] . '-transport' ) )
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $invalid_json, 'pattern_api_failed', 500 )
+					&& self::response_error_ok( $transport_error, 'component_fuzz_pattern_http_failed', 500 )
+					&& self::latest_transient_has( $transient_sets, 'wp_remote_block_patterns_', 5 ),
+				'pattern directory returns 500 and short-lived cache entries for invalid JSON and transport errors',
+				array(
+					'invalidJson'   => $invalid_json,
+					'transport'     => $transport_error,
+					'transientSets' => $transient_sets,
+				)
+			);
+
+			self::set_granted_caps( array() );
+			self::set_denied_caps( array( 'edit_posts' ) );
+			self::seed_current_user( $ctx, 'pattern-denied' );
+			$denied = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $case['query'] ) );
+
+			self::clear_caps();
+			\wp_set_current_user( 0 );
+			$logged_out = self::dispatch( $server, self::request( 'GET', '/wp/v2/pattern-directory/patterns', $case['query'] ) );
+
+			self::seed_current_user( $ctx, 'pattern-fallback' );
+			$fallback_cap = self::register_rest_visible_post_type_with_cap( $ctx, 'pattern' );
+			self::set_granted_caps( array( $fallback_cap ) );
+			self::set_denied_caps( array( 'edit_posts' ) );
+			$fallback_allowed = $controller->get_items_permissions_check( self::request( 'GET', '/wp/v2/pattern-directory/patterns', $case['query'] ) );
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied, 'rest_pattern_directory_cannot_view', 403 )
+					&& self::response_error_ok( $logged_out, 'rest_pattern_directory_cannot_view', 401 )
+					&& true === $fallback_allowed,
+				'pattern directory permission supports edit_posts or REST-visible post-type edit cap, and denies others',
+				array(
+					'denied'          => $denied,
+					'loggedOut'       => $logged_out,
+					'fallbackCap'     => $fallback_cap,
+					'fallbackAllowed' => $fallback_allowed,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_action( 'set_site_transient', $transient_action, 10 );
+			\remove_filter( 'rest_prepare_block_pattern', $prepare_filter, 10 );
+			\remove_filter( 'rest_pattern_directory_collection_params', $params_filter );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.pattern-directory-query-cache-permissions',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 7 ) )
+		);
+	}
+
+	private static function check_pattern_directory_fields_and_prepare_response( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'pattern-fields' );
+		self::set_granted_caps( array( 'edit_posts' ) );
+
+		$failures      = array();
+		$case          = self::pattern_case( $ctx );
+		$http_calls    = array();
+		$prepare_calls = array();
+
+		$case['rawPattern']->extra_remote_field       = '<strong>must not leak ' . $case['token'] . '</strong>';
+		$case['rawPattern']->title->rendered          = " <span>Projected {$case['token']}</span> &amp; <script>bad()</script> ";
+		$case['rawPattern']->pattern_content          = '<!-- wp:paragraph --><p>Projected <em>' . $case['token'] . '</em></p><script>bad()</script><!-- /wp:paragraph -->';
+		$case['rawPattern']->category_slugs           = array( 'Hero Section', 'CTA & Forms', '<b>Unsafe</b>' );
+		$case['rawPattern']->meta->wpop_keywords      = 'alpha,<b>beta</b>, spaced value ,' . $case['token'];
+		$case['rawPattern']->meta->wpop_description   = '<strong>Projected &amp; description ' . $case['token'] . '</strong>';
+		$case['rawPattern']->meta->wpop_viewport_width = '1440px';
+		$case['rawPattern']->meta->wpop_block_types   = array( 'core/group', '<b>core/buttons</b>', 'plugin/block-' . $case['token'] );
+
+		$expected = array(
+			'id'             => absint( $case['rawPattern']->id ),
+			'title'          => \sanitize_text_field( $case['rawPattern']->title->rendered ),
+			'content'        => \wp_kses_post( $case['rawPattern']->pattern_content ),
+			'categories'     => array_map( 'sanitize_title', $case['rawPattern']->category_slugs ),
+			'keywords'       => array_map( 'sanitize_text_field', explode( ',', $case['rawPattern']->meta->wpop_keywords ) ),
+			'description'    => \sanitize_text_field( $case['rawPattern']->meta->wpop_description ),
+			'viewport_width' => absint( $case['rawPattern']->meta->wpop_viewport_width ),
+			'block_types'    => array_map( 'sanitize_text_field', $case['rawPattern']->meta->wpop_block_types ),
+		);
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls, $case ) {
+			unset( $preempt );
+			$parts = parse_url( $url );
+			if ( ! isset( $parts['host'], $parts['path'] ) || 'api.wordpress.org' !== $parts['host'] || '/patterns/1.0/' !== $parts['path'] ) {
+				return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from pattern directory fields: ' . $url );
+			}
+
+			$query = array();
+			if ( isset( $parts['query'] ) ) {
+				parse_str( $parts['query'], $query );
+			}
+
+			$http_calls[] = array(
+				'url'   => $url,
+				'query' => $query,
+				'args'  => $parsed_args,
+			);
+
+			return self::http_response( \wp_json_encode( array( $case['rawPattern'] ) ), 200 );
+		};
+
+		$prepare_filter = static function ( \WP_REST_Response $response, $raw_pattern, \WP_REST_Request $request ) use ( &$prepare_calls ): \WP_REST_Response {
+			$data = $response->get_data();
+			$keys = is_array( $data ) ? array_keys( $data ) : array();
+			sort( $keys );
+
+			$prepare_calls[] = array(
+				'id'       => $raw_pattern->id ?? null,
+				'extra'    => $raw_pattern->extra_remote_field ?? null,
+				'method'   => $request->get_method(),
+				'fields'   => $request['_fields'] ?? null,
+				'dataKeys' => $keys,
+			);
+
+			return $response;
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'rest_prepare_block_pattern', $prepare_filter, 10, 3 );
+
+		try {
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_Pattern_Directory_Controller();
+			$controller->register_routes();
+
+			$direct_request  = self::request(
+				'GET',
+				'/wp/v2/pattern-directory/patterns',
+				array( '_fields' => 'id,title,content,viewport_width' )
+			);
+			$direct_response = $controller->prepare_item_for_response( $case['rawPattern'], $direct_request );
+			$direct_data     = $direct_response instanceof \WP_REST_Response ? $direct_response->get_data() : array();
+			$direct_keys     = is_array( $direct_data ) ? array_keys( $direct_data ) : array();
+			sort( $direct_keys );
+			$expected_full_keys = array_keys( $expected );
+			sort( $expected_full_keys );
+
+			self::collect_failure(
+				$failures,
+				$direct_response instanceof \WP_REST_Response
+					&& $expected === $direct_data
+					&& $expected_full_keys === $direct_keys
+					&& ! array_key_exists( 'extra_remote_field', $direct_data )
+					&& self::schema_valid( $direct_data, $controller->get_item_schema() ),
+				'pattern directory direct prepare sanitizes all schema fields and drops remote extras before REST projection',
+				array(
+					'expected' => $expected,
+					'actual'   => $direct_data,
+					'keys'     => $direct_keys,
+				)
+			);
+
+			$field_request = self::request(
+				'GET',
+				'/wp/v2/pattern-directory/patterns',
+				array_merge(
+					$case['query'],
+					array(
+						'_fields' => 'id,title,content,viewport_width',
+						'search'  => $case['query']['search'] . '-fields',
+					)
+				)
+			);
+			$field_response = self::dispatch( $server, $field_request );
+			$field_data     = $field_response->get_data();
+			$field_item     = is_array( $field_data ) && isset( $field_data[0] ) && is_array( $field_data[0] ) ? $field_data[0] : array();
+			$field_keys     = array_keys( $field_item );
+			sort( $field_keys );
+			$expected_field_keys = array( 'content', 'id', 'title', 'viewport_width' );
+
+			self::collect_failure(
+				$failures,
+				200 === $field_response->get_status()
+					&& $expected_field_keys === $field_keys
+					&& $expected['id'] === ( $field_item['id'] ?? null )
+					&& $expected['title'] === ( $field_item['title'] ?? null )
+					&& $expected['content'] === ( $field_item['content'] ?? null )
+					&& $expected['viewport_width'] === ( $field_item['viewport_width'] ?? null )
+					&& ! array_key_exists( 'categories', $field_item )
+					&& ! array_key_exists( 'keywords', $field_item )
+					&& ! array_key_exists( 'description', $field_item )
+					&& ! array_key_exists( 'block_types', $field_item )
+					&& ! array_key_exists( 'extra_remote_field', $field_item ),
+				'pattern directory dispatch honors _fields projection after preparing sanitized remote data',
+				array(
+					'status'        => $field_response->get_status(),
+					'item'          => $field_item,
+					'fieldKeys'     => $field_keys,
+					'expectedKeys'  => $expected_field_keys,
+					'expectedSlice' => array_intersect_key( $expected, array_flip( $expected_field_keys ) ),
+				)
+			);
+
+			$http_query = $http_calls[0]['query'] ?? array();
+			self::collect_failure(
+				$failures,
+				1 === count( $http_calls )
+					&& ! array_key_exists( '_fields', $http_query )
+					&& $case['query']['category'] === (int) ( $http_query['pattern-categories'] ?? 0 )
+					&& $case['query']['keyword'] === (int) ( $http_query['pattern-keywords'] ?? 0 )
+					&& ( $case['query']['search'] . '-fields' ) === ( $http_query['search'] ?? null ),
+				'pattern directory _fields affects local REST projection without leaking to WordPress.org proxy query',
+				array(
+					'httpCalls' => $http_calls,
+					'httpQuery' => $http_query,
+				)
+			);
+
+			$expected_prepare_keys = $expected_full_keys;
+			self::collect_failure(
+				$failures,
+				2 === count( $prepare_calls )
+					&& (string) $case['rawPattern']->id === (string) ( $prepare_calls[0]['id'] ?? null )
+					&& (string) $case['rawPattern']->id === (string) ( $prepare_calls[1]['id'] ?? null )
+					&& $case['rawPattern']->extra_remote_field === ( $prepare_calls[0]['extra'] ?? null )
+					&& $case['rawPattern']->extra_remote_field === ( $prepare_calls[1]['extra'] ?? null )
+					&& 'id,title,content,viewport_width' === ( $prepare_calls[0]['fields'] ?? null )
+					&& 'id,title,content,viewport_width' === ( $prepare_calls[1]['fields'] ?? null )
+					&& $expected_prepare_keys === ( $prepare_calls[0]['dataKeys'] ?? array() )
+					&& $expected_prepare_keys === ( $prepare_calls[1]['dataKeys'] ?? array() ),
+				'pattern directory rest_prepare_block_pattern receives raw remote object and full prepared data before _fields filtering',
+				array(
+					'prepareCalls' => $prepare_calls,
+					'expectedKeys' => $expected_prepare_keys,
+				)
+			);
+		} finally {
+			\remove_filter( 'rest_prepare_block_pattern', $prepare_filter, 10 );
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.pattern-directory-fields-prepare-projection',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 7 ) )
+		);
+	}
+
+	private static function check_url_details_controller( \ComponentFuzz\FuzzContext $ctx ): array {
+		self::reset_runtime_state();
+		self::seed_current_user( $ctx, 'url' );
+		self::set_granted_caps( array( 'edit_posts' ) );
+
+		$failures       = array();
+		$case           = self::url_case( $ctx );
+		$http_calls     = array();
+		$request_args   = array();
+		$prepare_calls  = array();
+		$cache_ttls     = array();
+		$transient_sets = array();
+
+		$http_filter = static function ( $preempt, array $parsed_args, string $url ) use ( &$http_calls, $case ) {
+			unset( $preempt );
+			$http_calls[] = array(
+				'url'  => $url,
+				'args' => $parsed_args,
+			);
+
+			if ( $case['url'] === $url || $case['urlNoTrailingSlash'] === $url ) {
+				return self::http_response( $case['html'], 200 );
+			}
+
+			if ( $case['dataIconUrl'] === $url ) {
+				return self::http_response( $case['dataIconHtml'], 200 );
+			}
+
+			if ( $case['fallbackHeadUrl'] === $url ) {
+				return self::http_response( $case['fallbackHeadHtml'], 200 );
+			}
+
+			if ( $case['non200Url'] === $url ) {
+				return self::http_response( '<html><head><title>Unavailable</title></head></html>', 503 );
+			}
+
+			if ( $case['emptyUrl'] === $url ) {
+				return self::http_response( '', 200 );
+			}
+
+			return new \WP_Error( 'component_fuzz_unregistered_http', 'Unexpected live HTTP from URL details: ' . $url );
+		};
+
+		$request_args_filter = static function ( array $args, string $url ) use ( &$request_args ): array {
+			$request_args[] = array(
+				'url'  => $url,
+				'args' => $args,
+			);
+			return $args;
+		};
+
+		$ttl_filter = static function ( int $ttl ) use ( &$cache_ttls, $case ): int {
+			$cache_ttls[] = $ttl;
+			return $case['cacheTtl'];
+		};
+
+		$prepare_filter = static function ( \WP_REST_Response $response, string $url, \WP_REST_Request $request, string $remote_body ) use ( &$prepare_calls ): \WP_REST_Response {
+			$prepare_calls[] = array(
+				'url'        => $url,
+				'method'     => $request->get_method(),
+				'bodyLength' => strlen( $remote_body ),
+			);
+			return $response;
+		};
+
+		$transient_action = static function ( string $transient, $value, int $expiration ) use ( &$transient_sets ): void {
+			$transient_sets[] = array(
+				'transient'  => $transient,
+				'expiration' => $expiration,
+				'valueType'   => is_object( $value ) ? get_class( $value ) : gettype( $value ),
+			);
+		};
+
+		\add_filter( 'pre_http_request', $http_filter, 10, 3 );
+		\add_filter( 'rest_url_details_http_request_args', $request_args_filter, 10, 2 );
+		\add_filter( 'rest_url_details_cache_expiration', $ttl_filter );
+		\add_filter( 'rest_prepare_url_details', $prepare_filter, 10, 4 );
+		\add_action( 'set_site_transient', $transient_action, 10, 3 );
+
+		try {
+			$server     = self::fresh_server();
+			$controller = new \WP_REST_URL_Details_Controller();
+			$controller->register_routes();
+
+			$response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['url'] )
+				)
+			);
+			$data     = $response->get_data();
+
+			self::collect_failure(
+				$failures,
+				200 === $response->get_status()
+					&& $case['expectedTitle'] === ( $data['title'] ?? null )
+					&& $case['expectedIcon'] === ( $data['icon'] ?? null )
+					&& $case['expectedDescription'] === ( $data['description'] ?? null )
+					&& $case['expectedImage'] === ( $data['image'] ?? null )
+					&& self::schema_valid( $data, $controller->get_item_schema() ),
+				'URL details parses head metadata, strips tags/entities, absolutizes relative media, and validates schema',
+				array(
+					'status' => $response->get_status(),
+					'data'   => $data,
+				)
+			);
+
+			$first_args = $request_args[0]['args'] ?? array();
+			self::collect_failure(
+				$failures,
+				1 === count( $http_calls )
+					&& 150 * \KB_IN_BYTES === (int) ( $first_args['limit_response_size'] ?? 0 )
+					&& isset( $first_args['user-agent'] )
+					&& str_starts_with( (string) $first_args['user-agent'], 'WP-URLDetails/' )
+					&& self::latest_transient_has( $transient_sets, 'g_url_details_response_', $case['cacheTtl'] )
+					&& \HOUR_IN_SECONDS === ( $cache_ttls[0] ?? null ),
+				'URL details uses bounded WP HTTP args, custom user agent, and filtered success-cache TTL',
+				array(
+					'httpCalls'     => $http_calls,
+					'requestArgs'   => $request_args,
+					'cacheTtls'     => $cache_ttls,
+					'transientSets' => $transient_sets,
+				)
+			);
+
+			$cached_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['urlNoTrailingSlash'] )
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				200 === $cached_response->get_status()
+					&& $data === $cached_response->get_data()
+					&& 1 === count( $http_calls )
+					&& 2 === count( $prepare_calls ),
+				'URL details cache key untrailingslashes URL and cache hits still run prepare filter without HTTP',
+				array(
+					'httpCallCount'    => count( $http_calls ),
+					'prepareCallCount' => count( $prepare_calls ),
+				)
+			);
+
+			$data_icon_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['dataIconUrl'] )
+				)
+			);
+			$data_icon_data     = $data_icon_response->get_data();
+
+			self::collect_failure(
+				$failures,
+				200 === $data_icon_response->get_status()
+					&& $case['dataIcon'] === ( $data_icon_data['icon'] ?? null )
+					&& '' === ( $data_icon_data['image'] ?? null ),
+				'URL details preserves data URL icons without absolutizing them',
+				array( 'data' => $data_icon_data )
+			);
+
+			$fallback_head_response = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['fallbackHeadUrl'] )
+				)
+			);
+			$fallback_head_data     = $fallback_head_response->get_data();
+
+			self::collect_failure(
+				$failures,
+				200 === $fallback_head_response->get_status()
+					&& $case['expectedFallbackTitle'] === ( $fallback_head_data['title'] ?? null )
+					&& $case['expectedFallbackIcon'] === ( $fallback_head_data['icon'] ?? null )
+					&& $case['expectedFallbackDescription'] === ( $fallback_head_data['description'] ?? null )
+					&& $case['expectedFallbackImage'] === ( $fallback_head_data['image'] ?? null )
+					&& self::schema_valid( $fallback_head_data, $controller->get_item_schema() ),
+				'URL details extracts unclosed head metadata before body and preserves first matching description/image variants',
+				array(
+					'status' => $fallback_head_response->get_status(),
+					'data'   => $fallback_head_data,
+				)
+			);
+
+			$non200 = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['non200Url'] )
+				)
+			);
+			$empty  = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['emptyUrl'] )
+				)
+			);
+			$invalid = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => 'ftp://example.test/' . $case['token'] )
+				)
+			);
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $non200, 'no_response', 404 )
+					&& self::response_error_ok( $empty, 'no_content', 404 )
+					&& self::response_error_ok( $invalid, 'rest_invalid_param', 400 ),
+				'URL details rejects unsafe URLs and distinguishes non-200 from empty successful bodies',
+				array(
+					'non200'  => $non200,
+					'empty'   => $empty,
+					'invalid' => $invalid,
+				)
+			);
+
+			self::set_granted_caps( array() );
+			self::set_denied_caps( array( 'edit_posts' ) );
+			self::seed_current_user( $ctx, 'url-denied' );
+			$denied = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['url'] )
+				)
+			);
+
+			self::clear_caps();
+			\wp_set_current_user( 0 );
+			$logged_out = self::dispatch(
+				$server,
+				self::request(
+					'GET',
+					'/wp-block-editor/v1/url-details',
+					array( 'url' => $case['url'] )
+				)
+			);
+
+			self::seed_current_user( $ctx, 'url-fallback' );
+			$fallback_cap = self::register_rest_visible_post_type_with_cap( $ctx, 'url' );
+			self::set_granted_caps( array( $fallback_cap ) );
+			self::set_denied_caps( array( 'edit_posts' ) );
+			$fallback_allowed = $controller->permissions_check();
+
+			self::collect_failure(
+				$failures,
+				self::response_error_ok( $denied, 'rest_cannot_view_url_details', 403 )
+					&& self::response_error_ok( $logged_out, 'rest_cannot_view_url_details', 401 )
+					&& true === $fallback_allowed,
+				'URL details permission supports edit_posts or REST-visible post-type edit cap, and denies others',
+				array(
+					'denied'          => $denied,
+					'loggedOut'       => $logged_out,
+					'fallbackCap'     => $fallback_cap,
+					'fallbackAllowed' => $fallback_allowed,
+				)
+			);
+		} finally {
+			\remove_filter( 'pre_http_request', $http_filter, 10 );
+			\remove_filter( 'rest_url_details_http_request_args', $request_args_filter, 10 );
+			\remove_filter( 'rest_url_details_cache_expiration', $ttl_filter );
+			\remove_filter( 'rest_prepare_url_details', $prepare_filter, 10 );
+			\remove_action( 'set_site_transient', $transient_action, 10 );
+		}
+
+		return self::row(
+			$ctx,
+			'rest-directory-services.url-details-parse-cache-permissions',
+			array() === $failures,
+			array( 'failures' => array_slice( $failures, 0, 7 ) )
+		);
+	}
+
+	private static function install_scoped_filters(): void {
+		\add_filter( 'user_has_cap', array( __CLASS__, 'filter_user_has_cap' ), 10, 4 );
+	}
+
+	private static function reset_runtime_state(): void {
+		$_GET     = array();
+		$_POST    = array();
+		$_REQUEST = array();
+
+		$_SERVER['HTTP_HOST']       = 'example.test';
+		$_SERVER['HTTP_USER_AGENT'] = 'component-fuzz/rest-directory-services';
+		$_SERVER['HTTPS']           = 'on';
+		$_SERVER['REMOTE_ADDR']     = '198.51.100.77';
+		$_SERVER['REQUEST_METHOD']  = 'GET';
+		$_SERVER['REQUEST_URI']     = '/wp-json/';
+		$_SERVER['SERVER_PORT']     = '443';
+
+		self::clear_caps();
+
+		if ( isset( $GLOBALS['wpdb'] ) && $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub && method_exists( $GLOBALS['wpdb'], 'component_fuzz_reset_content' ) ) {
+			$GLOBALS['wpdb']->component_fuzz_reset_content();
+		}
+
+		if ( function_exists( 'wp_cache_flush' ) ) {
+			\wp_cache_flush();
+		}
+	}
+
+	private static function reset_static_state(): void {
+		self::clear_caps();
+	}
+
+	private static function fresh_server(): \WP_REST_Server {
+		$server                    = new \WP_REST_Server();
+		$GLOBALS['wp_rest_server'] = $server;
+		if ( function_exists( 'rest_api_default_filters' ) ) {
+			\rest_api_default_filters();
+		}
+		return $server;
+	}
+
+	private static function dispatch( \WP_REST_Server $server, \WP_REST_Request $request ): \WP_REST_Response {
+		$response = \rest_ensure_response( $server->dispatch( $request ) );
+		if ( \is_wp_error( $response ) ) {
+			$data   = $response->get_error_data();
+			$status = is_array( $data ) && isset( $data['status'] ) ? (int) $data['status'] : 500;
+			return new \WP_REST_Response(
+				array(
+					'code'    => $response->get_error_code(),
+					'message' => $response->get_error_message(),
+					'data'    => array( 'status' => $status ),
+				),
+				$status
+			);
+		}
+
+		return \apply_filters( 'rest_post_dispatch', $response, $server, $request );
+	}
+
+	private static function seed_current_user( \ComponentFuzz\FuzzContext $ctx, string $label ): int {
+		$token = self::token( $ctx, $label );
+		$user  = \wp_insert_user(
+			array(
+				'display_name' => 'Directory Services ' . $label,
+				'user_email'   => 'rest-directory-' . $token . '@example.test',
+				'user_login'   => 'cfz_dir_' . $token,
+				'user_pass'    => 'pass-' . $token,
+			)
+		);
+		if ( \is_wp_error( $user ) ) {
+			throw new \RuntimeException( 'Could not create REST directory services user: ' . $user->get_error_code() );
+		}
+
+		\wp_set_current_user( (int) $user );
+		return (int) $user;
+	}
+
+	private static function set_granted_caps( array $caps ): void {
+		self::$granted_caps = array_fill_keys( $caps, true );
+	}
+
+	private static function set_denied_caps( array $caps ): void {
+		self::$denied_caps = array_fill_keys( $caps, true );
+	}
+
+	private static function clear_caps(): void {
+		self::$granted_caps = array();
+		self::$denied_caps  = array();
+	}
+
+	private static function request( string $method, string $route, array $query_params = array(), array $url_params = array(), array $body_params = array() ): \WP_REST_Request {
+		$request = new \WP_REST_Request( $method, $route );
+		if ( array() !== $query_params ) {
+			$request->set_query_params( $query_params );
+		}
+		if ( array() !== $url_params ) {
+			$request->set_url_params( $url_params );
+		}
+		if ( array() !== $body_params ) {
+			$request->set_body_params( $body_params );
+		}
+		return $request;
+	}
+
+	private static function directory_api_matrix_cases( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token = self::token( $ctx, 'direct-api-matrix' );
+		$cases = array(
+			self::directory_api_case(
+				'plugin-query-defaults-' . $token,
+				'plugin',
+				'query_plugins',
+				'http',
+				array( 'search' => 'plugin matrix ' . $token ),
+				false,
+				array(
+					'httpResult' => 'success',
+					'slug'       => 'matrix-plugin-' . $token,
+				)
+			),
+			self::directory_api_case(
+				'plugin-info-explicit-' . $token,
+				'plugin',
+				'plugin_information',
+				'http',
+				array(
+					'slug'       => 'matrix-plugin-info-' . $token,
+					'locale'     => 'fr_FR',
+					'wp_version' => '6.8',
+				),
+				true,
+				array( 'httpResult' => 'success' )
+			),
+			self::directory_api_case(
+				'plugin-info-short-' . $token,
+				'plugin',
+				'plugin_information',
+				'short',
+				array( 'slug' => 'matrix-plugin-short-' . $token ),
+				false
+			),
+			self::directory_api_case(
+				'plugin-info-short-error-' . $token,
+				'plugin',
+				'plugin_information',
+				'short-error',
+				array( 'slug' => 'matrix-plugin-short-error-' . $token ),
+				true,
+				array(
+					'shortErrorCode' => 'component_fuzz_plugin_short_error',
+					'errorMessage'   => 'Generated plugin short-circuit error ' . $token,
+				)
+			),
+			self::directory_api_case(
+				'plugin-query-malformed-' . $token,
+				'plugin',
+				'query_plugins',
+				'http',
+				array(
+					'search'   => 'plugin bad json ' . $token,
+					'per_page' => 7,
+				),
+				true,
+				array( 'httpResult' => 'malformed' )
+			),
+			self::directory_api_case(
+				'plugin-info-error-' . $token,
+				'plugin',
+				'plugin_information',
+				'http',
+				array( 'slug' => 'matrix-plugin-error-' . $token ),
+				false,
+				array(
+					'httpResult'  => 'api-error',
+					'errorMessage'=> 'Generated plugin API error ' . $token,
+				)
+			),
+			self::directory_api_case(
+				'plugin-info-terminal-fallback-' . $token,
+				'plugin',
+				'plugin_information',
+				'fallback-error',
+				array( 'slug' => 'matrix-plugin-terminal-fallback-' . $token ),
+				false
+			),
+			self::directory_api_case(
+				'theme-query-explicit-' . $token,
+				'theme',
+				'query_themes',
+				'http',
+				array(
+					'search'   => 'theme matrix ' . $token,
+					'per_page' => 9,
+				),
+				false,
+				array(
+					'httpResult' => 'success',
+					'slug'       => 'matrix-theme-' . $token,
+				)
+			),
+			self::directory_api_case(
+				'theme-info-explicit-' . $token,
+				'theme',
+				'theme_information',
+				'http',
+				array(
+					'slug'       => 'matrix-theme-info-' . $token,
+					'locale'     => 'de_DE',
+					'wp_version' => '6.7',
+				),
+				true,
+				array( 'httpResult' => 'success' )
+			),
+			self::directory_api_case(
+				'theme-feature-list-' . $token,
+				'theme',
+				'feature_list',
+				'http',
+				array(),
+				false,
+				array( 'httpResult' => 'success' )
+			),
+			self::directory_api_case(
+				'theme-info-short-' . $token,
+				'theme',
+				'theme_information',
+				'short',
+				array( 'slug' => 'matrix-theme-short-' . $token ),
+				false
+			),
+			self::directory_api_case(
+				'theme-info-short-error-' . $token,
+				'theme',
+				'theme_information',
+				'short-error',
+				array( 'slug' => 'matrix-theme-short-error-' . $token ),
+				true,
+				array(
+					'shortErrorCode' => 'component_fuzz_theme_short_error',
+					'errorMessage'   => 'Generated theme short-circuit error ' . $token,
+				)
+			),
+			self::directory_api_case(
+				'theme-query-error-' . $token,
+				'theme',
+				'query_themes',
+				'http',
+				array( 'search' => 'theme api error ' . $token ),
+				true,
+				array(
+					'httpResult'  => 'api-error',
+					'errorMessage'=> 'Generated theme API error ' . $token,
+				)
+			),
+			self::directory_api_case(
+				'theme-info-terminal-fallback-' . $token,
+				'theme',
+				'theme_information',
+				'fallback-error',
+				array( 'slug' => 'matrix-theme-terminal-fallback-' . $token ),
+				false
+			),
+		);
+
+		for ( $i = 0; $i < 4; ++$i ) {
+			$case_ctx = $ctx->fork( 'generated-directory-api-case-' . $i );
+			$service  = $case_ctx->choice( array( 'plugin', 'theme' ) );
+			$actions  = 'plugin' === $service
+				? array( 'query_plugins', 'plugin_information' )
+				: array( 'query_themes', 'theme_information', 'feature_list' );
+			$action   = $case_ctx->choice( $actions );
+			$mode     = $case_ctx->weightedChoice(
+				array(
+					array( 7, 'http' ),
+					array( 3, 'short' ),
+					array( 2, 'short-error' ),
+					array( 1, 'fallback-error' ),
+				)
+			);
+			if ( in_array( $mode, array( 'short', 'short-error', 'fallback-error' ), true ) && ! in_array( $action, array( 'plugin_information', 'theme_information' ), true ) ) {
+				$mode = 'http';
+			}
+
+			$args = array();
+			if ( in_array( $action, array( 'query_plugins', 'query_themes' ), true ) ) {
+				$args['search'] = $service . ' generated search ' . $i . ' ' . $token;
+				if ( $case_ctx->bool( 65 ) ) {
+					$args['per_page'] = $case_ctx->int( 1, 36 );
+				}
+			} elseif ( in_array( $action, array( 'plugin_information', 'theme_information' ), true ) ) {
+				$args['slug'] = 'matrix-' . $service . '-generated-' . $i . '-' . $token;
+			}
+			if ( $case_ctx->bool( 40 ) ) {
+				$args['locale'] = $case_ctx->choice( array( 'es_ES', 'ja', 'en_GB' ) );
+			}
+			if ( $case_ctx->bool( 40 ) ) {
+				$args['wp_version'] = $case_ctx->choice( array( '6.6', '6.7', '6.8' ) );
+			}
+
+			$http_result = 'http' === $mode
+				? $case_ctx->weightedChoice(
+					array(
+						array( 7, 'success' ),
+						array( 2, 'malformed' ),
+						array( 2, 'api-error' ),
+					)
+				)
+				: 'success';
+
+			$cases[] = self::directory_api_case(
+				'generated-' . $i . '-' . $service . '-' . $action,
+				$service,
+				$action,
+				$mode,
+				$args,
+				$case_ctx->bool(),
+				array(
+					'httpResult'  => $http_result,
+					'errorMessage'=> 'Generated ' . $service . ' API matrix error ' . $i . ' ' . $token,
+					'shortErrorCode' => 'component_fuzz_generated_' . $service . '_short_error',
+				)
+			);
+		}
+
+		return $cases;
+	}
+
+	private static function directory_api_case( string $id, string $service, string $action, string $mode, array $args, bool $object_args, array $overrides = array() ): array {
+		$filter_added = 'matrix-filter-' . substr( sha1( $id . ':filter' ), 0, 8 );
+		$slug         = $overrides['slug'] ?? ( $args['slug'] ?? 'matrix-' . $service . '-' . substr( sha1( $id . ':slug' ), 0, 10 ) );
+		$search       = $args['search'] ?? null;
+
+		return array(
+			'id'          => $id,
+			'service'     => $service,
+			'action'      => $action,
+			'mode'        => $mode,
+			'args'        => $object_args ? (object) $args : $args,
+			'rawArgs'     => $args,
+			'filterAdded' => $filter_added,
+			'httpResult'  => $overrides['httpResult'] ?? 'success',
+			'errorMessage'=> $overrides['errorMessage'] ?? 'Generated directory API error for ' . $id,
+			'shortErrorCode' => $overrides['shortErrorCode'] ?? 'component_fuzz_directory_short_error',
+			'slug'        => $slug,
+			'search'      => $search,
+		);
+	}
+
+	private static function directory_api_short_result( array $case, $args ) {
+		$slug = is_object( $args ) && isset( $args->slug ) ? (string) $args->slug : $case['slug'];
+
+		return (object) array(
+			'name'    => ( 'plugin' === $case['service'] ? 'Short Plugin ' : 'Short Theme ' ) . $case['id'],
+			'slug'    => $slug,
+			'version' => '9.' . strlen( $case['id'] ) . '.0',
+		);
+	}
+
+	private static function directory_api_http_payload( array $case ) {
+		$slug = (string) $case['slug'];
+
+		if ( 'plugin' === $case['service'] ) {
+			if ( 'query_plugins' === $case['action'] ) {
+				return array(
+					'info'    => array(
+						'page'    => 1,
+						'pages'   => 1,
+						'results' => 1,
+					),
+					'plugins' => array(
+						array(
+							'name'    => 'Generated Plugin ' . $case['id'],
+							'slug'    => $slug,
+							'version' => '1.0.' . strlen( $case['id'] ),
+						),
+					),
+				);
+			}
+
+			return array(
+				'name'     => 'Generated Plugin Info ' . $case['id'],
+				'slug'     => $slug,
+				'version'  => '2.0.' . strlen( $case['id'] ),
+				'sections' => array( 'description' => 'Generated plugin description.' ),
+			);
+		}
+
+		if ( 'query_themes' === $case['action'] ) {
+			return array(
+				'info'   => array(
+					'page'    => 1,
+					'pages'   => 1,
+					'results' => 1,
+				),
+				'themes' => array(
+					array(
+						'name'    => 'Generated Theme ' . $case['id'],
+						'slug'    => $slug,
+						'version' => '1.0.' . strlen( $case['id'] ),
+					),
+				),
+			);
+		}
+
+		if ( 'feature_list' === $case['action'] ) {
+			return array(
+				'Colors'  => array(
+					'blue-' . substr( sha1( $case['id'] ), 0, 4 ) => 'Generated Blue',
+				),
+				'Layouts' => array(
+					'grid' => 'Grid',
+				),
+			);
+		}
+
+		return array(
+			'name'    => 'Generated Theme Info ' . $case['id'],
+			'slug'    => $slug,
+			'version' => '2.0.' . strlen( $case['id'] ),
+		);
+	}
+
+	private static function directory_api_matrix_case_matches( array $case, $result, ?array $args_event, ?array $api_event, ?array $result_event, array $http_events, string $default_locale, string $default_wp_version, string $expected_home ): bool {
+		if (
+			! self::directory_api_args_event_matches( $case, $args_event, $default_locale, $default_wp_version )
+			|| ! self::directory_api_event_basics_match( $case, $api_event )
+			|| ! self::directory_api_event_basics_match( $case, $result_event )
+		) {
+			return false;
+		}
+
+		if ( 'short' === $case['mode'] ) {
+			return array() === $http_events
+				&& self::directory_api_result_matches_case( $case, $result )
+				&& (
+					( 'plugin' === $case['service'] && true === ( $result_event['external'] ?? null ) )
+					|| ( 'theme' === $case['service'] && null === ( $result_event['external'] ?? null ) )
+				);
+		}
+
+		if ( 'short-error' === $case['mode'] ) {
+			return array() === $http_events
+				&& \is_wp_error( $result )
+				&& $case['shortErrorCode'] === $result->get_error_code()
+				&& $case['errorMessage'] === $result->get_error_message()
+				&& 'WP_Error' === ( $result_event['type'] ?? null )
+				&& $case['shortErrorCode'] === ( $result_event['errorCode'] ?? null );
+		}
+
+		if ( 'fallback-error' === $case['mode'] ) {
+			return self::directory_api_terminal_fallback_matches( $case, $result, $result_event, $http_events, $default_locale, $default_wp_version, $expected_home );
+		}
+
+		if ( 1 !== count( $http_events ) || ! self::directory_api_http_event_matches( $case, $http_events[0], $default_locale, $default_wp_version, $expected_home ) ) {
+			return false;
+		}
+
+		if ( 'malformed' === $case['httpResult'] ) {
+			return \is_wp_error( $result )
+				&& self::directory_api_error_code( $case ) === $result->get_error_code()
+				&& '{generated-not-json' === $result->get_error_data()
+				&& 'WP_Error' === ( $result_event['type'] ?? null );
+		}
+
+		if ( 'api-error' === $case['httpResult'] ) {
+			return \is_wp_error( $result )
+				&& self::directory_api_error_code( $case ) === $result->get_error_code()
+				&& $case['errorMessage'] === $result->get_error_message()
+				&& 'WP_Error' === ( $result_event['type'] ?? null );
+		}
+
+		return self::directory_api_result_matches_case( $case, $result )
+			&& self::directory_api_result_type( $result ) === ( $result_event['type'] ?? null );
+	}
+
+	private static function directory_api_args_event_matches( array $case, ?array $event, string $default_locale, string $default_wp_version ): bool {
+		if ( null === $event || ! self::directory_api_event_basics_match( $case, $event ) ) {
+			return false;
+		}
+
+		$expected_per_page = null;
+		if ( isset( $case['rawArgs']['per_page'] ) ) {
+			$expected_per_page = $case['rawArgs']['per_page'];
+		} elseif ( in_array( $case['action'], array( 'query_plugins', 'query_themes' ), true ) ) {
+			$expected_per_page = 24;
+		}
+
+		return true === ( $event['wasObject'] ?? null )
+			&& $case['id'] === ( $event['marker'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['slug'] ?? null, $event['slug'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['search'] ?? null, $event['search'] ?? null )
+			&& self::same_nullable_scalar( $expected_per_page, $event['perPage'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['locale'] ?? $default_locale, $event['locale'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['wp_version'] ?? $default_wp_version, $event['wpVersion'] ?? null )
+			&& $case['filterAdded'] === ( $event['filterAdded'] ?? null );
+	}
+
+	private static function directory_api_event_basics_match( array $case, ?array $event ): bool {
+		return null !== $event
+			&& $case['id'] === ( $event['id'] ?? null )
+			&& $case['service'] === ( $event['service'] ?? null )
+			&& $case['action'] === ( $event['action'] ?? null );
+	}
+
+	private static function directory_api_http_event_matches( array $case, array $event, string $default_locale, string $default_wp_version, string $expected_home ): bool {
+		$request       = $event['query']['request'] ?? array();
+		$expected_path = 'plugin' === $case['service'] ? '/plugins/info/1.2/' : '/themes/info/1.2/';
+		$expected_per_page = null;
+		if ( isset( $case['rawArgs']['per_page'] ) ) {
+			$expected_per_page = $case['rawArgs']['per_page'];
+		} elseif ( in_array( $case['action'], array( 'query_plugins', 'query_themes' ), true ) ) {
+			$expected_per_page = 24;
+		}
+
+		return 'api.wordpress.org' === ( $event['host'] ?? null )
+			&& $expected_path === ( $event['path'] ?? null )
+			&& $case['action'] === ( $event['query']['action'] ?? null )
+			&& is_array( $request )
+			&& $case['id'] === ( $request['component_fuzz_matrix_marker'] ?? null )
+			&& $case['filterAdded'] === ( $request['component_fuzz_filter_added'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['slug'] ?? null, $request['slug'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['search'] ?? null, $request['search'] ?? null )
+			&& self::same_nullable_scalar( $expected_per_page, $request['per_page'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['locale'] ?? $default_locale, $request['locale'] ?? null )
+			&& self::same_nullable_scalar( $case['rawArgs']['wp_version'] ?? $default_wp_version, $request['wp_version'] ?? null )
+			&& 15 === (int) ( $event['timeout'] ?? 0 )
+			&& is_string( $event['userAgent'] ?? null )
+			&& str_contains( $event['userAgent'], 'WordPress/' )
+			&& str_contains( $event['userAgent'], $expected_home );
+	}
+
+	private static function directory_api_terminal_fallback_matches( array $case, $result, ?array $result_event, array $http_events, string $default_locale, string $default_wp_version, string $expected_home ): bool {
+		if ( ! \is_wp_error( $result ) || 'WP_Error' !== ( $result_event['type'] ?? null ) || self::directory_api_error_code( $case ) !== $result->get_error_code() ) {
+			return false;
+		}
+
+		$count = count( $http_events );
+		if ( ! in_array( $count, array( 1, 2 ), true ) ) {
+			return false;
+		}
+
+		foreach ( $http_events as $event ) {
+			if ( ! self::directory_api_http_event_matches( $case, $event, $default_locale, $default_wp_version, $expected_home ) ) {
+				return false;
+			}
+		}
+
+		$schemes = array_map(
+			static fn ( array $event ): ?string => $event['scheme'] ?? null,
+			$http_events
+		);
+		if ( 2 === $count && array( 'https', 'http' ) !== $schemes ) {
+			return false;
+		}
+		if ( 1 === $count && array( 'http' ) !== $schemes ) {
+			return false;
+		}
+
+		return self::directory_api_terminal_transport_message( $case, $count ) === $result->get_error_data();
+	}
+
+	private static function directory_api_terminal_transport_message( array $case, int $hit ): string {
+		return 'Generated terminal directory API transport failure ' . $case['id'] . ' hit ' . $hit;
+	}
+
+	private static function directory_api_result_matches_case( array $case, $result ): bool {
+		if ( \is_wp_error( $result ) ) {
+			return false;
+		}
+
+		if ( 'plugin' === $case['service'] ) {
+			if ( 'query_plugins' === $case['action'] ) {
+				return is_object( $result )
+					&& is_array( $result->plugins ?? null )
+					&& isset( $result->plugins[0] )
+					&& is_array( $result->plugins[0] )
+					&& $case['slug'] === ( $result->plugins[0]['slug'] ?? null );
+			}
+
+			return is_object( $result )
+				&& $case['slug'] === ( $result->slug ?? null )
+				&& ( 'short' !== $case['mode'] || true === ( $result->external ?? null ) );
+		}
+
+		if ( 'query_themes' === $case['action'] ) {
+			return is_object( $result )
+				&& is_array( $result->themes ?? null )
+				&& isset( $result->themes[0] )
+				&& is_object( $result->themes[0] )
+				&& $case['slug'] === ( $result->themes[0]->slug ?? null );
+		}
+
+		if ( 'feature_list' === $case['action'] ) {
+			return is_array( $result )
+				&& isset( $result['Colors'], $result['Layouts'] )
+				&& is_array( $result['Colors'] )
+				&& is_array( $result['Layouts'] );
+		}
+
+		return is_object( $result )
+			&& $case['slug'] === ( $result->slug ?? null )
+			&& ! isset( $result->external );
+	}
+
+	private static function directory_api_error_code( array $case ): string {
+		return 'plugin' === $case['service'] ? 'plugins_api_failed' : 'themes_api_failed';
+	}
+
+	private static function directory_api_result_type( $result ): string {
+		if ( \is_wp_error( $result ) ) {
+			return 'WP_Error';
+		}
+		if ( is_object( $result ) ) {
+			return 'object';
+		}
+		if ( is_array( $result ) ) {
+			return 'array';
+		}
+		return gettype( $result );
+	}
+
+	private static function last_directory_api_event( array $events, string $id ): ?array {
+		for ( $i = count( $events ) - 1; $i >= 0; --$i ) {
+			if ( $id === ( $events[ $i ]['id'] ?? null ) ) {
+				return $events[ $i ];
+			}
+		}
+
+		return null;
+	}
+
+	private static function same_nullable_scalar( $expected, $actual ): bool {
+		if ( null === $expected ) {
+			return null === $actual;
+		}
+
+		return null !== $actual && (string) $expected === (string) $actual;
+	}
+
+	private static function describe_directory_api_case( array $case ): array {
+		return array(
+			'id'         => $case['id'],
+			'service'    => $case['service'],
+			'action'     => $case['action'],
+			'mode'       => $case['mode'],
+			'httpResult' => $case['httpResult'],
+			'rawArgs'    => $case['rawArgs'],
+			'slug'       => $case['slug'],
+		);
+	}
+
+	private static function block_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token       = self::token( $ctx, 'block' );
+		$slug        = 'cfz-block-' . $token;
+		$description = implode( ' ', array_map( static fn ( int $i ): string => 'word' . $i, range( 1, 38 ) ) );
+		$updated     = '2025-04-03 02:01:09';
+		$plugin      = array(
+			'name'                => 'Component Fuzz Block Plugin ' . $token,
+			'short_description'   => $description,
+			'slug'                => $slug,
+			'rating'              => 85,
+			'num_ratings'         => '17',
+			'active_installs'     => '2500',
+			'author_block_rating' => 70,
+			'author_block_count'  => '6',
+			'author'              => '<a href="https://profiles.wordpress.org/fuzz">Fuzz Author ' . $token . '</a>',
+			'icons'               => array(),
+			'last_updated'        => $updated,
+			'blocks'              => array(
+				array(
+					'name'  => 'component-fuzz/' . $slug,
+					'title' => '',
+				),
+				array(
+					'name'  => 'component-fuzz/ignored-' . $slug,
+					'title' => 'Ignored block title',
+				),
+			),
+		);
+
+		return array(
+			'token'               => $token,
+			'term'                => 'fuzz ' . $token,
+			'perPage'             => $ctx->int( 2, 12 ),
+			'page'                => $ctx->int( 1, 5 ),
+			'plugin'              => $plugin,
+			'emptyBlocksPlugin'   => array_merge(
+				$plugin,
+				array(
+					'name'   => 'Skipped Plugin ' . $token,
+					'slug'   => $slug . '-empty',
+					'blocks' => array(),
+				)
+			),
+			'firstBlockName'      => 'component-fuzz/' . $slug,
+			'expectedAuthor'      => \wp_strip_all_tags( $plugin['author'] ),
+			'expectedDescription' => \wp_trim_words( $description, 30, '...' ),
+			'expectedLastUpdated' => gmdate( 'Y-m-d\TH:i:s', strtotime( $updated ) ),
+		);
+	}
+
+	private static function pattern_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token       = self::token( $ctx, 'pattern' );
+		$raw_pattern = array(
+			'id'                 => (string) $ctx->int( 101, 999 ),
+			'title'              => array( 'rendered' => '<b>Pattern &amp; Title ' . $token . '</b>' ),
+			'pattern_content'    => '<!-- wp:paragraph --><p>Allowed ' . $token . '</p><script>bad()</script><!-- /wp:paragraph -->',
+			'category_slugs'     => array( 'Hero Section', 'News & Updates' ),
+			'meta'               => array(
+				'wpop_keywords'       => 'alpha,<b>beta</b>, spaces  ',
+				'wpop_description'    => '<em>Description &amp; details ' . $token . '</em>',
+				'wpop_viewport_width' => '1200px',
+				'wpop_block_types'    => array( 'core/post-content', '<b>core/query</b>' ),
+			),
+			'extra_remote_field' => 'must not be returned',
+		);
+
+		$query = array(
+			'search'   => 'pattern ' . $token,
+			'category' => $ctx->int( 1, 20 ),
+			'keyword'  => $ctx->int( 21, 40 ),
+			'slug'     => array( 'beta-' . $token, 'alpha-' . $token ),
+			'per_page' => $ctx->int( 1, 15 ),
+			'page'     => $ctx->int( 1, 4 ),
+			'offset'   => $ctx->int( 0, 3 ),
+			'order'    => $ctx->choice( array( 'asc', 'desc' ) ),
+			'orderby'  => $ctx->choice( array( 'date', 'title', 'favorite_count' ) ),
+		);
+
+		return array(
+			'token'      => $token,
+			'query'      => $query,
+			'rawPattern' => json_decode( \wp_json_encode( $raw_pattern ) ),
+			'expected'   => array(
+				'id'             => absint( $raw_pattern['id'] ),
+				'title'          => \sanitize_text_field( $raw_pattern['title']['rendered'] ),
+				'content'        => \wp_kses_post( $raw_pattern['pattern_content'] ),
+				'categories'     => array_map( 'sanitize_title', $raw_pattern['category_slugs'] ),
+				'keywords'       => array_map( 'sanitize_text_field', explode( ',', $raw_pattern['meta']['wpop_keywords'] ) ),
+				'description'    => \sanitize_text_field( $raw_pattern['meta']['wpop_description'] ),
+				'viewport_width' => absint( $raw_pattern['meta']['wpop_viewport_width'] ),
+				'block_types'    => array_map( 'sanitize_text_field', $raw_pattern['meta']['wpop_block_types'] ),
+			),
+		);
+	}
+
+	private static function url_case( \ComponentFuzz\FuzzContext $ctx ): array {
+		$token          = self::token( $ctx, 'url' );
+		$url            = 'https://example.test/url-details-' . $token . '/';
+		$data_icon      = 'data:image/svg+xml;base64,PHN2Zy8+';
+		$html           = '<!doctype html><html><head><title> Fuzz &amp; <b>Title ' . $token . '</b> </title>'
+			. '<link rel="icon" href="/assets/favicon-' . $token . '.ico">'
+			. '<meta name="description" content="Remote &amp; <strong>description ' . $token . '</strong>">'
+			. '<meta property="og:image" content="/images/card-' . $token . '.png">'
+			. '</head><body>ignored</body></html>';
+		$data_icon_html = '<html><head><title>Data Icon</title><link rel="icon" href="' . $data_icon . '"></head></html>';
+		$fallback_html  = '<!doctype html><html><head data-fuzz="' . $token . '"><title>Fallback &amp; <em>Title ' . $token . '</em></title>'
+			. '<link rel="shortcut icon" href="favicons/fallback-' . $token . '.ico">'
+			. '<meta name="og:description" content="OG &amp; <strong>description ' . $token . '</strong>">'
+			. '<meta name="description" content="Ignored later description ' . $token . '">'
+			. '<meta property="og:image:url" content="images/fallback-' . $token . '.png">'
+			. '<meta property="og:image" content="images/ignored-' . $token . '.png">'
+			. '<body><title>Ignored Body Title</title><meta name="description" content="ignored body ' . $token . '"></body></html>';
+
+		return array(
+			'token'                  => $token,
+			'url'                    => $url,
+			'urlNoTrailingSlash'     => untrailingslashit( $url ),
+			'dataIconUrl'            => 'https://example.test/url-details-data-icon-' . $token,
+			'fallbackHeadUrl'        => 'https://example.test/url-details-head-fallback-' . $token,
+			'non200Url'              => 'https://example.test/url-details-not-found-' . $token,
+			'emptyUrl'               => 'https://example.test/url-details-empty-' . $token,
+			'html'                   => $html,
+			'dataIconHtml'           => $data_icon_html,
+			'fallbackHeadHtml'       => $fallback_html,
+			'dataIcon'               => $data_icon,
+			'cacheTtl'               => 137 + $ctx->int( 1, 50 ),
+			'expectedTitle'          => 'Fuzz & Title ' . $token,
+			'expectedIcon'           => 'https://example.test/assets/favicon-' . $token . '.ico',
+			'expectedDescription'    => 'Remote & description ' . $token,
+			'expectedImage'          => 'https://example.test/images/card-' . $token . '.png',
+			'expectedFallbackTitle'       => 'Fallback & Title ' . $token,
+			'expectedFallbackIcon'        => 'https://example.test/favicons/fallback-' . $token . '.ico',
+			'expectedFallbackDescription' => 'OG & description ' . $token,
+			'expectedFallbackImage'       => 'https://example.test/images/fallback-' . $token . '.png',
+		);
+	}
+
+	private static function register_rest_visible_post_type_with_cap( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
+		$token       = substr( self::token( $ctx, $label . '-post-type' ), 0, 10 );
+		$post_type   = 'cfz_' . substr( preg_replace( '/[^a-z0-9_]/', '', $label ), 0, 2 ) . '_' . $token;
+		$plural_base = 'cfz_' . str_replace( '-', '_', $label ) . '_items_' . $token;
+		$registered  = \register_post_type(
+			$post_type,
+			array(
+				'label'           => 'Directory Services ' . $label,
+				'public'          => false,
+				'show_ui'         => false,
+				'show_in_rest'    => true,
+				'rewrite'         => false,
+				'query_var'       => false,
+				'capability_type' => array( 'cfz_' . $label . '_item', $plural_base ),
+				'map_meta_cap'    => false,
+			)
+		);
+
+		if ( \is_wp_error( $registered ) || ! $registered instanceof \WP_Post_Type ) {
+			throw new \RuntimeException( 'Could not register REST-visible post type for ' . $label );
+		}
+
+		return (string) $registered->cap->edit_posts;
+	}
+
+	private static function http_response( string $body, int $status ): array {
+		return array(
+			'headers'  => array(),
+			'body'     => $body,
+			'response' => array(
+				'code'    => $status,
+				'message' => 200 === $status ? 'OK' : 'Synthetic Error',
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+
+	private static function route_methods( array $handlers ): array {
+		$methods = array();
+		foreach ( $handlers as $handler ) {
+			if ( ! is_array( $handler ) || ! isset( $handler['methods'] ) || ! is_array( $handler['methods'] ) ) {
+				continue;
+			}
+			foreach ( $handler['methods'] as $method => $enabled ) {
+				if ( $enabled ) {
+					$methods[] = (string) $method;
+				}
+			}
+		}
+
+		$methods = array_values( array_unique( $methods ) );
+		sort( $methods );
+		return $methods;
+	}
+
+	private static function route_data_endpoint_for_methods( ?array $data, array $methods ): ?array {
+		if ( null === $data || ! isset( $data['endpoints'] ) || ! is_array( $data['endpoints'] ) ) {
+			return null;
+		}
+
+		sort( $methods );
+		foreach ( $data['endpoints'] as $endpoint ) {
+			if ( ! isset( $endpoint['methods'] ) || ! is_array( $endpoint['methods'] ) ) {
+				continue;
+			}
+			$endpoint_methods = array_values( array_unique( array_map( 'strval', $endpoint['methods'] ) ) );
+			sort( $endpoint_methods );
+			if ( $methods === $endpoint_methods ) {
+				return $endpoint;
+			}
+		}
+		return null;
+	}
+
+	private static function route_data_endpoint_has_args( ?array $data, array $methods, array $args ): bool {
+		$endpoint = self::route_data_endpoint_for_methods( $data, $methods );
+		if ( null === $endpoint || ! isset( $endpoint['args'] ) || ! is_array( $endpoint['args'] ) ) {
+			return false;
+		}
+		foreach ( $args as $arg ) {
+			if ( ! array_key_exists( $arg, $endpoint['args'] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function route_data_schema_has_properties( ?array $data, array $properties ): bool {
+		if ( null === $data || ! isset( $data['schema']['properties'] ) || ! is_array( $data['schema']['properties'] ) ) {
+			return false;
+		}
+		foreach ( $properties as $property ) {
+			if ( ! array_key_exists( $property, $data['schema']['properties'] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function schema_has_properties( array $schema, array $properties ): bool {
+		if ( ! isset( $schema['properties'] ) || ! is_array( $schema['properties'] ) ) {
+			return false;
+		}
+		foreach ( $properties as $property ) {
+			if ( ! array_key_exists( $property, $schema['properties'] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function schema_valid( $value, array $schema ): bool {
+		$valid = \rest_validate_value_from_schema( $value, $schema );
+		return true === $valid;
+	}
+
+	private static function response_error_ok( $response, string $code, int $status ): bool {
+		if ( ! $response instanceof \WP_REST_Response || $status !== $response->get_status() ) {
+			return false;
+		}
+
+		$data = $response->get_data();
+		return is_array( $data )
+			&& $code === ( $data['code'] ?? null )
+			&& isset( $data['data'] )
+			&& is_array( $data['data'] )
+			&& $status === (int) ( $data['data']['status'] ?? 0 );
+	}
+
+	private static function latest_transient_has( array $sets, string $prefix, int $expiration ): bool {
+		for ( $i = count( $sets ) - 1; $i >= 0; --$i ) {
+			if ( str_starts_with( (string) ( $sets[ $i ]['transient'] ?? '' ), $prefix ) ) {
+				return $expiration === (int) ( $sets[ $i ]['expiration'] ?? -1 );
+			}
+		}
+		return false;
+	}
+
+	private static function link_href( array $links, string $rel ): ?string {
+		return isset( $links[ $rel ][0]['href'] ) ? (string) $links[ $rel ][0]['href'] : null;
+	}
+
+	private static function interesting_params( array $params, array $keys ): array {
+		$out = array();
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $params ) ) {
+				$out[ $key ] = $params[ $key ];
+			}
+		}
+		return $out;
+	}
+
+	private static function schema_property_keys( ?array $route_data ): array {
+		if ( ! isset( $route_data['schema']['properties'] ) || ! is_array( $route_data['schema']['properties'] ) ) {
+			return array();
+		}
+		$keys = array_keys( $route_data['schema']['properties'] );
+		sort( $keys );
+		return $keys;
+	}
+
+	private static function callable_name( $callable ): ?string {
+		if ( is_string( $callable ) ) {
+			return $callable;
+		}
+		if ( is_array( $callable ) && isset( $callable[1] ) ) {
+			$class = is_object( $callable[0] ?? null ) ? get_class( $callable[0] ) : (string) ( $callable[0] ?? '' );
+			return $class . '::' . (string) $callable[1];
+		}
+		return null;
+	}
+
+	private static function token( \ComponentFuzz\FuzzContext $ctx, string $label ): string {
+		return substr( sha1( $ctx->seed() . ':' . $ctx->iteration() . ':' . $label ), 0, 10 );
+	}
+
+	private static function collect_failure( array &$failures, bool $condition, string $label, array $details = array() ): void {
+		if ( $condition ) {
+			return;
+		}
+
+		$failures[] = array(
+			'label'   => $label,
+			'details' => self::describe_value( $details ),
+		);
+	}
+
+	private static function row( \ComponentFuzz\FuzzContext $ctx, string $invariant, bool $ok, array $data = array(), ?string $status = null ): array {
+		return array(
+			'ok'        => $ok,
+			'status'    => $status ?? ( $ok ? 'passed' : 'failed' ),
+			'surface'   => self::NAME,
+			'invariant' => $invariant,
+			'seed'      => $ctx->seed(),
+			'iteration' => $ctx->iteration(),
+			'data'      => self::describe_value( $data ),
+		);
+	}
+
+	private static function skip( \ComponentFuzz\FuzzContext $ctx, string $invariant, string $reason, array $data = array() ): array {
+		$data['reason'] = $reason;
+		return self::row( $ctx, $invariant, true, $data, 'skipped' );
+	}
+
+	private static function snapshot_state(): array {
+		return array(
+			'globals' => self::snapshot_globals(
+				array(
+					'authordata',
+					'current_user',
+					'user_ID',
+					'userdata',
+					'wp_actions',
+					'wp_current_filter',
+					'wp_filter',
+					'wp_filters',
+					'wp_object_cache',
+					'wp_post_types',
+					'wp_rest_server',
+				)
+			),
+			'request' => array(
+				'_GET'     => $_GET,
+				'_POST'    => $_POST,
+				'_REQUEST' => $_REQUEST,
+				'_SERVER'  => $_SERVER,
+			),
+			'wpdb'    => self::snapshot_wpdb(),
+		);
+	}
+
+	private static function restore_state( array $snapshot ): void {
+		self::restore_wpdb( $snapshot['wpdb'] );
+		if ( function_exists( 'wp_cache_flush' ) ) {
+			\wp_cache_flush();
+		}
+
+		self::restore_globals( $snapshot['globals'] );
+		$_GET     = $snapshot['request']['_GET'];
+		$_POST    = $snapshot['request']['_POST'];
+		$_REQUEST = $snapshot['request']['_REQUEST'];
+		$_SERVER  = $snapshot['request']['_SERVER'];
+	}
+
+	private static function state_fingerprint(): array {
+		return array(
+			'globals' => self::stable_hash(
+				self::summarize_for_hash(
+					self::snapshot_globals(
+						array(
+							'current_user',
+							'user_ID',
+							'wp_filter',
+							'wp_post_types',
+							'wp_rest_server',
+						)
+					)
+				)
+			),
+			'request' => self::stable_hash(
+				self::summarize_for_hash(
+					array(
+						'_GET'     => $_GET,
+						'_POST'    => $_POST,
+						'_REQUEST' => $_REQUEST,
+						'_SERVER'  => $_SERVER,
+					)
+				)
+			),
+			'wpdb'    => self::stable_hash( self::summarize_for_hash( self::snapshot_wpdb() ) ),
+		);
+	}
+
+	private static function snapshot_globals( array $names ): array {
+		$snapshot = array();
+		foreach ( $names as $name ) {
+			$value = array_key_exists( $name, $GLOBALS ) ? $GLOBALS[ $name ] : null;
+			if ( 'wp_filter' === $name ) {
+				$value = self::clone_wp_filter_registry( $value );
+			}
+
+			$snapshot[ $name ] = array(
+				'exists' => array_key_exists( $name, $GLOBALS ),
+				'value'  => $value,
+			);
+		}
+		return $snapshot;
+	}
+
+	private static function restore_globals( array $snapshot ): void {
+		foreach ( $snapshot as $name => $entry ) {
+			if ( $entry['exists'] ) {
+				$GLOBALS[ $name ] = 'wp_filter' === $name
+					? self::clone_wp_filter_registry( $entry['value'] )
+					: $entry['value'];
+			} else {
+				unset( $GLOBALS[ $name ] );
+			}
+		}
+	}
+
+	private static function clone_wp_filter_registry( $registry ) {
+		if ( $registry instanceof \WP_Hook ) {
+			return clone $registry;
+		}
+
+		if ( ! is_array( $registry ) ) {
+			return $registry;
+		}
+
+		$clone = array();
+		foreach ( $registry as $hook_name => $hook ) {
+			$clone[ $hook_name ] = $hook instanceof \WP_Hook ? clone $hook : $hook;
+		}
+
+		return $clone;
+	}
+
+	private static function snapshot_wpdb(): ?array {
+		if ( ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return null;
+		}
+
+		$wpdb       = $GLOBALS['wpdb'];
+		$reflection = new \ReflectionClass( $wpdb );
+		$state      = array(
+			'public'  => array(
+				'insert_id'     => $wpdb->insert_id,
+				'last_error'    => $wpdb->last_error,
+				'last_query'    => $wpdb->last_query,
+				'num_rows'      => $wpdb->num_rows,
+				'rows_affected' => $wpdb->rows_affected,
+			),
+			'private' => array(),
+		);
+
+		foreach ( $reflection->getProperties() as $property ) {
+			$name = $property->getName();
+			if ( str_starts_with( $name, 'component_fuzz_' ) ) {
+				$state['private'][ $name ] = $property->getValue( $wpdb );
+			}
+		}
+
+		return $state;
+	}
+
+	private static function restore_wpdb( ?array $snapshot ): void {
+		if ( null === $snapshot || ! isset( $GLOBALS['wpdb'] ) || ! $GLOBALS['wpdb'] instanceof \Component_Fuzz_WPDB_Stub ) {
+			return;
+		}
+
+		$wpdb = $GLOBALS['wpdb'];
+		foreach ( $snapshot['public'] as $name => $value ) {
+			$wpdb->{$name} = $value;
+		}
+
+		$reflection = new \ReflectionClass( $wpdb );
+		foreach ( $snapshot['private'] as $name => $value ) {
+			if ( ! $reflection->hasProperty( $name ) ) {
+				continue;
+			}
+			$property = $reflection->getProperty( $name );
+			$property->setValue( $wpdb, $value );
+		}
+	}
+
+	private static function stable_hash( $value ): ?string {
+		$json = json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE );
+		return false === $json ? null : sha1( $json );
+	}
+
+	private static function summarize_for_hash( $value, int $depth = 0 ) {
+		if ( $depth > 4 ) {
+			return is_array( $value ) ? array( 'array' => count( $value ) ) : gettype( $value );
+		}
+
+		if ( is_array( $value ) ) {
+			$out = array();
+			foreach ( $value as $key => $item ) {
+				$out[ (string) $key ] = self::summarize_for_hash( $item, $depth + 1 );
+			}
+			ksort( $out );
+			return $out;
+		}
+
+		if ( is_object( $value ) ) {
+			if ( $value instanceof \WP_Error ) {
+				return array( 'WP_Error' => $value->get_error_code() );
+			}
+			if ( $value instanceof \WP_REST_Response ) {
+				return array( 'WP_REST_Response' => self::summarize_for_hash( $value->get_data(), $depth + 1 ) );
+			}
+			if ( $value instanceof \WP_Hook ) {
+				return array( 'WP_Hook' => self::summarize_hook_callbacks( $value ) );
+			}
+			if ( $value instanceof \Closure ) {
+				return array( 'Closure' => true );
+			}
+			return array( 'object' => get_class( $value ) );
+		}
+
+		return $value;
+	}
+
+	private static function summarize_hook_callbacks( \WP_Hook $hook ): array {
+		$summary = array();
+		foreach ( $hook->callbacks as $priority => $callbacks ) {
+			$priority_key             = (string) $priority;
+			$summary[ $priority_key ] = array();
+			foreach ( $callbacks as $id => $callback ) {
+				$summary[ $priority_key ][ (string) $id ] = array(
+					'acceptedArgs' => (int) ( $callback['accepted_args'] ?? 0 ),
+					'function'     => self::summarize_callable( $callback['function'] ?? null ),
+				);
+			}
+			ksort( $summary[ $priority_key ] );
+		}
+		ksort( $summary );
+		return $summary;
+	}
+
+	private static function summarize_callable( $callback ): string {
+		if ( is_string( $callback ) ) {
+			return $callback;
+		}
+		if ( $callback instanceof \Closure ) {
+			return 'Closure';
+		}
+		if ( is_array( $callback ) && 2 === count( $callback ) ) {
+			$target = is_object( $callback[0] ) ? get_class( $callback[0] ) : (string) $callback[0];
+			return $target . '::' . (string) $callback[1];
+		}
+		if ( is_object( $callback ) && method_exists( $callback, '__invoke' ) ) {
+			return get_class( $callback ) . '::__invoke';
+		}
+		return gettype( $callback );
+	}
+
+	private static function first_difference( $before, $after, string $path = '' ) {
+		if ( $before === $after ) {
+			return null;
+		}
+
+		if ( is_array( $before ) && is_array( $after ) ) {
+			$keys = array_unique( array_merge( array_keys( $before ), array_keys( $after ) ) );
+			foreach ( $keys as $key ) {
+				$next_path = '' === $path ? (string) $key : $path . '.' . $key;
+				if ( ! array_key_exists( $key, $before ) || ! array_key_exists( $key, $after ) ) {
+					return array(
+						'path'   => $next_path,
+						'before' => array_key_exists( $key, $before ) ? $before[ $key ] : '[missing]',
+						'after'  => array_key_exists( $key, $after ) ? $after[ $key ] : '[missing]',
+					);
+				}
+				$diff = self::first_difference( $before[ $key ], $after[ $key ], $next_path );
+				if ( null !== $diff ) {
+					return $diff;
+				}
+			}
+		}
+
+		return array(
+			'path'   => $path,
+			'before' => self::describe_value( $before ),
+			'after'  => self::describe_value( $after ),
+		);
+	}
+
+	private static function describe_value( $value, int $depth = 0 ) {
+		if ( is_string( $value ) ) {
+			return strlen( $value ) > self::SAMPLE_BYTES ? substr( self::escape_string( $value ), 0, self::SAMPLE_BYTES ) . '...' : self::escape_string( $value );
+		}
+
+		if ( is_array( $value ) ) {
+			if ( $depth >= 4 ) {
+				return array(
+					'type'  => 'array',
+					'count' => count( $value ),
+				);
+			}
+
+			$out = array();
+			$i   = 0;
+			foreach ( $value as $key => $item ) {
+				if ( $i >= 16 ) {
+					$out['...'] = count( $value ) - $i;
+					break;
+				}
+				$out[ is_int( $key ) ? $key : self::escape_string( (string) $key ) ] = self::describe_value( $item, $depth + 1 );
+				++$i;
+			}
+			return $out;
+		}
+
+		if ( is_object( $value ) ) {
+			if ( $value instanceof \Throwable ) {
+				return self::describe_throwable( $value );
+			}
+			if ( $value instanceof \WP_Error ) {
+				return array(
+					'type' => 'WP_Error',
+					'code' => $value->get_error_code(),
+					'data' => self::describe_value( $value->get_error_data(), $depth + 1 ),
+				);
+			}
+			if ( $value instanceof \WP_REST_Response ) {
+				return array(
+					'type'   => 'WP_REST_Response',
+					'status' => $value->get_status(),
+					'data'   => self::describe_value( $value->get_data(), $depth + 1 ),
+				);
+			}
+			return array(
+				'type'  => 'object',
+				'class' => get_class( $value ),
+			);
+		}
+
+		return $value;
+	}
+
+	private static function describe_throwable( \Throwable $e ): array {
+		return array(
+			'class'   => get_class( $e ),
+			'message' => self::escape_string( $e->getMessage() ),
+			'file'    => $e->getFile(),
+			'line'    => $e->getLine(),
+		);
+	}
+
+	private static function escape_string( string $value ): string {
+		return (string) preg_replace_callback(
+			'/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\xFF]/',
+			static function ( array $matches ): string {
+				return sprintf( '\\x%02X', ord( $matches[0] ) );
+			},
+			$value
+		);
+	}
+}

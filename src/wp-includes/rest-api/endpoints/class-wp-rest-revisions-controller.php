@@ -381,7 +381,7 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 		$response->header( 'X-WP-TotalPages', (int) $max_pages );
 
 		$request_params = $request->get_query_params();
-		$base_path      = rest_url( sprintf( '%s/%s/%d/%s', $this->namespace, $this->parent_base, $request['parent'], $this->rest_base ) );
+		$base_path      = rest_url( sprintf( '%s/%s/%s/%s', $this->namespace, $this->parent_base, $request['parent'], $this->rest_base ) );
 		$base           = add_query_arg( urlencode_deep( $request_params ), $base_path );
 
 		if ( $page > 1 ) {

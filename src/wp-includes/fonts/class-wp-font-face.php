@@ -311,13 +311,7 @@ class WP_Font_Face {
 		 * Wrap font-family in quotes if it contains spaces
 		 * and is not already wrapped in quotes.
 		 */
-		if (
-			str_contains( $font_face['font-family'], ' ' ) &&
-			! str_contains( $font_face['font-family'], '"' ) &&
-			! str_contains( $font_face['font-family'], "'" )
-		) {
-			$font_face['font-family'] = '"' . $font_face['font-family'] . '"';
-		}
+		$font_face['font-family'] = $this->compile_font_family( $font_face['font-family'] );
 
 		foreach ( $font_face as $key => $value ) {
 			// Compile the "src" parameter.
@@ -339,6 +333,47 @@ class WP_Font_Face {
 	}
 
 	/**
+	 * Compiles the `font-family` into valid CSS.
+	 *
+	 * @since 6.4.0
+	 *
+	 * @param string $value Value to process.
+	 * @return string The CSS.
+	 */
+	private function compile_font_family( $value ) {
+		if ( $this->font_family_needs_quotes( $value ) ) {
+			return '"' . $this->escape_css_string( $value, '"' ) . '"';
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Checks whether a font family value should be quoted.
+	 *
+	 * @since 6.4.0
+	 *
+	 * @param string $value Value to process.
+	 * @return bool Whether the font family value should be quoted.
+	 */
+	private function font_family_needs_quotes( $value ) {
+		if (
+			str_contains( $value, ';' ) ||
+			str_contains( $value, '{' ) ||
+			str_contains( $value, '}' ) ||
+			str_contains( $value, '/*' ) ||
+			str_contains( $value, '*/' ) ||
+			preg_match( '/[\x00-\x1F\x7F]/', $value )
+		) {
+			return true;
+		}
+
+		return str_contains( $value, ' ' ) &&
+			! str_contains( $value, '"' ) &&
+			! str_contains( $value, "'" );
+	}
+
+	/**
 	 * Compiles the `src` into valid CSS.
 	 *
 	 * @since 6.4.0
@@ -350,13 +385,37 @@ class WP_Font_Face {
 		$src = '';
 
 		foreach ( $value as $item ) {
-			$src .= ( 'data' === $item['format'] )
-				? ", url({$item['url']})"
-				: ", url('{$item['url']}') format('{$item['format']}')";
+			$src .= ", url('" . $this->escape_css_string( $item['url'], "'" ) . "')";
+
+			if ( 'data' !== $item['format'] ) {
+				$src .= " format('" . $this->escape_css_string( $item['format'], "'" ) . "')";
+			}
 		}
 
 		$src = ltrim( $src, ', ' );
 		return $src;
+	}
+
+	/**
+	 * Escapes a value for use in a quoted CSS string.
+	 *
+	 * @since 6.4.0
+	 *
+	 * @param string $value Value to process.
+	 * @param string $quote Quote character wrapping the CSS string.
+	 * @return string Escaped CSS string content.
+	 */
+	private function escape_css_string( $value, $quote ) {
+		$value = str_replace( '\\', '\\\\', $value );
+		$value = str_replace( $quote, '\\' . $quote, $value );
+
+		return preg_replace_callback(
+			'/[\x00-\x1F\x7F]/',
+			static function ( $matches ) {
+				return '\\' . strtoupper( dechex( ord( $matches[0] ) ) ) . ' ';
+			},
+			$value
+		);
 	}
 
 	/**

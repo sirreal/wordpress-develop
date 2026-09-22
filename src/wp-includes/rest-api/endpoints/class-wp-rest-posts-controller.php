@@ -759,6 +759,8 @@ class WP_REST_Posts_Controller extends WP_REST_Controller {
 			&& ! empty( $prepared_post->post_status )
 			&& in_array( $prepared_post->post_status, array( 'draft', 'pending' ), true )
 		) {
+			$post_parent = isset( $prepared_post->post_parent ) ? (int) $prepared_post->post_parent : 0;
+
 			/*
 			 * `wp_unique_post_slug()` returns the same slug for 'draft' or 'pending' posts.
 			 *
@@ -766,10 +768,10 @@ class WP_REST_Posts_Controller extends WP_REST_Controller {
 			 */
 			$prepared_post->post_name = wp_unique_post_slug(
 				$prepared_post->post_name,
-				$prepared_post->id,
+				0,
 				'publish',
 				$prepared_post->post_type,
-				$prepared_post->post_parent
+				$post_parent
 			);
 		}
 
@@ -966,7 +968,7 @@ class WP_REST_Posts_Controller extends WP_REST_Controller {
 		 * To ensure that a unique slug is generated, pass the post data with the 'publish' status.
 		 */
 		if ( ! empty( $post->post_name ) && in_array( $post_status, array( 'draft', 'pending' ), true ) ) {
-			$post_parent     = ! empty( $post->post_parent ) ? $post->post_parent : 0;
+			$post_parent     = property_exists( $post, 'post_parent' ) ? (int) $post->post_parent : (int) $post_before->post_parent;
 			$post->post_name = wp_unique_post_slug(
 				$post->post_name,
 				$post->ID,

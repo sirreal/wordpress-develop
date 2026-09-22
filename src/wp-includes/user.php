@@ -5084,12 +5084,22 @@ function wp_validate_user_request_key(
 	#[\SensitiveParameter]
 	$key
 ) {
-	$request_id       = absint( $request_id );
-	$request          = wp_get_user_request( $request_id );
+	$request_id = absint( $request_id );
+
+	if ( ! $request_id ) {
+		return new WP_Error( 'invalid_request', __( 'Invalid personal data request.' ) );
+	}
+
+	$request = wp_get_user_request( $request_id );
+
+	if ( ! $request ) {
+		return new WP_Error( 'invalid_request', __( 'Invalid personal data request.' ) );
+	}
+
 	$saved_key        = $request->confirm_key;
 	$key_request_time = $request->modified_timestamp;
 
-	if ( ! $request || ! $saved_key || ! $key_request_time ) {
+	if ( ! $saved_key || ! $key_request_time ) {
 		return new WP_Error( 'invalid_request', __( 'Invalid personal data request.' ) );
 	}
 

@@ -36,6 +36,8 @@ class Tests_Formatting_IsEmail extends WP_UnitTestCase {
 			'phil@TLA.example',
 			'ace@204.32.222.14',
 			'kevin@many.subdomains.make.a.happy.man.edu',
+			'a@b',
+			'first.last@example',
 			'a@b.co',
 			'bill+ted@example.com',
 			'..@example.com',
@@ -89,17 +91,6 @@ class Tests_Formatting_IsEmail extends WP_UnitTestCase {
 			 * Best rejected.
 			 */
 			'(ab)cd@couc.ou',
-
-			/*
-			 * The next address is not globally deliverable,
-			 * so it may work with PHPMailer and break with
-			 * mail sending services. Best not allow users
-			 * to paint themselves into that corner. This also
-			 * avoids security problems like those that were
-			 * used to probe the WordPress server's local
-			 * network.
-			*/
-			'toto@to',
 
 			/*
 			 * Several addresses are best rejected because

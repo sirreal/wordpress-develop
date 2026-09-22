@@ -263,7 +263,7 @@ function do_shortcode( $content, $ignore_html = false ) {
 	$has_filter   = has_filter( 'wp_get_attachment_image_context', '_filter_do_shortcode_context' );
 	$filter_added = false;
 
-	if ( ! $has_filter ) {
+	if ( false === $has_filter ) {
 		$filter_added = add_filter( 'wp_get_attachment_image_context', '_filter_do_shortcode_context' );
 	}
 

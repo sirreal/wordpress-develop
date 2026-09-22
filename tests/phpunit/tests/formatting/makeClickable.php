@@ -32,6 +32,7 @@ class Tests_Formatting_MakeClickable extends WP_UnitTestCase {
 			array( 'Foo.Bar@a.b.c.d.example.com' ),
 			array( '0@example.com' ),
 			array( 'foo@example-example.com' ),
+			array( 'mail@xn--fsqu00a.xn--4rr70v' ),
 		);
 	}
 
@@ -57,6 +58,7 @@ class Tests_Formatting_MakeClickable extends WP_UnitTestCase {
 			array( '@example.com' ),
 			array( 'foo @example.com' ),
 			array( 'foo@example' ),
+			array( 'mail@example.xn--' ),
 		);
 	}
 
