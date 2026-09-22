@@ -47,6 +47,9 @@ wp-tests-config.php
 /packagehash.txt
 /.gutenberg-hash
 /artifacts
+/tools/html-api-fuzz/oracles/lexbor/build
+/tools/html-api-fuzz/oracles/html5ever/build
+/tools/html-api-fuzz/oracles/chrome/.chrome-for-testing
 /setup.log
 /coverage
 
