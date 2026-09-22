@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan the HTML linearly for `A` tags containing the `external` class, then called `remove_class( 'external' )` on each match and returned the modified document with `get_updated_html()`. This follows the documented tag query and class-edit APIs without changing unrelated markup.",
+  "confidence": 99
+}

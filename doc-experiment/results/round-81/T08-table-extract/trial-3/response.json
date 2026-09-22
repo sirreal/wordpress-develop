@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked the table subtree with `next_tag()` and `next_token()` so implied table structure is handled like a browser. Cell text comes from `get_modifiable_text()` on `#text` tokens, which is already decoded, and rows are finalized on `TR` closers.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for tree-aware fragment parsing, then `next_tag()` to find the first `UL` or `OL`, `get_current_depth()` plus `next_token()` to count only direct `LI` children, and `set_bookmark()`/`seek()`/`set_attribute()`/`get_updated_html()` to edit the list opener only after a clean full scan of that subtree.",
+  "confidence": 93
+}

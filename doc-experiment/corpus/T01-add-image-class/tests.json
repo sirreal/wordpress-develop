@@ -1,0 +1,69 @@
+{
+    "id": "T01-add-image-class",
+    "title": "Add a class to every image",
+    "difficulty": "basic",
+    "split": "train",
+    "role": "smoke",
+    "commonness": "high",
+    "concept": "classes",
+    "processor": "tag",
+    "function": "add_image_class",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<p><img src=\"a.jpg\"></p>"
+            ],
+            "expected": "<p><img class=\"wp-image\" src=\"a.jpg\"></p>"
+        },
+        {
+            "id": "multiple",
+            "args": [
+                "<img src=\"a.jpg\"><div><img src=\"b.png\"></div>"
+            ],
+            "expected": "<img class=\"wp-image\" src=\"a.jpg\"><div><img class=\"wp-image\" src=\"b.png\"></div>"
+        },
+        {
+            "id": "existing-classes",
+            "args": [
+                "<img class=\"photo large\" src=\"a.jpg\">"
+            ],
+            "expected": "<img class=\"photo large wp-image\" src=\"a.jpg\">"
+        },
+        {
+            "id": "uppercase-tag",
+            "args": [
+                "<IMG SRC=\"a.jpg\">"
+            ],
+            "expected": "<IMG class=\"wp-image\" SRC=\"a.jpg\">"
+        },
+        {
+            "id": "inside-comment-ignored",
+            "args": [
+                "<!-- <img src=\"x.jpg\"> --><img src=\"real.jpg\">"
+            ],
+            "expected": "<!-- <img src=\"x.jpg\"> --><img class=\"wp-image\" src=\"real.jpg\">"
+        },
+        {
+            "id": "no-images",
+            "args": [
+                "<p>Nothing here.</p>"
+            ],
+            "expected": "<p>Nothing here.</p>"
+        },
+        {
+            "id": "unquoted-attributes",
+            "args": [
+                "<img src=a.jpg width=10>"
+            ],
+            "expected": "<img class=\"wp-image\" src=a.jpg width=10>"
+        },
+        {
+            "id": "incomplete-tag-at-end",
+            "args": [
+                "<p>text</p><img src=\"a.jpg"
+            ],
+            "expected": "<p>text</p><img src=\"a.jpg"
+        }
+    ]
+}

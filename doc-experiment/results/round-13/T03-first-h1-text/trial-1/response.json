@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML, finds the first H1 tag with next_tag('H1'), then walks through all tokens inside it using next_token() while tracking depth with get_current_depth(). Text nodes are collected by concatenating get_modifiable_text() values. Returns null if no H1 exists, empty string if H1 contains no text.",
+  "confidence": 78
+}

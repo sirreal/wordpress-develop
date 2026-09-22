@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to modify a template HTML string that already has the correct structure and attribute order. First, next_tag('img') finds the img element, then set_attribute() is called for 'src' and 'alt' in that order \u2014 both methods handle HTML encoding automatically per the docs. Next, next_token() iterates tokens until the '#text' node inside the figcaption is found, then set_modifiable_text() replaces the placeholder with the properly-encoded caption text. Finally, get_updated_html() returns the serialized result. The set_attribute() and set_modifiable_text() APIs are documented to handle all necessary HTML encoding, so special characters in the inputs will be correctly escaped.",
+  "confidence": 72
+}

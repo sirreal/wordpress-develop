@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`. I collected ordinary `#text` tokens plus opener text from `TITLE` and `TEXTAREA` only via `get_modifiable_text()`, then truncated the decoded UTF-8 text to the requested number of code points with `mb_substr()` when available and safe fallbacks otherwise.",
+  "confidence": 94
+}

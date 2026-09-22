@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function normalizes both HTML fragments using WP_HTML_Processor::normalize(), which parses each fragment according to HTML5 rules and serializes it back in a canonical form. This normalization process handles optional/implied closing tags, tag-name case differences, attribute quoting variations, and character reference decoding. If either normalization returns null (indicating parse failure or unsupported markup), the function returns false. Otherwise, it compares the normalized representations for equality, which correctly determines if both fragments represent the same DOM structure.",
+  "confidence": 92
+}

@@ -1,0 +1,62 @@
+{
+    "id": "N01-remove-external-class",
+    "title": "Remove a class from links",
+    "difficulty": "basic",
+    "split": "holdout",
+    "role": "core",
+    "commonness": "high",
+    "concept": "classes",
+    "processor": "tag",
+    "function": "remove_external_class",
+    "cases": [
+        {
+            "id": "among-others",
+            "args": [
+                "<a class=\"external link\" href=\"/x\">go</a>"
+            ],
+            "expected": "<a class=\"link\" href=\"/x\">go</a>"
+        },
+        {
+            "id": "only-class-removes-attribute",
+            "args": [
+                "<a class=\"external\" href=\"/x\">go</a>"
+            ],
+            "expected": "<a  href=\"/x\">go</a>"
+        },
+        {
+            "id": "no-class-untouched",
+            "args": [
+                "<a href=\"/y\">stay</a>"
+            ],
+            "expected": "<a href=\"/y\">stay</a>"
+        },
+        {
+            "id": "case-sensitive-not-removed",
+            "args": [
+                "<a class=\"EXTERNAL\">caps</a>"
+            ],
+            "expected": "<a class=\"EXTERNAL\">caps</a>"
+        },
+        {
+            "id": "multiple-links",
+            "args": [
+                "<a class=\"external a\">1</a><a class=\"b external\">2</a><a class=\"c\">3</a>"
+            ],
+            "expected": "<a class=\"a\">1</a><a class=\"b\">2</a><a class=\"c\">3</a>"
+        },
+        {
+            "id": "non-link-untouched",
+            "args": [
+                "<div class=\"external\">not a link</div><a class=\"external\">link</a>"
+            ],
+            "expected": "<div class=\"external\">not a link</div><a >link</a>"
+        },
+        {
+            "id": "middle-of-list",
+            "args": [
+                "<a class=\"one external two\">mid</a>"
+            ],
+            "expected": "<a class=\"one two\">mid</a>"
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then walked tokens with `next_token()` and collected only `#text` tokens while inside an open `H1` through `H6` element. I flushed each heading on its closing token so nested markup contributes text but its tags do not, and empty headings still produce an entry with an empty string.",
+  "confidence": 88
+}

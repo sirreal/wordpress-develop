@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and emitted normalized output via `serialize_token()`. Ordinary `#text` tokens are compared using `get_modifiable_text()` and wrapped in `<mark>` when they contain the case-sensitive keyword; special text-bearing elements (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) are left untouched because their content is carried on the opener token rather than as ordinary text nodes.",
+  "confidence": 88
+}

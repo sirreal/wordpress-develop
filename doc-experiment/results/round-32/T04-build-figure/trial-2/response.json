@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template using `WP_HTML_Tag_Processor`, which the docs explicitly recommend for safely filling untrusted values into known markup. The function preserves the required `img` attribute order by including `src` and `alt` in the template, sets those attributes with `set_attribute()`, replaces the placeholder figcaption text by scanning tokens with `next_token()`, checking `get_token_type()` for `#text`, and calling `set_modifiable_text()`, then returns the result with `get_updated_html()`.",
+  "confidence": 94
+}

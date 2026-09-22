@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction is tree-aware, then walks the fragment with `next_token()`. On each `A` opener it reads `href` with `get_attribute()` and includes only string-valued attributes (excluding missing and boolean `href`), and while inside a collected link it concatenates decoded `#text` token content from `get_modifiable_text()` until the corresponding closer is reached.",
+  "confidence": 89
+}

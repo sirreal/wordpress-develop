@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. This is effectively the reference approach: WP_HTML_Processor::create_fragment(), next_tag('H1'), depth-bounded next_token() walk, #text filtering, and get_modifiable_text() for already-decoded text. All called methods are present in the rendered docs and no _doing_it_wrong records appeared."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Uses the right processor and the documented subtree text-walk pattern. The extra SCRIPT/STYLE/TEXTAREA/TITLE handling is documented and defensible, but it goes beyond the ordinary #text-token recipe and hard-codes only the special elements named in the text-extraction note."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Same implementation pattern as trial-2: documented APIs only, no _doing_it_wrong records, correct depth-bounded token walk, and decoded text via get_modifiable_text(). Minor near-miss is the same special-element branch, which is plausible but slightly less canonical than the documented ordinary-DOM-text recipe."
+    }
+  ],
+  "failure_analysis": "All trials passed every frozen hidden case: simple, nested-markup, entities-decoded, no-h1-null, image-only-empty-string, first-of-two, nested-in-div, and unclosed-h1. The docs did well on the core decisions: the Tag Processor overview explicitly says to use WP_HTML_Processor when structure matters, including collecting an element's text content; the HTML Processor overview has a direct 'collect DOM-style text from a subtree' recipe showing create_fragment(), next_tag(), get_current_depth(), next_token(), #text filtering, and get_modifiable_text(); the next_token() section warns that text may be split across tokens and that walks must be bounded by depth or breadcrumbs; get_modifiable_text() states that #text text is already decoded, which prevented double-decoding. The only near-miss is special element text. Trials 2 and 3 inferred from the docs that SCRIPT/STYLE/TEXTAREA/TITLE text should be included from the opener token. That inference is documented, but the docs also describe the ordinary #text recipe as DOM-style text extraction, so the boundary between 'ordinary DOM text descendants' and 'full textContent including special-element contents' remains slightly ambiguous.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, 'Recipe: collect DOM-style text from a subtree' and next_token() special-element note",
+      "problem": "The recipe says to append only ordinary #text tokens for DOM-style text, then separately says SCRIPT, STYLE, TITLE, and TEXTAREA carry text on their own opener token. This leaves readers unsure whether a textContent-style extractor should include or exclude those contents.",
+      "suggestion": "State the contract explicitly: one recipe for ordinary visible/text-node collection that excludes special-element token text, and a second short variant for full textContent-style extraction that includes text carried by special-element opener tokens."
+    },
+    {
+      "location": "html-processor.md, next_token() depth-bounded walk guidance",
+      "problem": "The depth comparison pattern is shown, but the reason >= works for malformed or implicitly closed input is spread across later closer/depth notes.",
+      "suggestion": "Add one sentence to the subtree-walk recipe explaining that closing tokens report the parent depth, so the loop exits when the parser leaves the matched element, including implicit or end-of-input closes."
+    },
+    {
+      "location": "html-processor.md, get_modifiable_text()",
+      "problem": "The method documents decoded text well, but examples focus on generic text and TITLE. Readers doing extraction may not immediately connect this to avoiding html_entity_decode() on #text tokens.",
+      "suggestion": "Add a compact read-only example showing '&amp;' in a #text token returning '&', with a warning that callers should not decode the returned string again."
+    }
+  ]
+}

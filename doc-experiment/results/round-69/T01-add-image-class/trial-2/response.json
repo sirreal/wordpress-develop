@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly for `img` tags in a case-insensitive way, then called `add_class( 'wp-image' )` on each matched opener. The processor\u2019s `get_updated_html()` returns the original bytes unchanged except for the queued attribute edits, which preserves comments and all unrelated markup exactly as required.",
+  "confidence": 97
+}

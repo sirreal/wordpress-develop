@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_token() so the heading contents are collected structurally. For each H1-H6 opener I tracked the current subtree depth with get_current_depth(), appended only #text token contents via get_modifiable_text(), and flushed each heading when its matching closer arrived or when the walk left its subtree.",
+  "confidence": 92
+}

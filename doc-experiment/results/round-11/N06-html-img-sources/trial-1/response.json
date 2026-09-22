@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment with full structural awareness, including proper handling of SVG foreign content. It iterates through all IMG tags, filters for those in the HTML namespace (excluding SVG image elements), and collects their decoded src attribute values. The get_attribute() method automatically handles decoding of character references, and we verify that src exists (not null), is not empty string, and is not a boolean true attribute.",
+  "confidence": 92
+}

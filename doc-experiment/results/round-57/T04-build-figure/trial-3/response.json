@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template with the target attribute order already present, then filled it through `WP_HTML_Tag_Processor::set_attribute()` so values are safely encoded and the `src` and `alt` order is preserved. I also replaced the placeholder text inside `figcaption` with `WP_HTML_Tag_Processor::set_modifiable_text()` after locating the `#text` token via `next_token()`, then returned the final fragment with `get_updated_html()`.",
+  "confidence": 96
+}

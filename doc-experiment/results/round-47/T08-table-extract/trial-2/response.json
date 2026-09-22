@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with browser-like table handling, finds the first `TABLE` via `next_tag()`, then walks tokens once with `next_token()` while inside that table. It tracks `TR`, `TD`, and `TH` openers/closers, appending only `#text` token contents via `get_modifiable_text()` so character references are already decoded and markup itself contributes nothing.",
+  "confidence": 87
+}

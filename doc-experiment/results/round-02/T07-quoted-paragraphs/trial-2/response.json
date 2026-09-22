@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor in fragment mode to parse the HTML while tracking element nesting through breadcrumbs. It iterates through all P tags using next_tag() with a tag_name query, then checks if BLOCKQUOTE appears in the breadcrumbs array for each P element. If a BLOCKQUOTE ancestor is found, add_class() adds the \"quoted\" class. The get_updated_html() method returns the modified HTML with all changes applied.",
+  "confidence": 72
+}

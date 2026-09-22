@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterate with next_token() to visit every token including text nodes. When a non-closing H1\u2013H6 tag is matched (detected via get_tag() and is_tag_closer()), I record the heading level and the nesting depth at that point using get_current_depth(). While inside a heading, I accumulate text from #text tokens using get_modifiable_text(), which returns decoded text content. I detect the heading's closing by watching for a tag-closer at depth = heading_depth - 1 (since get_current_depth() reflects the depth after the closer is applied). The get_token_type() method distinguishes tags from text nodes, and get_modifiable_text() on text nodes provides character-reference-decoded content as required.",
+  "confidence": 72
+}

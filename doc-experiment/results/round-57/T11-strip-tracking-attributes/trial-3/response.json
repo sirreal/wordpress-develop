@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` constructor, `next_tag()`, `get_attribute_names_with_prefix()`, `remove_attribute()`, and `get_updated_html()` APIs to scan every tag and delete only attributes whose names start with `data-track-`, leaving similar names untouched.",
+  "confidence": 97
+}

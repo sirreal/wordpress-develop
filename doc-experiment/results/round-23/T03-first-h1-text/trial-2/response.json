@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction is a tree-aware operation. It finds the first `H1` with `next_tag()`, records its depth with `get_current_depth()`, then walks its subtree with `next_token()`, concatenating decoded ordinary text from `#text` tokens via `get_modifiable_text()`. It also includes text carried on opening `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` tokens, since those elements do not expose separate `#text` child tokens in the documented API.",
+  "confidence": 83
+}

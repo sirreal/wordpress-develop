@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware scanning, then next_tag('A') to find anchor openers and get_attribute('href') to include only anchors whose href is a real string value. For each matched anchor, I recorded the current depth and walked tokens with next_token(), concatenating only '#text' tokens via get_modifiable_text() until the walk left that anchor subtree.",
+  "confidence": 83
+}

@@ -1,0 +1,134 @@
+{
+  "round": "round-61",
+  "mode": "discoverability-probe",
+  "question_id": "breadcrumbs-ancestor-check",
+  "question": "When WP_HTML_Processor is matched on a tag opener, does get_breadcrumbs() include the current element? How should code check whether the current element has an ancestor with a given tag name without counting the current element itself? Are next_tag() breadcrumbs query arrays arbitrary ancestor-set checks, or do they describe a DOM path/sub-path? Answer only from the rendered docs and cite headings.",
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-61/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "breadcrumbs-ancestor-check",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "Yes. `WP_HTML_Processor::get_breadcrumbs()` returns the full path to the currently matched node, so it includes the current element itself. To test whether the current element has a given ancestor without counting itself, inspect the breadcrumbs for the matched node but exclude the last breadcrumb (the current element) before checking for the ancestor tag. `next_tag()` breadcrumb queries are not arbitrary ancestor-set checks; the docs describe them as a DOM sub-path / child-combinator path, with `*` as a single-element wildcard, so they match structure like `FIGURE > IMG`, not an unordered ancestor set.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Breadcrumbs",
+            "support": "\"Breadcrumbs start at the outermost parent and descend toward the matched element. They always include the entire path from the root HTML node to the matched element.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Breadcrumbs",
+            "support": "\"Breadcrumbs can specify nested HTML structure and are equivalent to a CSS selector comprising tag names separated by the child combinator, such as \\\"DIV > FIGURE > IMG\\\".\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_tag()",
+            "support": "`$breadcrumbs` is documented as a \"DOM sub-path at which element is found\" and may contain `*` which \"matches a single element\"."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "matches_breadcrumbs()",
+            "support": "`$breadcrumbs` is documented as a \"DOM sub-path at which element is found\"; examples show ordered paths like `array( 'figure', 'img' )` and `array( 'span', '*', 'img' )`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "is_tag_closer()",
+            "support": "When matched on a tag closer, \"the closed element has already been popped from the stack of open elements\" and breadcrumbs report the parent context, not the element being closed."
+          }
+        ],
+        "rationale": "The breadcrumb docs explicitly say the returned path includes the matched node itself and that breadcrumb queries are ordered DOM sub-paths, so ancestor checks must ignore the current node rather than treat the query as an unordered set.",
+        "confidence": 94
+      }
+    },
+    {
+      "id": "breadcrumbs-ancestor-check",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "Yes. `WP_HTML_Processor::get_breadcrumbs()` includes the currently matched element itself as the last entry in the path. The docs do not give a dedicated helper for “has ancestor X but not self”; the nearest contract is to inspect the breadcrumbs and compare against the path excluding the current element, since `get_breadcrumbs()` is the full root-to-node path. `next_tag()` breadcrumb queries are not arbitrary ancestor-set checks; they describe a DOM sub-path/path, equivalent to a child-combinator chain, with wildcard support for a single element.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Breadcrumbs",
+            "support": "“Breadcrumbs represent the stack of open elements from the root of the document or fragment down to the currently-matched node…”. “They always include the entire path from the root HTML node to the matched element.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_breadcrumbs()",
+            "support": "“Breadcrumbs start at the outermost parent and descend toward the matched element.” “They always include the entire path from the root HTML node to the matched element.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_tag()",
+            "support": "`$breadcrumbs` is described as “DOM sub-path at which element is found” and the examples show child-path matching, e.g. `array( 'FIGURE', 'IMG' )` and `array( 'SECTION', '*' )`."
+          }
+        ],
+        "rationale": "The docs explicitly say breadcrumbs include the full root-to-matched-element path and that `next_tag()` breadcrumbs are DOM sub-path queries, so the only missing piece is the exact ancestor-excluding-self check, which must be inferred by ignoring the last breadcrumb entry.",
+        "confidence": 95
+      }
+    },
+    {
+      "id": "breadcrumbs-ancestor-check",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "Yes. On a matched tag opener, `get_breadcrumbs()` includes the current element: the docs say the breadcrumbs are the stack of open elements “down to the currently-matched node” and “always include the entire path from the root HTML node to the matched element.” To test whether the current element has a given ancestor without counting the element itself, the docs only give the breadcrumb-path contract, so code should compare against the ancestor portion of that path, not the full breadcrumb array including the current element. For `next_tag()`, the `breadcrumbs` query is not an arbitrary ancestor-set check; it is a DOM sub-path / nested structure query, with examples like `array( 'FIGURE', 'IMG' )`, and `matches_breadcrumbs()` explicitly says it is a “DOM sub-path.”",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "Breadcrumbs",
+            "support": "“Breadcrumbs represent the stack of open elements from the root of the document or fragment down to the currently-matched node, if one is currently selected. Call WP_HTML_Processor::get_breadcrumbs() to inspect the breadcrumbs for a matched tag.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Breadcrumbs",
+            "support": "“Breadcrumbs can specify nested HTML structure and are equivalent to a CSS selector comprising tag names separated by the child combinator, such as 'DIV > FIGURE > IMG'.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_breadcrumbs()",
+            "support": "“Computes the HTML breadcrumbs for the currently-matched node, if matched. Breadcrumbs start at the outermost parent and descend toward the matched element. They always include the entire path from the root HTML node to the matched element.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_tag()",
+            "support": "The `breadcrumbs` query is described as “DOM sub-path at which element is found, e.g. `array( 'FIGURE', 'IMG' )`.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "matches_breadcrumbs()",
+            "support": "“Indicates if the currently-matched tag matches the given breadcrumbs.” and its parameter doc says `string[]` is a “DOM sub-path at which element is found, e.g. array( 'FIGURE', 'IMG' )`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "is_tag_closer()",
+            "support": "“When matched on a tag closer, the closed element has already been popped from the stack of open elements. This means that `get_breadcrumbs` and `get_current_depth` report the parent context at that point, not the element being closed.”"
+          }
+        ],
+        "rationale": "The breadcrumbs docs state that the matched element is included in the breadcrumb path, and both `next_tag()` and `matches_breadcrumbs()` describe breadcrumb queries as DOM sub-paths rather than arbitrary ancestor sets; the only missing piece is an explicit recipe for excluding the current element, which the docs do not spell out directly.",
+        "confidence": 93
+      }
+    }
+  ]
+}

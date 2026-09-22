@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses the documented `WP_HTML_Processor::normalize()` API, which normalizes an HTML fragment in BODY context and returns `null` when the HTML Processor cannot normalize unsupported input. It returns that normalized serialization when available, otherwise the exact fallback placeholder HTML.",
+  "confidence": 98
+}

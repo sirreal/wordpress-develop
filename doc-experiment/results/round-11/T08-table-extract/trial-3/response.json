@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse HTML and find the first TABLE element using next_tag(). It then walks through all tokens within the table using next_token(), tracking state with flags for when inside a cell. Text nodes are accumulated into the current cell using get_modifiable_text() (which automatically decodes character references). TR openers start new rows, and TD/TH openers/closers manage cell boundaries. Since the HTML Processor handles implicit structure (omitted closing tags, TBODY/THEAD), the algorithm simply collects text at token level while tracking when inside vs outside cells.",
+  "confidence": 45
+}

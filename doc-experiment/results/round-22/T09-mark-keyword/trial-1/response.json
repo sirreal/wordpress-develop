@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment with full HTML structure, then walks tokens with `next_token()`. Ordinary text nodes are identified via `get_token_type() === '#text'`, matched against the decoded text from `get_modifiable_text()`, and when they contain the keyword their normalized token serialization from `serialize_token()` is wrapped in literal `<mark>` tags; all other tokens are appended from `serialize_token()` unchanged, which yields the normalized output and naturally skips special text-bearing elements because their contents are not exposed as `#text` child tokens.",
+  "confidence": 84
+}

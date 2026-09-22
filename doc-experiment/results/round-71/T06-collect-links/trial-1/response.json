@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in tree-aware mode, then walked tokens with `next_token()`, reading decoded text only from `#text` tokens via `get_modifiable_text()` and href values via `get_attribute('href')`. A small stack tracks open `<a>` elements with string-valued `href` attributes so text from descendant nodes is concatenated in document order and boolean `href` attributes are excluded.",
+  "confidence": 91
+}

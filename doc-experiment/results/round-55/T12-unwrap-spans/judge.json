@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor::create_fragment(), walked with next_token(), skipped SPAN tag tokens, and emitted normalized output with serialize_token(). All called methods are documented. Minor deduction: if processor construction returned null it would return raw input, which is not the normalized/rewrite contract, and it has no explicit get_last_error policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor choice and all calls are documented, including normalize() and get_last_error(). Using get_tag() alone in the next_token() loop is supported by the serialize_token() docs because non-tag tokens return null. Minor deduction: the get_last_error branch returns the same accumulated output as the success path, so the unsupported-markup policy is effectively no-op."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correct processor choice, documented API only, and idiomatic token-by-token normalized serialization. The normalize() fallback is more compatible with a normalized-output contract than returning raw input. Small residual gap: no post-loop get_last_error or paused_at_incomplete_token policy for unsupported or truncated syntax beyond best-effort serialization."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials. The rendered docs did well: the HTML Processor overview directs users to WP_HTML_Processor for normalized output and structure; create_fragment() explains BODY-fragment construction; next_token() explains full token walking; and serialize_token() explicitly says concatenating serialized tokens reconstructs normalized HTML while skipped tokens are removed, with a close generic example of removing an element while keeping contents. That guidance let every trial avoid decoded-vs-raw text pitfalls and attribute-value semantics by never rebuilding text or attributes manually. Near-misses were fallback-policy related: trial 1 returned raw input when construction failed, which would not be normalized, and trial 2 checked get_last_error() but did not choose a distinct error policy. No trial used undocumented methods and no execution recorded _doing_it_wrong.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() docblock",
+      "problem": "The docs say null means no processor was created, but examples leave fallback choice open; subjects chose inconsistent fallbacks, including raw input for a normalized rewrite.",
+      "suggestion": "Document the practical null-return causes for default BODY fragments and add guidance that raw input fallback is not normalized; normalized rewrite functions should return a documented sentinel, empty string, null, or a separate normalized fallback only when that matches their contract."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock, after rewriting-loop guidance",
+      "problem": "The docs mention get_last_error(), but trial 2's redundant branch suggests it is not clear what changes when an unsupported-markup error is detected after a rewrite loop.",
+      "suggestion": "Add a short contrast between best-effort partial output and contract-safe rejection/fallback, explicitly warning that returning the same accumulated output on both branches is merely accepting partial serialization."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() / get_token_type() docblocks",
+      "problem": "Candidates used both '#tag' plus get_tag() and get_tag() alone. Both worked, but the relationship is spread across separate methods and examples.",
+      "suggestion": "State directly that during next_token() walks, get_tag() returns the uppercase element name for tag opener and closer tokens and null for non-tag tokens; use get_token_type() when code needs an explicit token-kind guard."
+    }
+  ]
+}

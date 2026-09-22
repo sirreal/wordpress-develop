@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse HTML and visit all tokens. For each #text token, it retrieves the decoded text via get_modifiable_text() and accumulates it while counting UTF-8 code points using mb_strlen/mb_substr. When the limit is reached, truncates the final text token at the exact codepoint boundary without cutting multi-byte characters. Handles edge cases: returns empty string for non-positive limits, gracefully handles parser creation failure, and correctly skips non-text nodes.",
+  "confidence": 78
+}

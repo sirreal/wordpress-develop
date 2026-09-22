@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment structurally, walks every token with `next_token()`, checks only ordinary `#text` tokens via `get_token_type()` and decoded text from `get_modifiable_text()`, and rebuilds normalized HTML with `serialize_token()`, inserting `<mark>...</mark>` around any matching text token. Special text-bearing elements like `script`, `style`, `title`, and `textarea` are naturally skipped because their contents are not exposed as `#text` child tokens in the HTML Processor.",
+  "confidence": 86
+}

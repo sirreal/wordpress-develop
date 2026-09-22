@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a token-by-token rewrite loop with `next_token()` plus `serialize_token()` so the result is normalized HTML. It wraps only ordinary `#text` tokens whose decoded text from `get_modifiable_text()` contains the case-sensitive keyword, which automatically excludes attributes, comments, and special text-bearing elements like `script`, `style`, `title`, and `textarea` because those are not exposed as ordinary `#text` child tokens.",
+  "confidence": 88
+}

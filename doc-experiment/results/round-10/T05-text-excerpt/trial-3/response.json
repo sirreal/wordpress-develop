@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to safely parse the HTML fragment, then iterates through all tokens with next_token(), collecting text from nodes where get_token_type() returns '#text'. The modifiable text is already decoded by get_modifiable_text(). Finally, mb_substr() with UTF-8 encoding truncates to the exact number of Unicode code points without cutting multi-byte characters.",
+  "confidence": 92
+}

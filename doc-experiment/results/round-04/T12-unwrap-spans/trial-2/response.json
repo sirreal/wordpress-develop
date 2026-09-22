@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's token-by-token walking mechanism to iterate through the HTML. For each token, it checks if the token is a SPAN tag (using get_tag() which returns uppercase names). If it's a SPAN (whether opening or closing), the loop skips it with continue. All other tokens are serialized and appended to the output. The processor's normalize() is implicit through serialize_token(), which handles attribute normalization, tag normalization, and HTML canonicalization. The serialized output is the normalized form as required.",
+  "confidence": 72
+}

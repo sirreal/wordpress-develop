@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` pass so it can respect document structure while preserving document order. On each `A` opener it reads `href` with `get_attribute()` and includes only string-valued attributes, then accumulates descendant text from `#text` tokens via `get_modifiable_text()`; it also adds modifiable text carried on non-closing tag tokens so special text-carrying elements are included when they appear inside a link.",
+  "confidence": 84
+}

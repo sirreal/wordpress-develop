@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, wrapping only ordinary `#text` tokens whose decoded text from `get_modifiable_text()` contains the keyword, and emitting normalized HTML with `serialize_token()`. I also checked `get_last_error()` and fall back to `normalize()` when the processor aborts.",
+  "confidence": 88
+}

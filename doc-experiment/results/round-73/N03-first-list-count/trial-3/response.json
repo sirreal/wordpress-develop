@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` because the input is a body fragment and the task depends on tree structure. The function finds the first `UL` or `OL`, records its depth with `get_current_depth()`, counts direct `LI` opener tokens while walking with `next_token()`, and only commits the `data-item-count` edit through `set_attribute()` if the scan completes without `paused_at_incomplete_token()` or `get_last_error()`.",
+  "confidence": 84
+}

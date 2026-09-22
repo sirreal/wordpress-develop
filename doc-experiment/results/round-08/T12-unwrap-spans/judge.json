@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor — full parser needed for normalization, nested/unclosed-span handling; Tag Processor would not normalize). All four methods used (create_fragment, next_token, get_tag, serialize_token) are documented; no get_token_type despite reference using it — get_tag alone suffices because get_tag()==='SPAN' is false for non-tag tokens. Verbatim adaptation of the documented serialize_token() SUP-removal example: token-walk, skip-by-tag (comment correctly notes it skips both opener and closer), concatenate serialize_token(). Returns '' on null create_fragment (idiomatic, matches reference). 7/7 passed. Minor: confidence reported 75 despite a textbook-correct solution — under-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. All methods documented; no hallucination. Explicitly cites the documented SUP-removal serialize_token() example as its source — exactly the right reference. Idiomatic skip-by-get_tag loop. 7/7 passed. Sole deduction: on null create_fragment it returns the raw $html (unnormalized original) instead of '' or a normalized form. Unreachable for these inputs (BODY-context create_fragment only returns null on bad context), and docs don't specify the contract, so the divergence is harmless here but is the least graceful of the three failure-path choices."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. All methods documented; no hallucination. Cleanest implementation — identical to the reference minus get_token_type, which is unnecessary. Explicitly grounds the approach in the documented SUP-removal example. Returns '' on null (idiomatic). Comment correctly explains both opener and closer are skipped. 7/7 passed. Confidence 92, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7, with zero _doing_it_wrong or trigger_error records. The dominant cause of success is that html-processor.md's `serialize_token()` section (lines 1013-1042) contains a worked example that is nearly isomorphic to the task: \"Remove every SUP element but keep its contents\" using the exact token-walk → skip-by-get_tag → concatenate-serialize_token pattern, with the inline note \"Skips both the opener and the closer.\" Trials 2 and 3 explicitly named this example as their source; trial 1 reproduced it. The accompanying prose (\"Closing tokens of skipped elements must be skipped too\"; \"skip tokens to remove them\") directly preempts the only subtle trap — forgetting to skip the SPAN closer — which is the bug that would have broken nested-spans, adjacent-spans, and span-with-block-content. The docs also correctly steered subjects away from the wrong tool: the serialize_token heading warns that get_updated_html()/set_attribute is the path for edits while serialize_token is for token-by-token rewriting, and the create_fragment description frames fragments as the right model for body-context HTML. Consequently every subject picked WP_HTML_Processor (which normalizes optional/unclosed tags and re-encodes text per the spec) rather than WP_HTML_Tag_Processor (which would not normalize the &AMP;→&amp; case or close the implicit </p></div>).\\n\\nNear-misses in the explanations, not failures: (1) Trial 2 chose `return $html` on a null create_fragment, returning unnormalized original input — semantically inconsistent with the task's \"normalized serialization\" contract. It never fired because BODY-context create_fragment returns null only on an invalid context argument, not on content (verified by probe). The docs do not state what create_fragment returns null for, nor what a caller should emit on failure, so this divergence is an unguided guess rather than a doc-contradiction. (2) None of the subjects articulated why get_tag()==='SPAN' is safe on text/comment/doctype tokens (where get_tag() returns null); they inherited the idiom from the example without restating the invariant. This worked but reflects pattern-copying rather than understanding of get_tag's null-on-non-tag semantics.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() (html-processor.md, ~line 1711) and WP_HTML_Tag_Processor::get_tag()",
+      "problem": "The docblock documents that get_tag() returns null when not matched on a tag, but does not state that it also returns null on every non-tag token (text, comment, doctype, CDATA) encountered while walking with next_token(). The widely-copied skip idiom `'SPAN' === $processor->get_tag()` is only safe because that comparison is false (not an error) on those tokens. Subjects used the idiom correctly but by imitation, without the stated invariant.",
+      "suggestion": "Add one sentence to get_tag(): when iterating tokens via next_token(), get_tag() returns null for any token that is not an element (text, comment, doctype), so a string-equality test like `'SPAN' === $p->get_tag()` is a safe, allocation-free way to match a specific element regardless of token type. Cross-link to get_token_type() for callers who need to distinguish those non-tag tokens."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md, ~line 348)",
+      "problem": "The return type is `static|null` but the docblock never enumerates when null is returned, so callers cannot reason about the failure path. This led one trial to return the raw, unnormalized input on null — inconsistent with a normalization contract — while two others returned ''. The choice was an unguided guess.",
+      "suggestion": "Add a short 'Returns null when…' note listing the failure conditions (e.g., unsupported context or encoding) and clarify that content-level malformation does NOT cause null (the parser recovers and normalizes instead). This lets callers know the null branch is reached only for unsupported configuration, guiding a sensible early return."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() (html-processor.md, ~line 1023) — the token-rewriting example",
+      "problem": "The worked example removes an element and keeps its contents, and the prose says 'Closing tokens of skipped elements must be skipped too', but it does not explain WHY a single `'SUP' === get_tag(); continue;` correctly skips the closer as well — namely that get_tag() reports the same uppercase name for an element's opening and closing tokens. A reader who does not already know this might add a redundant is_tag_closer() check or, worse, skip only the opener.",
+      "suggestion": "Add a clause to the example's prose: because get_tag() returns the element name for both the opening and the closing token, a single name comparison skips both ends of the element in one branch — no is_tag_closer() check is needed. This makes the 'must skip the closer too' guidance self-contained and transferable to any unwrap/remove task."
+    }
+  ]
+}

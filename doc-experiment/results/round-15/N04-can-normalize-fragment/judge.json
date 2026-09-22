@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Identical to the reference solution: WP_HTML_Processor::normalize($html) with a strict `!== null` check. Correct processor choice (html, structure/normalization matters). Only documented API used (normalize() is in html-processor.md, returns string|null). The strict null comparison correctly treats the empty-string result of empty input as success rather than failure, matching the documented null-on-unsupported contract. The level-512 trigger_error on the adoption-agency case is emitted internally by normalize()->serialize() when it hits unsupported markup, not candidate misuse. Idiomatic and minimal; nothing to fault beyond there being no extra defensiveness needed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical logic to trial-1 (normalize + `!== null`), only variable naming differs. Same correct processor choice, same documented-only API, same correct handling of the empty-string-as-success edge via strict null comparison. The internal serialize() notice on the misnesting case is expected internal behavior. Clean and idiomatic."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Alternative valid path: create_fragment() then serialize(), with a `null === $processor` guard before serializing and a `null !== $result` check after. Both methods are documented; serialize() is documented to require a processor on which scanning has not begun, which holds here (no next_token/next_tag called first), so the result is valid. The create-failure guard is sound defensiveness. The `null !== $result` check correctly counts the empty-string serialization of empty input as success. Slightly more verbose than the single-call normalize() form the docs present as the primary fragment-normalization entry point, and serialize()'s internal unsupported-markup notice surfaces here too (expected). Marginally less direct than trials 1-2 but fully correct and idiomatic."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 7/7. The documentation for this task was effective. The normalize() and serialize() docblocks in html-processor.md both state plainly that the method \"return[s] `null` if unable to normalize/serialize,\" and the class-level \"HTML Support\" section explicitly names \"mis-nested formatting elements whose reconstruction would require advancing and rewinding\" (with the exact `<b>one<i>two</b>three</i>` example) and foster-parented content as the constructs that cause the processor to abort and make output methods return null. This gave subjects everything needed to map the task (\"return false when not normalizable\") directly onto `normalize() === null`. The task description's own examples mirroring the doc's unsupported-markup example also reduced ambiguity. All three subjects chose the right processor (WP_HTML_Processor) and the right method family (normalize/serialize), and all used a strict `!== null` comparison.\\n\\nOne genuine near-miss latent in the design, avoided by all three only because they happened to use strict null comparison: the empty-input case. `normalize('')` returns the empty string `''` (verified by probe), which is a successful normalization and must yield `true`. A subject who interpreted \\\"return true when normalization succeeds\\\" as a truthiness check — `(bool) normalize($html)`, `!empty($result)`, or `if ($result)` — would have returned false for the `empty-true` case and failed it. The docs never state that normalize()/serialize() can legitimately return a non-null falsy value (the empty string) for empty or whitespace-only input that still counts as success; they only contrast \\\"string\\\" vs \\\"null.\\\" The distinction between \\\"null means failure\\\" and \\\"empty string is a valid success\\\" is exactly the kind of edge the rubric's edge-case criterion targets, and it was left implicit. Trial-3's explanation also slightly conflated the two failure modes (create_fragment returning null vs serialize returning null) as equivalent \\\"normalization fails\\\" signals; create_fragment only returns null for unsupported context/encoding arguments, not for unsupported fragment markup, so that guard is defensively correct but for a different reason than the explanation implies — a minor conceptual blur, not a functional error here.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() and ::serialize() (Returns sections, html-processor.md)",
+      "problem": "The Returns contract is documented as `string|null` where null signals failure, but it is never stated that a successful normalization can return the empty string (e.g. for empty or whitespace-only input). A reader who treats the result as a boolean (`(bool)$result`, `!empty()`, `if ($result)`) would incorrectly classify empty input as a failure. All trials avoided this only by using strict `!== null`.",
+      "suggestion": "Add one sentence to the Returns description making the success/failure boundary explicit: success is signalled ONLY by a non-null return, and the empty string is a valid successful result (empty input normalizes to an empty string). Show or mention that distinguishing success from failure requires a strict `!== null` check, not a truthiness test."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md)",
+      "problem": "create_fragment() returns `static|null`, and the only documented reason for null is an unsupported $context or $encoding argument. It is easy to mistakenly assume create_fragment() returns null for unsupported *markup* (as trial-3's explanation implied). The doc does not clarify that fragment creation succeeds regardless of how malformed or unsupported the markup is — the abort happens later, during scanning/serialization, surfaced via get_last_error()/null output.",
+      "suggestion": "Clarify in create_fragment()'s Returns or description that null indicates the processor could not be created from the given context/encoding arguments, NOT that the markup is unsupported; unsupported markup is detected later (during next_token/serialize) and surfaced through get_last_error() and null output from normalize()/serialize()."
+    },
+    {
+      "location": "WP_HTML_Processor 'HTML Support' / get_last_error() sections (html-processor.md)",
+      "problem": "The docs describe two ways to detect that the processor bailed on unsupported markup: output methods returning null, and get_last_error() returning ERROR_UNSUPPORTED. They do not state the simplest pattern for a pure can-it-be-normalized check, so subjects must infer that `normalize() !== null` is the canonical normalizability probe. They inferred correctly here, but the relationship between get_last_error(), get_unsupported_exception(), and the null return of normalize()/serialize() could be tied together so the reader knows the null return alone is a sufficient and reliable normalizability signal.",
+      "suggestion": "Add a short cross-reference noting that for a yes/no \"can this be normalized?\" check, testing `normalize($html) !== null` is sufficient and equivalent to inspecting get_last_error(); get_last_error()/get_unsupported_exception() are for distinguishing *why* it failed, not for the basic success/failure decision."
+    }
+  ]
+}

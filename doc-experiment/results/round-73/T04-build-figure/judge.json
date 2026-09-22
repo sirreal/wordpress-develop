@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor for a fixed template fill: WP_HTML_Tag_Processor. All API calls are documented: constructor, next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, and get_updated_html. It follows the documented template pattern exactly: seed attributes to preserve order, include placeholder text, replace a #text token with plain text, and let the API encode values. No _doing_it_wrong records; passed 7/7."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "All methods used are documented, including WP_HTML_Processor::create_fragment and inherited mutation/output methods. The implementation is safe and idiomatic once the HTML Processor is chosen: null/falsy creation guard, seeded attributes, set_attribute for plain strings, #text token walk, set_modifiable_text, get_updated_html. Minor adherence loss because the HTML Processor is over-scoped for a known literal template where the docs recommend the lighter Tag Processor for flat edits."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "All API usage is documented and no misuse was recorded. The code checks create_fragment() for null, updates existing attributes in template order, navigates to figcaption, then walks to the child #text token before calling set_modifiable_text and get_updated_html. Minor adherence loss only for choosing the heavier HTML Processor when the Tag Processor template-building recipe is the better fit for this job."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: simple, ampersand-in-caption, quotes-in-alt, special-chars-in-url, angle-brackets-in-caption, unicode, and html-in-caption-not-parsed all passed 3/3. The docs did well at the exact hard parts: the Tag Processor heading \"Building markup from a template\" tells readers to start from a literal shape, predeclare attributes to preserve order, include placeholder text, walk to a #text token, and return get_updated_html(); set_attribute() and set_modifiable_text() both explicitly say to pass plain unescaped strings and let the API encode them. Near-misses were mild: two trials chose WP_HTML_Processor::create_fragment because the task says \"fragment\", even though structure-aware parsing was unnecessary, and trial-1 did not check set_modifiable_text()'s return value, although its #text guard and fixed template make that benign here.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md - \"Which processor should I use?\" / \"Building markup from a template\"",
+      "problem": "Two of three trials used WP_HTML_Processor::create_fragment for a flat known-template construction task, suggesting the processor-choice guidance does not fully counter the pull of the word \"fragment\".",
+      "suggestion": "Add an explicit decision sentence: for fixed literal templates where callers only fill attributes or existing text placeholders and want to preserve written order/bytes, instantiate WP_HTML_Tag_Processor directly; reserve WP_HTML_Processor::create_fragment for structure-aware parsing, subtree boundaries, implied tags, or normalized serialization."
+    },
+    {
+      "location": "html-processor.md - \"Usage\" / create_fragment()",
+      "problem": "The HTML Processor docs describe fragment parsing but do not early distinguish parsing an existing fragment from constructing a new fixed-shape fragment by filling a template.",
+      "suggestion": "Cross-link create_fragment() or the Usage section to the Tag Processor template-building recipe, noting that inherited mutators plus get_updated_html() work but are usually unnecessary for flat template fills."
+    },
+    {
+      "location": "html-tag-processor.md - set_modifiable_text() examples",
+      "problem": "The surrounding docs correctly emphasize get_token_type() === '#text' for ordinary text, but one replacement example uses get_token_name(), which can blur the distinction between token kind and token name.",
+      "suggestion": "Standardize ordinary text examples on get_token_type() === '#text', and reserve get_token_name() for tag or token names. Add that a #text guard is the expected precondition for ordinary text replacement, while broader token sets should still handle a false return from set_modifiable_text()."
+    }
+  ]
+}

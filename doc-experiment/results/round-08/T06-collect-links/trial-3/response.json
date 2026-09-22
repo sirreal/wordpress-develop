@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() with next_tag() to find A elements, filters by href attribute presence, tracks depth with get_current_depth(), and collects text from #text tokens using get_modifiable_text() which returns decoded text.",
+  "confidence": 72
+}

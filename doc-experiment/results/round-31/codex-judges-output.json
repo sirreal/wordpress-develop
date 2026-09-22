@@ -1,0 +1,100 @@
+{
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment() for a tree-aware direct-child count. Every called method appears in the rendered docs, and execution recorded no _doing_it_wrong notices. The solution follows the documented scan-bookmark-seek-edit pattern, uses get_current_depth() for subtree boundaries, and checks paused_at_incomplete_token() plus get_last_error() before mutating."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and fully documented API usage. Uses next_tag() to find the first list, set_bookmark()/seek() to return to the opener, next_token() plus get_current_depth() to count only direct LI openers, then set_attribute() and get_updated_html(). Edge handling matches the docs: null factory return, incomplete-token detection, and unsupported-parser abort detection."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correct processor and no undocumented calls or _doing_it_wrong records. The implementation is idiomatic for the rendered HTML Processor docs: one bounded token walk, opener bookmark, clean-scan checks, seek back, attribute update, and get_updated_html(). Releasing the bookmark after get_updated_html() is harmless."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 11 frozen cases, so there are no failed hidden cases to attribute to a misconception. The docs did well on the key decision points: the HTML Processor overview explicitly says to use it when document structure matters; create_fragment() is described as the right constructor for body fragments; the “scan a region before editing its opener” recipe directly models bookmark, next_token(), depth boundary, clean-scan check, seek, and edit; get_current_depth() explains why subtree walks must use >= and how closers report depth; set_attribute() documents overwriting and string encoding; get_updated_html() is identified as the right way to retrieve queued edits. Near-misses: the candidates had to infer the direct-child formula from depth semantics rather than from an explicit direct-child example, and the next_token() method history still says “do not use” even though the surrounding public recipes rely on it.",
+        "doc_gaps": [
+          {
+            "location": "src/wp-includes/html-api/class-wp-html-processor.php::next_token() docblock",
+            "problem": "The method docs include an @since note saying “Added for internal support; do not use,” while the class overview and examples recommend next_token() for public tree-aware subtree walks.",
+            "suggestion": "Clarify the current public contract: either remove/update the stale “do not use” wording or add a note explaining that next_token() is supported for userland structural walks in current releases."
+          },
+          {
+            "location": "src/wp-includes/html-api/class-wp-html-processor.php::get_current_depth() docblock",
+            "problem": "The docs explain bounded subtree walks but do not spell out the common direct-child test. Subjects inferred that a direct element child opener is at parent_depth + 1 and must not be a closer.",
+            "suggestion": "Add a short general example for counting or selecting direct element children: record the parent opener depth, walk while depth >= parent depth, and match non-closer element tokens where get_current_depth() === parent_depth + 1."
+          },
+          {
+            "location": "src/wp-includes/html-api/class-wp-html-processor.php::get_last_error() and paused_at_incomplete_token() cross-references",
+            "problem": "The docs do not make fully explicit that error/truncation checks only certify the region actually scanned; unsupported or incomplete syntax after a bounded region is not discovered unless the caller continues scanning.",
+            "suggestion": "Add a note to bounded-walk examples: if the edit depends only on a scanned subtree, check paused_at_incomplete_token() and get_last_error() after that walk; if the whole document must be validated, continue scanning to EOF before deciding."
+          },
+          {
+            "location": "src/wp-includes/html-api/class-wp-html-processor.php::set_bookmark() docblock",
+            "problem": "The HTML Processor bookmark method shows a Tag Processor UL/LI example, which is lexical and can obscure the better tree-aware bookmark pattern for structural tasks.",
+            "suggestion": "Add or substitute an HTML Processor-specific bookmark example that scans a subtree using depth or breadcrumbs, then seeks back to edit the opener. Label any Tag Processor bookmark example as appropriate only for flat lexical scans."
+          }
+        ]
+      }
+    },
+    {
+      "id": "T07-nested-lists",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment() for structure-aware traversal. All HTML API calls are documented in the rendered docs: create_fragment, next_tag, get_tag, get_breadcrumbs, add_class, paused_at_incomplete_token, get_last_error, and get_updated_html. The breadcrumbs use correctly excludes the current list node before checking ancestors, and get_updated_html is the documented byte-preserving output path. Passed 7/7 with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 99,
+            "hallucinated_methods": [],
+            "notes": "Correctly used WP_HTML_Processor and the documented next_tag/get_tag/get_breadcrumbs/add_class/get_last_error/get_updated_html flow. This is essentially the canonical breadcrumbs approach. It handles unsupported-parser aborts via get_last_error; it does not explicitly consider paused_at_incomplete_token, but that policy is not required by the task and get_updated_html remains the documented edit-output path. Passed 7/7 with no _doing_it_wrong records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 97,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor and used only documented APIs, including next_tag( array( 'tag_closers' => 'visit' ) ), get_tag, is_tag_closer, add_class, get_last_error, and get_updated_html. The manual list-depth tracking is supported by documented closer walking, but breadcrumbs would have been the more direct documented pattern for ancestor checks and less stateful. Passed 7/7 with no _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "No failed hidden cases: all three trials passed all 7 frozen expectations. The docs did well in the key places this task needed: the WP_HTML_Processor overview and Supported elements section explicitly say to choose the HTML Processor when document structure, containment, nesting depth, and ancestor breadcrumbs matter; next_tag() documents cursor-relative scans and shows the pattern for matching one of several tag names by scanning any tag and branching on get_tag(); the Breadcrumbs section explains that get_breadcrumbs() includes the full path including implicit HTML/BODY and the matched node; add_class() and get_updated_html() document the class-edit and byte-preserving output workflow. The main near-misses were not functional failures: trial-3 chose a more manual tag-closer depth counter instead of get_breadcrumbs(), and trials made different choices around incomplete trailing syntax because the docs intentionally leave that policy to callers.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs guide",
+            "problem": "The docs define the returned path, but they do not give a compact ancestor-only inspection example. A reader can easily forget that the matched element itself is the last breadcrumb and accidentally count the current node as its own ancestor.",
+            "suggestion": "Add a general example showing how to test ancestors of the current matched tag by removing the final breadcrumb before calling in_array(), while noting that implicit HTML and BODY may appear at the front."
+          },
+          {
+            "location": "WP_HTML_Processor::next_tag() tag_closers parameter",
+            "problem": "The docs document tag_closers and is_tag_closer(), but the strongest guarantee about seeing closers for every opener, including virtual closers, is stated under next_token(). Users doing stateful next_tag() walks may not know whether the same guarantee applies.",
+            "suggestion": "State directly in next_tag() that tag_closers => 'visit' visits tag closing tokens, including virtual/implied closers produced by the HTML Processor, and that breadcrumbs/current depth are usually simpler for pure ancestor classification."
+          },
+          {
+            "location": "WP_HTML_Processor inherited output and error-handling methods",
+            "problem": "paused_at_incomplete_token() and get_updated_html() are inherited from WP_HTML_Tag_Processor, so their full semantics are split across files. That can lead to inconsistent choices about whether to return partial edits, original HTML, or null on truncated input.",
+            "suggestion": "Add a short HTML Processor output-policy note: use get_updated_html() after queued attribute/class/text edits; always treat non-null get_last_error() as an unsupported-parser abort; decide explicitly whether paused_at_incomplete_token() should cause fallback for the caller's contract."
+          },
+          {
+            "location": "WP_HTML_Processor::add_class() inherited method entry",
+            "problem": "The HTML Processor method entry for add_class() is terse, while the practical behavior needed by class-editing tasks is documented more fully in the Tag Processor page.",
+            "suggestion": "Cross-link or summarize the inherited class-edit contract: add_class() creates class when absent, appends without removing existing classes, avoids duplicate class additions, and preserves untouched bytes until get_updated_html()."
+          }
+        ]
+      }
+    }
+  ]
+}

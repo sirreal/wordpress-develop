@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML fragment, collecting text from nodes where get_token_type() returns '#text'. The get_modifiable_text() method already returns character references decoded and is UTF-8 encoded. After concatenating all text nodes, the result is truncated to the specified number of Unicode code points using mb_substr() with 'UTF-8' encoding to avoid cutting multi-byte characters.",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse the HTML, then walks through every token with next_token(). For each text node (#text token type), it checks if the keyword appears in the decoded text using strpos(). If found, the entire token is wrapped in a <mark> element using serialize_token(), which provides normalized serialization. All other tokens (tags, comments, etc.) are serialized as-is, resulting in normalized HTML with mark wrappers added around matching text nodes.",
+  "confidence": 42
+}

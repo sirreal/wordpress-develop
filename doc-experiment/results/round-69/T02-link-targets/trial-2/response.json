@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses `WP_HTML_Tag_Processor` to scan tags linearly, match every `A` tag, and check `get_attribute( 'href' )`, which the documentation says returns `true` for boolean attributes and `''` for empty values while returning `null` only when absent. For matched links, it calls `set_attribute( 'target', '_blank' )`, then returns `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 98
+}

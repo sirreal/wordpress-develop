@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), walked tokens with one explicit state machine, filtered href with is_string(), and read link text only from #text tokens via get_modifiable_text(). All called HTML API methods are present in the rendered docs; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor and a documented single-cursor token-walking pattern with depth state. The extra class_exists() guard is unnecessary for the task but is not hallucinated HTML API usage. It handled string href values, decoded text, and unclosed links correctly; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Reference-like use of create_fragment(), next_tag('A'), get_attribute(), get_current_depth(), next_token(), get_token_type(), and get_modifiable_text(). The depth-bounded subtree walk matches the documented pattern and all API calls are documented; no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8 cases, including decoded href entities, valueless href exclusion, nested markup contributing only text, image-only links producing empty text, entity-decoded text, no links, and an unclosed link. The docs did well in four specific areas: the 'Which processor should I use?' and HTML Processor overview clearly pushed subjects toward WP_HTML_Processor for structure and subtree text; the create_fragment() docs made the body-fragment constructor and null check discoverable; the text extraction recipe and get_modifiable_text() docs made clear that ordinary DOM-style text means only #text tokens and that returned text is decoded; and the get_current_depth()/next_token() docs emphasized the >= depth guard and virtual closers, which prevented the common error of stopping at the first child closer or dropping text after inline markup. The main near-miss is that the decoded attribute-value guarantee is explicit in the Tag Processor get_attribute() section but not repeated in the HTML Processor get_attribute() override, so successful subjects had to transfer inherited semantics across files.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute()",
+      "problem": "The HTML Processor override documents string|true|null but does not repeat the Tag Processor guarantee that string attribute values are already decoded. This task was still solved because subjects inferred it from the Tag Processor docs, but the contract is easy to miss when working primarily from the HTML Processor page.",
+      "suggestion": "Mirror the decoded-string wording from WP_HTML_Tag_Processor::get_attribute(), including an href-style character-reference example and a reminder that boolean/valueless attributes return true while missing attributes return null."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() / repeated-region guidance",
+      "problem": "The docs warn against nested next_token() loops for repeated regions, while nearby examples also show bounded subtree walks after next_tag(). That is technically consistent, but it can leave readers unsure when next_tag()+bounded next_token() is safe versus when a single explicit-state loop is required.",
+      "suggestion": "Add a short clarification that a bounded subtree walk after next_tag() is appropriate when the caller intentionally consumes the whole matched subtree, while a single next_token() state machine is preferable when the outer loop must observe every boundary token or overlapping region."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() incomplete-input discussion",
+      "problem": "The docs describe virtual closers and paused_at_incomplete_token(), but the distinction between an unclosed normal element that still yields a virtual closer and an incomplete syntax token that is never visited could be made more direct for read-only extractors.",
+      "suggestion": "Add a compact note under read-only extraction explaining that ordinary unclosed elements can still produce accumulated subtree text, while a trailing incomplete token is not visited; callers should decide whether partial accumulated data is acceptable."
+    }
+  ]
+}

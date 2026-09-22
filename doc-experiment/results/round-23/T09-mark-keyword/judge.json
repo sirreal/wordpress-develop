@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the right parser (`WP_HTML_Processor::create_fragment()`), walked tokens, matched only `#text`, used decoded `get_modifiable_text()`, and emitted normalized tokens with `serialize_token()`. All called methods are documented, including the extra `get_namespace()` check. Minor deductions: the namespace check is unnecessary for the stated BODY-fragment text-node task, and the `get_last_error()` branch calls `normalize()` on the original HTML after already building a rewrite, which the `serialize_token()` docs warn will discard emitted changes."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Very close to the reference implementation. It chose the HTML Processor, used documented token walking and `serialize_token()` rewriting, and correctly relied on decoded `get_modifiable_text()` only after checking for `#text`. No undocumented API use or `_doing_it_wrong` records. Minor deduction for the unsupported-markup fallback: normalizing the original HTML after a rewrite loop would drop the inserted wrappers if that path were reached."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Also very close to the reference. It uses only documented methods, follows the `next_token()` plus `serialize_token()` rewrite pattern, and naturally skips comments, attributes, and special text-bearing elements by filtering to `#text`. Minor deductions: the `'' !== $text` guard is redundant given the non-empty keyword, and the parse-error/null-factory fallback returns the original unnormalized HTML, which is a weak policy for a function specified to return normalized serialization."
+    }
+  ],
+  "failure_analysis": "All three trials passed every hidden case, so there are no failed-case misconceptions to attribute. The docs did the important things well: the Tag Processor overview explicitly says to use the HTML Processor for normalized output and missing/implied closing tags; `create_fragment()` explains BODY-fragment parsing; the HTML Processor text-extraction recipe says to append only ordinary `#text` tokens and notes that SCRIPT, STYLE, TITLE, and TEXTAREA do not expose child `#text`; `get_modifiable_text()` states that ordinary text is already decoded; and `serialize_token()` explains token-by-token normalized rewriting. The main near-miss was error handling after a rewrite loop: trials 1 and 2 used `normalize($html)` as a fallback after emitting marked tokens, despite the docs warning that this discards loop changes. Trial 3 avoided that specific issue but returned the original input on processor failure, which would not satisfy a strict normalized-output contract.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md `serialize_token()`",
+      "problem": "The docs warn not to call `normalize()` on the original HTML after a rewrite loop, but two successful subjects still did exactly that in the error branch.",
+      "suggestion": "Move the warning into the main example’s error-handling path and state the contract more mechanically: after token-by-token rewriting, the accumulated string is the only rewritten output; `normalize($html)` or returning `$html` is a deliberate decision to discard the rewrite."
+    },
+    {
+      "location": "html-processor.md `create_fragment()` returns",
+      "problem": "The docs say the factory may return `null`, but do not make recommended fallback policies concrete for string-returning filters that promise normalized output.",
+      "suggestion": "Document common null-return causes and show caller-policy options such as return `null`, return an empty string, or explicitly return the unmodified input, noting which choices do and do not preserve a normalized-output contract."
+    },
+    {
+      "location": "html-processor.md text recipes and `get_modifiable_text()`",
+      "problem": "The necessary text-node rules are present but split across recipe prose and method docs, so future subjects could still call `get_modifiable_text()` on comments or special element tokens by accident.",
+      "suggestion": "Add a compact table mapping token/location to behavior: ordinary `#text` is decoded DOM text, comments are modifiable but not DOM text, SCRIPT/STYLE raw text is carried on the element token, and TITLE/TEXTAREA decoded text is carried on the element token."
+    }
+  ]
+}

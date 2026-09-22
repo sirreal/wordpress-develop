@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so table parsing follows browser-style HTML structure, then finds the first `TABLE` with `next_tag()`, walks its subtree token-by-token with `next_token()` and `get_current_depth()`, and collects row/cell text by reacting to `TR`, `TD`, and `TH` openers/closers. Cell text comes from ordinary `#text` tokens via `get_modifiable_text()`, plus any element-carried modifiable text on non-closing tags, which covers special text-only elements documented by the API.",
+  "confidence": 86
+}

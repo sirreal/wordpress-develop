@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on nesting structure, not just flat tag matching. The function walks the fragment token-by-token with `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `add_class()`, while tracking open list depth so only `UL`/`OL` elements inside another list get the `nested-list` class. It returns the processor\u2019s byte-preserving `get_updated_html()` output when the scan completes cleanly.",
+  "confidence": 94
+}

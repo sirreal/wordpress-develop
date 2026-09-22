@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize(), a documented static method that normalizes HTML fragments to a canonical form. This method handles all the structural normalization requirements: adding omitted closing tags, lowercasing tag names, standardizing attribute quoting, and decoding equivalent character references. Both inputs are normalized independently, and if either normalization returns null (indicating incomplete or unparseable HTML), the function returns false. Otherwise, it performs a simple string equality comparison on the normalized results.",
+  "confidence": 92
+}

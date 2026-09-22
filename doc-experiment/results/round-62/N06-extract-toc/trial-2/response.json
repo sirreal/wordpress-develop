@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the fragment token-by-token, because the task needs document-order text extraction from nested heading content. The implementation reads only documented APIs: `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, `get_current_depth()`, and `get_modifiable_text()`, then records each `H1` through `H6` opener and flushes its accumulated plain text when the matching closer is reached.",
+  "confidence": 84
+}

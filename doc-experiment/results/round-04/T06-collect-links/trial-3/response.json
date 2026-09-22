@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through all A tags with next_tag(tag_closers='skip') to find opening tags only. For each A tag with an href attribute, it uses next_token() to traverse child tokens, collecting text from #text nodes via get_modifiable_text() which returns decoded character references. Depth tracking ensures the loop stops when exiting the A element. This handles nested markup by skipping non-text tokens, returning only concatenated text content as specified.",
+  "confidence": 78
+}

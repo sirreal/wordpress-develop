@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for BODY-fragment normalized output, walked with next_token(), skipped SPAN tag tokens via documented get_tag(), and emitted normalized tokens with serialize_token(). All API calls are documented and execution recorded no _doing_it_wrong notices. Minor adherence weakness: on create_fragment() failure or get_last_error(), it returns raw input, which the serialization docs explicitly warn is neither normalized nor the rewritten output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best-aligned implementation: correct HTML Processor choice, documented next_token()/get_token_type()/get_tag()/serialize_token() rewrite loop, and no undocumented API use. WP_HTML_Processor::normalize() is documented. Minor weakness: using normalize($html) as an error fallback after a rewrite intentionally discards the accumulated transformation, though this only applies on unsupported-parser paths and did not affect the tests."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and the documented token serialization pattern. get_tag() without an explicit #tag guard is still supported by the serialize_token() example because non-tag tokens return null and SPAN closers are skipped too. No undocumented HTML API calls and no _doing_it_wrong records. Minor deductions for the unnecessary class_exists() environment fallback and raw-input returns on processor/error fallback, which do not satisfy a normalized-output contract."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 hidden cases, so there are no failed hidden cases to attribute to a misconception. The docs worked well for this task: the Tag Processor overview explicitly says to use the HTML Processor for normalized output, implied/missing closing tags, and structure; create_fragment() documents BODY-fragment parsing; the rewrite-while-serializing recipe tells callers to append serialize_token(), skip tokens to remove them, and return the accumulated string; and serialize_token() includes a directly relevant wrapper-removal example stating that skipped element closing tokens must be skipped too. The near-miss was fallback policy: two trials returned raw input on parser creation/error failure, and one trial normalized the original input after a failed rewrite. The docs do say these choices discard the rewrite and may not be normalized, but the candidates still treated them as clean fallbacks.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > serialize_token() example",
+      "problem": "The method-level example demonstrates token skipping but omits the null-processor and get_last_error() handling shown in the earlier recipe, making it easier to copy the core loop while choosing a weak fallback policy.",
+      "suggestion": "Expand the serialize_token() example with minimal create_fragment() null handling and post-loop get_last_error() handling, using a contract-neutral fail-closed return such as null in the example."
+    },
+    {
+      "location": "html-processor.md > Recipe: rewrite while serializing tokens / serialize_token() fallback discussion",
+      "problem": "The docs state that returning original input discards the rewrite, but candidates still used raw input as a fallback for a function whose output contract is normalized rewritten HTML.",
+      "suggestion": "Add a sharper contract note: for APIs promising normalized rewritten output, raw-input fallback violates that contract; choose null/empty/error or another explicitly documented caller policy instead."
+    },
+    {
+      "location": "html-processor.md > create_fragment()",
+      "problem": "The docs say create_fragment() can return null but do not clearly enumerate when that is expected with the default BODY/UTF-8 arguments, causing candidates to add broad fallbacks that may not preserve the transformation contract.",
+      "suggestion": "Document the common null causes and state that default BODY-fragment construction is the intended path for normal post/body fragments; advise selecting fallback behavior based on the caller's output contract."
+    }
+  ]
+}

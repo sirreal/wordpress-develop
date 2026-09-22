@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML as a browser would, ensuring proper handling of nested elements and foreign content (SVG). It iterates through all IMG tags using next_tag('img'), checks that each tag is in the HTML namespace (not SVG), retrieves the already-decoded src attribute value using get_attribute(), and collects non-empty src values in document order. The processor's awareness of HTML structure and namespaces ensures SVG image elements are excluded.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal figure template so the output shape and attribute order are fixed by the markup, then filled `src` and `alt` via `set_attribute()` and replaced the placeholder caption text via `set_modifiable_text()`. Those documented HTML API methods handle the required encoding for unescaped input values, and `get_updated_html()` returns the final fragment.",
+  "confidence": 97
+}

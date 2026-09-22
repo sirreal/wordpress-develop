@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and documented methods: create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), get_last_error(), and normalize(). Main loop is idiomatic and handles decoded #text matching, comments, attributes, split text nodes, special-element text, and normalization. Deductions: on parser error it calls normalize($html) after building rewritten output, which the serialize_token() docs explicitly warn will discard emitted changes; if normalization fails it returns raw input. It also returns raw input if create_fragment() returns null."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses WP_HTML_Processor::create_fragment() for a body fragment, walks tokens with next_token(), limits matching to ordinary #text tokens, reads decoded text via get_modifiable_text(), and emits normalized output with serialize_token(). All API calls are documented, there are no _doing_it_wrong records, and the get_last_error() rejection path matches the documented rewrite-loop guidance."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented token-serialization pattern as the reference: HTML Processor, #text guard, decoded get_modifiable_text(), serialize_token() for normalized output. Deductions are for the same near-miss as trial-1: after a rewrite loop it falls back to normalize($html) on parser error, which intentionally drops any wrappers already emitted. Returning empty string if normalization fails is safer than trial-1's raw-input fallback, but the normalize-after-rewrite pattern is still non-idiomatic."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, so there are no hidden-case failures to attribute. The docs did well on the core decisions: the processor-choice sections in both docs point users to WP_HTML_Processor for body fragments, structure, implied/missing closing tags, and normalized output; next_token() explains why text requires token walking and why special elements do not expose ordinary #text children; get_modifiable_text() clearly states that #text is decoded and that the method is not a predicate for ordinary text; serialize_token() explains the exact rewrite pattern of appending each current token's normalized serialization while inserting extra markup around selected tokens. The near-miss was error handling: trials 1 and 3 called normalize($html) after accumulating rewritten output. The serialize_token() docs already warn against this, but the models still invented that fallback. It was not exercised by the hidden cases; on unsupported markup it would abandon the emitted wrappers, and trial-1 can return raw unnormalized input.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() and the 'Recipe: rewrite while serializing tokens' section",
+      "problem": "The docs contain the necessary warning, but models still added normalize($html) as an error fallback after a token-by-token rewrite, which silently discards emitted edits.",
+      "suggestion": "Add an explicit error-path note: after a rewrite loop, normalize($original_html) or serialize() on a fresh processor produces an unmodified normalized copy, not the accumulated rewrite. Show acceptable generic policies such as returning null/empty, throwing, or returning the accumulated best-effort output only when the caller contract allows it."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() return value",
+      "problem": "The method says it can return null but does not make the common null causes and recommended caller policy prominent. Trial fallbacks varied between raw input and empty string.",
+      "suggestion": "Document the practical null cases for the default BODY/UTF-8/string path and add guidance for string-returning filters: choose an explicit fallback consistent with the function contract, and avoid returning raw input when the caller promises normalized output."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() / paused_at_incomplete_token() cross-reference",
+      "problem": "The distinction between unsupported parser aborts, supported malformed HTML with virtual closers, and trailing incomplete syntax is spread across sections. This can lead to unnecessary or inconsistent fallback logic.",
+      "suggestion": "Add a compact decision table: supported malformed markup still serializes normally; get_last_error() means the processor aborted on unsupported markup; paused_at_incomplete_token() is the separate signal for truncated trailing syntax when the caller requires complete input."
+    }
+  ]
+}

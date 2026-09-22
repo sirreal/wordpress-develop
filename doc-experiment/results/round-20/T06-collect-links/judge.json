@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor for structural subtree walking. All HTML API calls are documented and execution recorded no _doing_it_wrong misuse. The implementation follows the documented depth-bounded next_token() pattern, uses is_string() for href to exclude missing and boolean attributes, and relies on decoded get_attribute()/get_modifiable_text() values. Minor deduction: it broadly reads get_modifiable_text() on every non-closing #tag token, which is documented but wider than the reference's #text-only extraction and could include raw/RCDATA contents for unusual anchors."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct processor, documented methods only, no _doing_it_wrong records, and strong use of the documented token-walking/depth pattern. Handles href null/true/string semantics, decoded entities, image-only links, no links, and unclosed links. Minor near-miss is the extra #tag get_modifiable_text() branch."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. API usage is documented and idiomatic for this task: create_fragment(), next_tag('A'), get_attribute(), get_current_depth(), next_token(), get_token_type(), is_tag_closer(), and get_modifiable_text(). Edge-case handling matches the docs and all hidden cases passed. Minor deduction for the over-broad special-element text branch."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there were no failed hidden cases to attribute to documentation gaps. The docs did well in three important places: the processor-choice guidance explicitly says to use WP_HTML_Processor when structure matters, including collecting element text and handling missing closing tags; the next_token()/get_current_depth() docs give a depth-bounded subtree-walk recipe; and get_attribute()/get_modifiable_text() document boolean/missing attributes and decoded text semantics. The main near-miss is that every trial added a branch that reads get_modifiable_text() from non-closing #tag tokens. That appears to come from the get_modifiable_text()/next_token() passages explaining that SCRIPT, STYLE, TITLE, and TEXTAREA carry text on the element token. The branch is harmless for the frozen cases because ordinary tags and IMG return an empty string, but it could include raw or RCDATA special-element contents in a broader text-extraction task where only ordinary #text descendants were intended.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / html-processor.md#next_token",
+      "problem": "The docs include both a general '#text token accumulation' recipe and a special-element exception, but they do not sharply distinguish descendant text extraction from reading raw/RCDATA element payloads.",
+      "suggestion": "Add a short note that for ordinary descendant text extraction, callers should accumulate #text tokens; only read get_modifiable_text() from an element token when the desired contract explicitly includes SCRIPT/STYLE/TITLE/TEXTAREA-style payloads."
+    },
+    {
+      "location": "WP_HTML_Processor inherited get_attribute() rendering / html-processor.md#get_attribute",
+      "problem": "The HTML Processor page lists get_attribute() but does not repeat the decoded string-value warning as clearly as the Tag Processor page does.",
+      "suggestion": "Repeat or cross-link the full get_attribute() contract in the HTML Processor docs: missing returns null, valueless/boolean returns true, empty quoted value returns '', and string values are already character-reference decoded."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and WP_HTML_Processor::get_current_depth() docblocks",
+      "problem": "The docs warn that nested walk loops can interfere, while also showing depth-bounded scans. For repeated self-contained extraction, the safe cursor-resume pattern is implicit rather than explicit.",
+      "suggestion": "Add a general example or note for extracting data from repeated elements: record opener depth, walk until depth drops below it, then continue the outer search from the current cursor; reserve the single-loop state-machine warning for overlapping or nested repeated regions."
+    }
+  ]
+}

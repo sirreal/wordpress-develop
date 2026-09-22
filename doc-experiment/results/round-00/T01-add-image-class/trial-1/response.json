@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with `next_tag('img')` to iterate over every IMG opening tag in the document. For each match, I called `add_class('wp-image')`, which appends the class to any existing classes without removing or reordering them (as documented in the \"Modifying CSS classes\" section). The processor inherently skips content inside HTML comments, so images appearing there are not matched. Finally, `get_updated_html()` returns the modified HTML with all changes applied.",
+  "confidence": 98
+}

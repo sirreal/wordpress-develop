@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment API to start from a literal figure template that already contains `src`, `alt`, and a placeholder text node, so the attribute order stays fixed and the caption can be replaced safely. The function updates the `img` attributes with `set_attribute()` and replaces the `figcaption` placeholder using `next_token()` plus `set_modifiable_text()`, which handles the required HTML encoding for unescaped input.",
+  "confidence": 93
+}

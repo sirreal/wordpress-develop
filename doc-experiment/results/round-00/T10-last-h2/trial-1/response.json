@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor, iterating with next_tag('H2') to find every H2 opener. On each match, I overwrite a single bookmark named 'last-h2', so after the loop it points to the final H2. If no H2 was found I return the input unchanged. Otherwise I seek back to the bookmark, call add_class('final-section'), and return get_updated_html(). The Tag Processor naturally skips content inside HTML comments, so fake H2s in comments are never matched. The bookmark-update-in-loop pattern is explicitly demonstrated in the set_bookmark() documentation.",
+  "confidence": 97
+}

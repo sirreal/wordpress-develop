@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` because this is a flat, source-order edit: scan for each `h2`, remember the last one with a bookmark, then seek back and add the `final-section` class with `add_class()`. The modified markup is returned with `get_updated_html()`, and if no `h2` is found the original HTML is returned unchanged.",
+  "confidence": 97
+}

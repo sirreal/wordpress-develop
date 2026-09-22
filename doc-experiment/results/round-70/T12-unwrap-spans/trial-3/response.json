@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked every token with `next_token()` and rebuilt normalized HTML by concatenating `serialize_token()` for everything except `SPAN` tag tokens. Because the processor visits both openers and closers, skipping every `SPAN` token unwraps nested spans while preserving their contents and normalization rules.",
+  "confidence": 95
+}

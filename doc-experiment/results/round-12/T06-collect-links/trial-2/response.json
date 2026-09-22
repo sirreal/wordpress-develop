@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse HTML and handle nested elements. It finds each A tag using next_tag(), checks for an href attribute, then walks through tokens inside the A element using next_token() to accumulate all text content (#text token types). The depth comparison (get_current_depth() >= depth_inside_a) ensures text collection stops when exiting the A element. Attribute and text values are already decoded by the API.",
+  "confidence": 92
+}

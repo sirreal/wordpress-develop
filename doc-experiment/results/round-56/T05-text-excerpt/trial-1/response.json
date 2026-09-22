@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in body context, then walked all tokens with next_token(). I concatenated only ordinary #text tokens plus the opening TITLE/TEXTAREA tokens\u2019 modifiable text, which the documented HTML Processor says are the special text-bearing elements that count here, and truncated the decoded UTF-8 result with mb_strlen()/mb_substr() by code points.",
+  "confidence": 92
+}

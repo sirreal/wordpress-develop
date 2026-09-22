@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because structure and text-content collection matter. It walks the fragment once with `next_token()`, starts a record on each `A` opening tag whose `href` from `get_attribute()` is a string (excluding missing and boolean-valued `href`), appends decoded text from `#text` tokens via `get_modifiable_text()`, and finalizes each link when the matching `A` closing token is reached.",
+  "confidence": 84
+}

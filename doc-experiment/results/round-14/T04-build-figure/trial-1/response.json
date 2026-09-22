@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor with a template approach as documented. It creates a literal HTML template with the exact structure required (figure containing img and figcaption with a placeholder dot), then updates the img attributes (src, alt in order) and the figcaption text content using the API methods set_attribute() and set_modifiable_text(). These methods automatically handle all necessary HTML encoding for special characters, ensuring the output is safe and exactly matches the specified structure.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to walk through HTML tokens. For each token, skips SPAN opening and closing tags completely (via continue), but serializes all other tokens. The serialize_token() method produces normalized HTML for each non-SPAN token, which concatenates into normalized output. The processor is created with create_fragment() for body context and handles all HTML normalization (attribute double-quoting, tag closure, text re-encoding) during serialization.",
+  "confidence": 72
+}

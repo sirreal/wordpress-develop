@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body-context fragment and WP_HTML_Processor::serialize() to get the normalized serialization, returning the exact fallback markup whenever the processor cannot be created or aborts with an error. The implementation stays within the documented HTML API surface and avoids any undocumented methods.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a seeded fragment template so the `img` attributes stay in the required `src` then `alt` order, then replaced the placeholder text inside `figcaption` via `set_modifiable_text()`. The function relies on documented `next_tag()`, `next_token()`, `set_attribute()`, `set_modifiable_text()`, and `get_updated_html()` behavior to safely encode all unescaped inputs.",
+  "confidence": 94
+}

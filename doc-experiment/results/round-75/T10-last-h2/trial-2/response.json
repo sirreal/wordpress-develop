@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan tags linearly, remember the last `H2` opener with a bookmark, then `seek()` back to it and `add_class( 'final-section' )` before returning `get_updated_html()`. This stays within the documented Tag Processor APIs and preserves the rest of the HTML byte-for-byte.",
+  "confidence": 98
+}

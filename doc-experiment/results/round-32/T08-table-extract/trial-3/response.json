@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so table parsing follows browser-style HTML structure, including implied table elements. It finds the first `TABLE` with `next_tag()`, then does a single `next_token()` walk bounded by the table depth, building rows on `TR` open/close, cells on `TD`/`TH` open/close, and concatenating only `#text` tokens with `get_modifiable_text()` so character references are already decoded and markup contributes nothing.",
+  "confidence": 89
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The approach uses `WP_HTML_Processor::normalize()`, a static method that serializes an HTML fragment into a canonical form. It handles all the cases the task requires: attribute quoting is normalized to double-quotes, tag names are lowercased, omitted/implied tags are added, and equivalent character references are decoded and re-encoded consistently. If normalization returns `null` (meaning the input cannot be fully parsed/represented), the function returns `false` as required. Two fragments represent the same DOM structure if and only if their normalized serializations are identical strings.",
+  "confidence": 90
+}

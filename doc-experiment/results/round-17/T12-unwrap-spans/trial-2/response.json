@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and walk through all tokens. For each token, if it's a SPAN tag (either opening or closing), we skip it using `continue`, which prevents the token from being serialized. All other tokens are serialized with serialize_token() and concatenated to build the output. This approach automatically handles normalization (double-quoted attributes, lowercase tags, character encoding, etc.) as part of the serialization process and works for nested spans since every token is visited individually.",
+  "confidence": 82
+}

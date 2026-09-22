@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), #text filtering, get_modifiable_text(), and explicit TITLE/TEXTAREA opener handling. All HTML API calls are documented and no _doing_it_wrong records occurred. Minor deduction only for not making an explicit incomplete/unsupported-input policy check, though the docs allow read-only callers to choose partial results."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API use throughout. get_tag() is documented and safe here because it is called only after checking #tag and not a closer. The fallback to strlen()/substr() would cut bytes if mbstring were unavailable, despite the docs emphasizing UTF-8/code-point handling; this did not affect the frozen run."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, token-walking pattern, decoded text handling, and special-element whitelist. All HTML API calls are documented. The class_exists()/method_exists() guards are unnecessary in the harness and suggest uncertainty about the guaranteed WordPress API surface, but they do not misuse the API."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed 10/10. The rendered docs did well on the exact conceptual hazards for this task: html-processor.md's \"Recipe: collect DOM-style text from a subtree\" says to use the HTML Processor for tree-aware text extraction, append only #text tokens by default, and whitelist special-element opener text only when the caller asks for it. The next_token() section explicitly states that SCRIPT, STYLE, TITLE, and TEXTAREA produce no #text children and that opener-carried text must be read with get_modifiable_text(). The get_modifiable_text() section states that #text, TITLE, and TEXTAREA text is already decoded UTF-8, while SCRIPT/STYLE are raw. The create_fragment() and processor overview sections also pointed subjects to the correct body-fragment parser instead of the flat Tag Processor.\n\nNear-misses: trial-2's byte-oriented fallback would violate Unicode truncation without mbstring, and none of the trials inspected paused_at_incomplete_token() or get_last_error(). For this read-only contract that was acceptable, but it shows that the completion-policy guidance is easy to skip once a solution appears to work.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, get_modifiable_text() and next_token() sections",
+      "problem": "The docs state the decoded UTF-8 contract and show mb_* examples, but they do not explicitly warn that strlen()/substr() are byte-oriented and unsafe for code-point limits.",
+      "suggestion": "Add a short anti-example or note: when limiting decoded HTML text by characters/code points, use mb_strlen()/mb_substr(..., 'UTF-8') or another Unicode-aware splitter; do not use strlen()/substr() on get_modifiable_text() output."
+    },
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree",
+      "problem": "The recipe is subtree-oriented. A body-fragment-wide extraction task requires the same token policy but without a prior next_tag() or depth boundary, which subjects inferred correctly here but may not always.",
+      "suggestion": "Add a brief variant for whole-fragment text scans: create_fragment(), loop next_token() to EOF, collect #text tokens, and explicitly opt in to special opener text such as TITLE/TEXTAREA when the caller contract requires it."
+    },
+    {
+      "location": "html-processor.md, create_fragment()/next_token() completion-policy guidance",
+      "problem": "The docs mention get_last_error() and paused_at_incomplete_token(), but the decision point is separated from the simplest read-only extraction loop, so models may omit an intentional policy.",
+      "suggestion": "In extraction examples, add a final comment or sentence showing the three valid policies after scanning: return accumulated partial text, return a sentinel/empty value, or reject when get_last_error() or paused_at_incomplete_token() indicates the scan did not cover all input."
+    }
+  ]
+}

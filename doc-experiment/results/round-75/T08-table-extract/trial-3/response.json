@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the first table as a browser-style tree, then collected only `#text` tokens inside `TD` and `TH` boundaries while flushing cells on their closing tags and rows on `TR` closers. This relies on the documented `create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` APIs.",
+  "confidence": 88
+}

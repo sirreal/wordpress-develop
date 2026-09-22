@@ -1,0 +1,43 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor — required for tree-awareness; Tag Processor alone cannot detect ancestors). All methods documented: create_fragment, next_tag('P') string shorthand, get_breadcrumbs, add_class, get_updated_html. Guards create_fragment null return (=== null) per documented static|null. Idiomatic token walk + breadcrumb ancestor check; add_class preserves existing classes (existing-class-preserved passed). 7/7. Minor: checks full breadcrumbs including the trailing P rather than slicing self off like the reference (array_slice(...,0,-1)); harmless here since P is never BLOCKQUOTE, but not self-aware of the distinction. Self-reported confidence only 45 despite a fully correct solution.",
+      "adherence_breakdown": "processor 30/30; no-hallucination 30/30; idiomatic 24/25 (no self-exclusion from breadcrumbs); edge-cases 12/15 (handles implicit-close, nesting, existing-class via parser/add_class; didn't reason explicitly about matched-node inclusion)"
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and only documented methods (create_fragment, next_tag(array('tag_name'=>'P')), get_breadcrumbs, add_class, get_updated_html). 7/7. Uses truthy guard `! $processor` instead of `=== null`; functionally equivalent since create_fragment only yields object-or-null, but slightly less precise than the documented null contract. Same full-breadcrumb check (includes trailing P) as the others — correct for this task. Explanation accurately attributes ancestor detection to breadcrumbs. Confidence 72.",
+      "adherence_breakdown": "processor 30/30; no-hallucination 30/30; idiomatic 24/25; edge-cases 11/15 (loose null guard, no explicit self-node reasoning)"
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, only documented methods. next_tag(array('tag_name'=>'P')) and precise `=== null` guard per documented static|null return. 7/7 including implicitly-closed-paragraphs and nested-blockquotes (breadcrumbs reflect the real parse tree). Explanation explicitly notes 'breadcrumbs API automatically handles the ancestor detection requirement' — accurate. Same full-breadcrumb (self-inclusive) check; harmless. Trailing ?> is a cosmetic style nit, not an API issue. Highest confidence (82), correctly calibrated.",
+      "adherence_breakdown": "processor 30/30; no-hallucination 30/30; idiomatic 24/25; edge-cases 12/15"
+    }
+  ],
+  "failure_analysis": "No hidden cases failed — all three trials passed 7/7 on every case (simple, deep-ancestor, outside-untouched, implicitly-closed-paragraphs, existing-class-preserved, nested-blockquotes, mixed-document), with no _doing_it_wrong or trigger_error records. The docs were sufficient for this task. What worked well: (1) The `get_breadcrumbs()` heading (html-processor.md, line 811) plus the IMG example ending in `array('HTML','BODY','P','STRONG','EM','IMG')` made the ancestor-chain semantics concrete, so all subjects correctly used `in_array('BLOCKQUOTE', $breadcrumbs, true)` for arbitrary-depth ancestor detection (deep-ancestor and nested-blockquotes passed without special handling). (2) The 'Breadcrumbs' overview section (lines 50-71) and the note that fragment-parsed tags always contain `array('HTML','BODY',…)` steered subjects to the Processor rather than the Tag Processor — the correct choice, since the Tag Processor exposes no ancestor/breadcrumb API. (3) `create_fragment()`'s documented `static|null` return (line 351, 383) led every subject to guard the null case. (4) `add_class()` documentation noting it preserves whitespace/ordering and merges into existing class lists (html-tag-processor.md line 294) covered existing-class-preserved implicitly. The implicitly-closed-paragraphs and nested-blockquotes cases passed because the Processor builds the real DOM tree from the byte stream, and the docs frame breadcrumbs as the path through that tree — subjects trusted the API to handle implicit closing without manual tracking. Near-misses in the explanations: all three check the FULL breadcrumbs array including the currently-matched node (the trailing P), whereas the reference slices off self with `array_slice($breadcrumbs, 0, -1)`. This is harmless here (a P is never a BLOCKQUOTE), but it reflects an unexamined assumption: none of the subjects noted that the matched element appears in its own breadcrumbs, even though the IMG example shows exactly that. A task like 'mark every BLOCKQUOTE nested inside another BLOCKQUOTE' would turn this into a self-match bug. Confidence calibration was poor and conservative (45/72/82) for three identical, fully-correct solutions, suggesting the docs lacked a worked example tying breadcrumbs directly to an 'is X an ancestor' classification pattern.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() (html-processor.md, ~line 811-836)",
+      "problem": "The doc states breadcrumbs 'descend toward the matched element' and the IMG example includes the matched node itself, but never explicitly says the matched element is the LAST entry in its own breadcrumbs. Subjects checking for an ancestor on the full array (rather than excluding self) got the right answer here only because the target tag name differs from the matched tag name. The self-inclusion is shown but not called out, so no subject reasoned about excluding self when an 'ancestor' (proper, strict) test is intended.",
+      "suggestion": "Add an explicit sentence: 'The currently-matched element is always the final entry in the returned array; the entries before it are its ancestors from the root down.' Pair it with a one-line note that to test for a strict ancestor (excluding the node itself) you should examine all but the last entry, e.g. array_slice($crumbs, 0, -1)."
+    },
+    {
+      "location": "Breadcrumbs overview section (html-processor.md, ~line 50-71) or get_breadcrumbs()",
+      "problem": "Documented breadcrumb examples only demonstrate the next_tag(array('breadcrumbs' => ...)) query form (exact tail-path matching) and a next_token loop that uses in_array() to stay within an element. There is no example of the common 'does the matched node have ancestor X at any depth' classification pattern, which is what this task and many real tasks require. Subjects had to infer it; confidence was low (45/72) even when correct.",
+      "suggestion": "Add a short worked example showing arbitrary-depth ancestor classification: walk tags with next_tag('P'), then `if ( in_array( 'BLOCKQUOTE', $processor->get_breadcrumbs(), true ) ) { ... }`, with a note that this matches an ancestor at ANY depth (unlike the breadcrumbs query option, which matches a contiguous tail path). This generalizes to any 'is the current node inside an X' check."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() return value (html-processor.md, ~line 381-383)",
+      "problem": "The Returns line documents `static|null` but does not say WHEN null is returned (e.g., unsupported context/encoding, or unparseable input). Subjects guarded null defensively but could not reason about which inputs trigger it, contributing to low confidence on edge handling.",
+      "suggestion": "Briefly enumerate the null conditions in the Returns description, e.g. 'Returns null when the requested context or encoding is unsupported, or when the input cannot be parsed as a fragment in that context,' so callers know what their null branch is actually catching."
+    }
+  ]
+}

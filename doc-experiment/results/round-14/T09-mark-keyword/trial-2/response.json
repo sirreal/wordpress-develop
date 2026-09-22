@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. When a text node (#text token) is found, it checks if the decoded text contains the keyword using strpos(). If the keyword is found, the entire text node is wrapped with <mark> tags. All other tokens (tags, comments, etc.) are serialized as-is. The serialize_token() method produces normalized HTML output. This approach preserves the normalized form of the HTML while adding <mark> wrappers only around matching text nodes.",
+  "confidence": 75
+}

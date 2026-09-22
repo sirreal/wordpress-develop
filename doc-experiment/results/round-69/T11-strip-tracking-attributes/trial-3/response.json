@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly, `next_tag()` to visit every tag opener, `get_attribute_names_with_prefix( 'data-track-' )` to find only attributes with the required prefix, and `remove_attribute()` to delete each match before returning `get_updated_html()`.",
+  "confidence": 97
+}

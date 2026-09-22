@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory for fragment parsing, `next_tag( 'H1' )` to find the first heading opener, and a depth-bounded `next_token()` walk with `get_token_type()` plus `get_modifiable_text()` to collect only ordinary text nodes inside that element, which already returns decoded text for `#text` nodes. If no `H1` exists, the function returns `null`; an empty `H1` naturally yields an empty string.",
+  "confidence": 94
+}

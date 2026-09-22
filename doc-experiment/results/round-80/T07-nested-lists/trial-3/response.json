@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment with structural awareness, then walked tags with `next_tag()`, checked `is_tag_closer()`, inspected `get_tag()` and `get_breadcrumbs()` to detect whether a `UL` or `OL` had any `UL`/`OL` ancestor, and finally added the class with `add_class()` before returning `get_updated_html()` so untouched bytes are preserved exactly.",
+  "confidence": 93
+}

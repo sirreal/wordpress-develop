@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Tag_Processor to linearly scan the document with next_tag() filtering for H2 elements. For each H2 found, the bookmark \"last-h2\" is re-set (moving it from the previous H2 to the current one), which idiomatically tracks the last occurrence in a single pass. After the scan completes, we seek to the final bookmarked H2 and call add_class() to insert the \"final-section\" class. The bookmark is released and get_updated_html() returns the modified HTML with all other content preserved byte-for-byte.",
+  "confidence": 92
+}

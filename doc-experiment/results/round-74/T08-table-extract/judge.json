@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor via WP_HTML_Processor::create_fragment(), walked tokens with one explicit state machine, read only #text tokens with get_modifiable_text(), and relied correctly on virtual/implied closers. All called HTML API methods are present in the rendered docs. Minor idiom issue: it records table depth but bounds the first table by a TABLE closer instead of the documented depth-bounded subtree pattern; this is still valid under the no-nested-tables task assumption."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Most closely matches the documented recipe: create_fragment(), next_tag('TABLE'), record get_current_depth(), then a single next_token() loop guarded with >= depth and explicit row/cell state. It reads decoded text only from #text tokens and handles implied closers and empty cells. All API calls are documented; only minor missing polish is no explicit post-scan completion policy check, which the reference also omits for this read-only extractor."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout: create_fragment(), next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The token walk is broadly idiomatic and passed all hidden cases, including omitted closers and decoded entities. Slight edge-case weakness: its TR closer flush skips rows whose cell list is empty, contrary to the closer-driven repeated-region pattern the docs recommend for preserving empty regions."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in this round: all three trials passed 8/8 with no _doing_it_wrong records. The docs did the important work well: the 'Which processor should I use?' guidance points structural text extraction toward WP_HTML_Processor; create_fragment() clearly fits body fragments; next_token() explains implied/virtual closers, synthesized table structure, one shared cursor, and depth-bounded walks; get_modifiable_text() clearly states decoded #text semantics and warns not to treat all modifiable text as DOM text. The near misses were not hidden-test failures: trial-1 did not use its recorded table depth to bound the table, relying instead on a TABLE closer; trial-3 skipped structurally empty rows because it guarded the row flush with empty(); and none of the trials made an explicit all-or-nothing choice using paused_at_incomplete_token() or get_last_error(), though the task and reference accepted best-effort read-only extraction.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / implied and virtual token discussion",
+      "problem": "The docs say table rows may be visited inside a synthesized TBODY, but they do not show a concrete token sequence for optional end tags such as omitted cell and row closers.",
+      "suggestion": "Add a compact, general token/depth example for markup with optional end tags, showing get_token_name(), is_tag_closer(), and get_current_depth() for both source and virtual tokens."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag()",
+      "problem": "The description says it returns the matched tag 'in input HTML', which is ambiguous for HTML Processor token walks that expose virtual or implied tags not literally present in the source.",
+      "suggestion": "Clarify whether get_tag() returns names for virtual/implied #tag tokens and closers, and note when get_token_name() is preferable for all-token dispatch."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region recipe",
+      "problem": "The recipe explains that empty element regions can be preserved, but it does not explicitly warn against empty() guards when the structural region itself should be retained even with no children.",
+      "suggestion": "Add a short note: initialize records on opener and flush on the matching closer when preserving structural regions; use empty() guards only when intentionally filtering empty regions."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() completion-policy notes",
+      "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but the extraction examples make it easy to omit an explicit best-effort vs complete-source policy.",
+      "suggestion": "Add a post-loop mini-pattern contrasting best-effort read-only extraction with all-or-nothing extraction that rejects truncated or unsupported input."
+    }
+  ]
+}

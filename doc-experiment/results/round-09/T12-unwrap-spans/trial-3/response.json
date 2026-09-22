@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness. It iterates through every token using next_token(), and skips tokens for SPAN tags (both openers and closers) by checking get_tag() and continuing the loop. All other tokens are serialized with serialize_token(), which produces normalized output. This approach automatically handles nested SPANs because each SPAN token (whether opening or closing) is individually checked and skipped. The serialization produces double-quoted attributes, closed optional tags, and canonical text encoding as required.",
+  "confidence": 75
+}

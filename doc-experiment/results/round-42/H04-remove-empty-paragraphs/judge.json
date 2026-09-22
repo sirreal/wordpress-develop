@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used a single next_token() walk, documented structural calls, serialize_token() for most output, and checked both paused_at_incomplete_token() and get_last_error(). All API methods used are documented and execution recorded no _doing_it_wrong calls. Main adherence weakness: when a pending P proves non-empty it emits a literal <p> instead of the stored serialize_token() result, so the implementation is not fully following the documented token-serialization pattern and would drop attributes in broader cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Strong adherence. It uses the HTML Processor, buffers the serialized opener with serialize_token(), walks tokens once, identifies the closing P with documented is_tag_closer() and get_current_depth() semantics, and falls back on incomplete or unsupported input. No undocumented API calls or _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Strong adherence. It uses the HTML Processor, next_token(), serialize_token(), documented token/type/depth APIs, and the correct incomplete/error checks. The paragraph stack is more complex than necessary for HTML P parsing, but it remains within documented token-walking patterns and did not misuse the API."
+    }
+  ],
+  "failure_analysis": "All trials passed all 11 frozen cases, with no _doing_it_wrong records. The docs appear to have succeeded on the major points: the processor-choice guidance clearly directs structure-sensitive and normalized-output work to WP_HTML_Processor; the rewrite recipe for serialize_token() maps directly to dropping selected tokens while concatenating the rest; get_current_depth() explains closer-depth semantics well enough for the candidates to handle implicit paragraph closes; and the incomplete/error guidance led all trials to return the original input for truncated or unsupported markup. The main near-miss was trial-1's hand-built <p> emission after delaying a paragraph opener. That passed because the tests used un-attributed paragraphs, but a broader case with attributes would lose normalized opener details. This suggests the serialization docs are good but could be more explicit about storing serialized tokens when emission is deferred.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docs and rewrite recipe",
+      "problem": "The docs say token-by-token rewriting can skip or emit tokens, but they do not explicitly warn that delayed emission should keep the exact serialize_token() result. A model hand-emitted <p>, which would drop attributes and other normalized opener details.",
+      "suggestion": "Add a short note and example: when buffering a token for possible later output, store `$serialized = $processor->serialize_token()` and emit that string later; do not reconstruct the tag name manually unless intentionally creating new markup."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() / is_tag_closer() docs",
+      "problem": "The closer-depth explanation is strong, but readers still have to derive the common predicate for identifying the closing token corresponding to a previously recorded opener.",
+      "suggestion": "Add a compact recipe for matching an element's own closer after recording opener depth: same tag name, is_tag_closer(), and depth below the opener depth, with a note that child closers can report the opener depth and must not end the subtree walk."
+    },
+    {
+      "location": "WP_HTML_Processor overview or rewrite recipe",
+      "problem": "The docs discuss rejecting incomplete or unsupported input after a rewrite, but examples often return null rather than showing the common all-or-nothing filter policy of returning the original HTML unchanged.",
+      "suggestion": "Add a generic all-or-nothing rewrite skeleton that accumulates serialize_token() output and then returns the original input when paused_at_incomplete_token() is true or get_last_error() is non-null."
+    },
+    {
+      "location": "WP_HTML_Processor::get_namespace() and tag-matching examples",
+      "problem": "The reference implementation guards P matching with get_namespace(), but the candidates matched only get_tag(). The docs list get_namespace(), yet examples of semantic tag matching rarely show a namespace guard.",
+      "suggestion": "In examples that transform HTML element semantics by tag name, include `html === $processor->get_namespace()` or a note explaining when tag-name checks should also verify namespace, especially around SVG and MathML content."
+    }
+  ]
+}

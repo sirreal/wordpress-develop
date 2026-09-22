@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get tree-aware ancestry via `get_breadcrumbs()`, then scanned tags with `next_tag()` and added `nested-list` only when a `UL` or `OL` had a `UL`/`OL` ancestor. Output is read back with `get_updated_html()` so untouched bytes are preserved.",
+  "confidence": 87
+}

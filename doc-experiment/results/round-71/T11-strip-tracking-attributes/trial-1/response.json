@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan every tag opener in document order, `get_attribute_names_with_prefix( 'data-track-' )` to find only case-insensitive matches for the required prefix, and `remove_attribute()` to delete each matching attribute before returning `get_updated_html()`.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` with a literal template that already contains `src` and `alt` in the required order and a placeholder text node inside `figcaption`. It then uses `next_tag()` plus `set_attribute()` to fill the image attributes, `next_token()` plus `get_token_type()` and `set_modifiable_text()` to replace the caption text, and finally `get_updated_html()` to return the safely encoded fragment.",
+  "confidence": 96
+}

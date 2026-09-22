@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Processor is required here because the task needs ancestor/structural awareness (a BLOCKQUOTE anywhere above), which the Tag Processor cannot provide (30/30). All four methods called exist and are documented: create_fragment, next_tag('P'), get_breadcrumbs, add_class, get_updated_html. No _doing_it_wrong records (30/30). Idiomatic: token-walking via next_tag in a while loop, in_array on get_breadcrumbs to test ancestry, get_updated_html to read edits back — matches the documented idiom at next_token's example (line 640) almost verbatim (25/25). Edge handling: guards the null return of create_fragment and returns input unchanged; passes the implicitly-closed-paragraphs and nested-blockquotes cases that probe HTML5 parsing semantics (14/15). Minor: unlike the reference it does not array_slice off the matched node before the in_array check, so the breadcrumb array still contains the P tail element. Harmless because P is never named BLOCKQUOTE, but it is slightly less precise than checking strict ancestors; costs 3 points overall. 7/7 cases passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same correct structure and processor choice as trial-1 (30/30). Methods all documented; no misuse records (30/30). Idiomatic walk + breadcrumb membership test + get_updated_html (25/25). Uses lowercase query array('tag_name' => 'p'); this is valid because next_tag tag-name matching is documented as ASCII case-insensitive (html-tag-processor.md next_tag: \"a query of img matches <IMG>\"), and output casing is preserved, so all cases pass. Edge handling identical: null guard present (13/15). Same non-sliced breadcrumb check as trial-1, and the lowercase query is marginally less self-documenting than uppercase given breadcrumbs are always uppercase; net 96. 7/7 cases passed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three: correct processor, array('tag_name' => 'P') with uppercase matching the convention used throughout the docs, well-commented intent that correctly states BLOCKQUOTE is checked anywhere in the chain, not just as direct parent (30/30). All methods documented, no misuse (30/30). Idiomatic walk/breadcrumbs/add_class/get_updated_html (25/25). Null-creation guard with explanatory comment (14/15). Same harmless non-sliced breadcrumb membership check as the others; highest self-reported confidence (92) and the explanation is accurate. 7/7 cases passed."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 7 cases (simple, deep-ancestor, outside-untouched, implicitly-closed-paragraphs, existing-class-preserved, nested-blockquotes, mixed-document), with zero _doing_it_wrong or trigger_error records. The task is a near-canonical match for the documented WP_HTML_Processor breadcrumb pattern, so the docs did well here.\n\nWhat the docs did well: (1) The breadcrumbs section (html-processor.md lines 48-72) plus get_breadcrumbs() (lines 809-835) make it unambiguous that breadcrumbs are the full root-to-node ancestor stack and that get_breadcrumbs() returns uppercase tag names — this directly enabled the in_array('BLOCKQUOTE', ...) ancestry test and is why deep-ancestor and mixed-document (BLOCKQUOTE several levels up) passed. (2) The Overview's stated purpose \\\"Querying based on nested HTML structure\\\" (line 15) steered all three subjects to the HTML Processor rather than the Tag Processor, which cannot relate a tag to its ancestors. (3) The example at next_token (line 640) literally shows the in_array(..., get_breadcrumbs(), true) idiom, which all three reproduced. (4) The implicitly-closed-paragraphs case (<blockquote><p>first<p>second</blockquote> → both P's get the class) is exactly the kind of HTML5 optional-tag-omission handling promised in the HTML Support section (line 95, \\\"HTML with optional tags omitted, e.g. <p>one<p>two\\\"); subjects did not have to do anything special because the parser models the implicit close, and the docs set that expectation. (5) add_class preserving existing classes/order (existing-class-preserved: 'lead' → 'lead quoted') is covered by the Modifying CSS classes section (html-tag-processor.md lines 176-209).\n\nNear-misses worth noting in the explanations and code: All three subjects checked in_array on the entire breadcrumb array including the matched P itself, rather than slicing off the tail node as the reference does (array_slice(..., 0, -1)). This is correct only because a P element's own name can never equal 'BLOCKQUOTE'; the subjects did not articulate this reasoning, suggesting they got the right answer partly by luck of the data. The docs never state whether get_breadcrumbs() includes the matched node itself — the example at line 825 shows array('HTML','BODY','P','STRONG','EM','IMG') for a matched IMG, which DOES include the matched node at the tail, but no prose makes the \\\"self is the last element\\\" rule explicit, nor warns that an ancestor-only test must exclude the tail. A task where the queried tag name could also be an ancestor (e.g. \\\"mark every DIV that has a DIV ancestor\\\") would have broken all three implementations, and the docs would not have prevented it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs()",
+      "problem": "The docblock never states that the returned array's LAST element is the currently-matched node itself; the reader must infer it from the single IMG example. Code that tests for an ANCESTOR by membership (in_array) can therefore false-positive when the matched tag's own name could appear as an ancestor name (e.g. a DIV inside a DIV). All three subjects checked the full array including the matched node and only passed because P can never be named BLOCKQUOTE.",
+      "suggestion": "Add one sentence: \"The matched node itself is always the final element of the returned array; its ancestors are everything before it.\" Then add a short note: to test for a proper ancestor (not self), exclude the last element, e.g. in_array($name, array_slice($processor->get_breadcrumbs(), 0, -1), true)."
+    },
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs section",
+      "problem": "There is no worked example of using get_breadcrumbs() for an 'ancestor anywhere above' membership test, even though this is a common need. The closest is buried in the next_token example (line 640) as a loop guard, not presented as an ancestry check. Subjects had to transfer that idiom from an unrelated context.",
+      "suggestion": "Add a brief example under get_breadcrumbs() showing an ancestor test, e.g.: $processor->next_tag('IMG'); $has_figure_ancestor = in_array('FIGURE', $processor->get_breadcrumbs(), true); and contrast it with matches_breadcrumbs(), which only matches a contiguous tail path, not an arbitrary ancestor."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() (parameter docs)",
+      "problem": "The breadcrumbs query and the structural 'has an ancestor of type X anywhere above' use case are easy to conflate. A reader might try array('breadcrumbs' => array('BLOCKQUOTE', 'P')) expecting it to match a P with a non-direct BLOCKQUOTE ancestor, but breadcrumb queries match a contiguous tail path (parent chain), not arbitrary-depth ancestry. No prose distinguishes 'direct path tail match' from 'ancestor anywhere'.",
+      "suggestion": "In next_tag()/matches_breadcrumbs() docs, state explicitly that a breadcrumbs query matches a contiguous path ending at the node (each element is the parent of the next), and that to find 'any ancestor of type X at any depth' you should query the target tag and then test get_breadcrumbs() membership yourself. The matches_breadcrumbs note about deliberately omitting a ** wildcard (line 727) is the right place to cross-reference this."
+    }
+  ]
+}

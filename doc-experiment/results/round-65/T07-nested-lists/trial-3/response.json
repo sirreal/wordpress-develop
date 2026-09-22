@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so I could track list nesting with the documented `next_token()`, `get_token_type()`, `get_tag()`, and `is_tag_closer()` APIs, then applied `add_class()` only to `UL`/`OL` openers encountered while already inside another list. The modified fragment is returned with `get_updated_html()`, which preserves untouched bytes exactly.",
+  "confidence": 91
+}

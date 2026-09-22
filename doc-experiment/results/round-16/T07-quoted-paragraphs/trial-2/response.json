@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML with full structural awareness. It iterates through all P tags using next_tag('P'), then checks if 'BLOCKQUOTE' appears in the breadcrumbs (the list of ancestor elements) for each P tag. If found, add_class() adds the 'quoted' class to that P tag. The get_updated_html() method returns the modified HTML while preserving everything else byte-for-byte. The HTML Processor handles all complex cases like nested blockquotes, implied closing tags, and whitespace preservation automatically.",
+  "confidence": 92
+}

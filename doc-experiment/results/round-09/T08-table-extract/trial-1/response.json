@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML, finds the first TABLE element using next_tag(), then walks through all tokens inside the table. For each TR (table row) element that is a direct child of TABLE/TBODY/THEAD/TFOOT, it extracts all TD and TH cells. Within each cell, it accumulates all #text token content using get_modifiable_text(), which automatically decodes character references. Depth tracking ensures we stay within the correct nesting levels.",
+  "confidence": 45
+}

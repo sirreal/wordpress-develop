@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with proper HTML5 parsing that handles SVG namespaces. Iterates through all img tags, checks that they're in the HTML namespace (not SVG), gets the decoded src attribute via get_attribute(), and skips images with missing, boolean, or empty src values. Returns a numeric array of decoded src values in document order.",
+  "confidence": 92
+}

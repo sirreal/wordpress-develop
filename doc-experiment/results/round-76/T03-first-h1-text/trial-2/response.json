@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'H1' )` to find the first heading, and a depth-bounded `next_token()` walk with `get_token_type()` plus `get_modifiable_text()` to concatenate only ordinary text nodes inside that heading, including text from nested elements and with character references already decoded.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `get_tag()`, `get_current_depth()`, `is_tag_closer()`, `set_bookmark()`, `seek()`, `set_attribute()`, `release_bookmark()`, `paused_at_incomplete_token()`, and `get_last_error()` APIs. The function scans to the first `UL` or `OL`, counts only `LI` opener tokens at one depth deeper than that list, and only applies the `data-item-count` edit if the list subtree is fully scanned; otherwise it returns the original HTML unchanged.",
+  "confidence": 91
+}

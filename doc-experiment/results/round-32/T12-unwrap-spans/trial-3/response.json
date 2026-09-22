@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walks the token stream with `next_token()`. For every token except `SPAN` openers and closers, it appends the normalized token text from `serialize_token()`, which preserves the fragment in normalized HTML form while unwrapping all spans and keeping their contents in place.",
+  "confidence": 86
+}

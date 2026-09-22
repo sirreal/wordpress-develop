@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses `WP_HTML_Processor::normalize()`, which is the static method that normalizes an HTML fragment. According to the documentation, this method returns a normalized string on success or `null` if the processor encounters unsupported HTML (such as misnested formatting elements like `<b>one<i>two</b>three</i>`). By checking if the result is not null, we determine whether normalization succeeded. This approach handles all cases mentioned in the task: unclosed tags, implied closing tags, and well-formed tables all normalize fine, while unsupported misnesting returns null.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses `WP_HTML_Processor::normalize()`, which is the documented API for normalizing HTML fragments. This method returns `null` when the HTML Processor encounters unsupported markup (like mis-nested formatting elements), making it ideal for checking whether normalization is possible. It returns a string when normalization succeeds, so comparing against `null` gives the correct boolean result.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment, finds the first H1 tag, records its depth, then walks through all subsequent tokens collecting text node content. Text is automatically decoded by get_modifiable_text(). Loop terminates when depth decreases below H1's depth (indicating we've exited the element). Returns null if no H1 found, or the concatenated text content otherwise.",
+  "confidence": 78
+}

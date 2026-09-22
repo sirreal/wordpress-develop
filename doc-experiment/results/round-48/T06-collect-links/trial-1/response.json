@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then walks tokens with `next_token()`. On each `A` opener it reads `href` with `get_attribute()` and starts collecting text; while inside that link it appends only `#text` token content from `get_modifiable_text()`, which yields decoded text and ignores markup, comments, and special-element opener text. It flushes each link on the matching `A` closer and fails closed with an empty array if parsing ended on incomplete or unsupported markup via `paused_at_incomplete_token()` or `get_last_error()`.",
+  "confidence": 88
+}

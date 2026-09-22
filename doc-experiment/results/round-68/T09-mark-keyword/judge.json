@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct `WP_HTML_Processor::create_fragment()` path for BODY fragments and normalized output. All HTML API calls are documented in the rendered files: `create_fragment`, `normalize`, `next_token`, `get_token_type`, `get_modifiable_text`, `serialize_token`, and `get_last_error`. The token-walking rewrite is idiomatic and uses decoded text for matching plus `serialize_token()` for output. Minor edge-policy reservation: it does not check `paused_at_incomplete_token()`, though the docs allow best-effort omission for incomplete trailing syntax when that is the caller policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor choice and documented API surface as trial-1. The implementation follows the documented `serialize_token()` wrapper pattern closely, checks only `#text` tokens, and therefore excludes attributes, comments, and special-element opener text. Minor edge-policy reservation: it checks `get_last_error()` but not `paused_at_incomplete_token()`; acceptable for best-effort normalized rewrites, but not explicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses the correct processor and only documented methods: `create_fragment`, `normalize`, `next_token`, `get_token_type`, `get_modifiable_text`, and `serialize_token`. The main path is idiomatic and passes all cases. It loses a few adherence points because the rendered docs for token rewrites say to reject or fall back when `get_last_error()` is non-null; this implementation returns the accumulated serialization without checking for a parser abort. It also leaves incomplete-token policy implicit."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, so there are no failed hidden cases to attribute to a misconception. The docs did well on the exact conceptual hazards this task exercises: the Tag Processor overview says to use the HTML Processor for normalized output and implied/missing closing tags; `create_fragment()` documents BODY-fragment construction and null returns; `next_token()` explains why text work needs token walking and why SCRIPT/STYLE/TITLE/TEXTAREA do not produce ordinary `#text` children; `get_modifiable_text()` states that `#text` content is decoded and that the method is not itself a predicate for ordinary DOM text; `serialize_token()` gives the crucial distinction between decoded text inspection and normalized token serialization. The main near-misses are edge-policy related rather than functional: none of the trials made an explicit `paused_at_incomplete_token()` decision, and trial-3 omitted the documented `get_last_error()` post-scan check. Trials 1 and 2 used `normalize($html) ?? $html` only as an error fallback, which is a documented possible policy, but it would discard any accumulated rewrite if reached.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` and the “rewrite while serializing tokens” recipe",
+      "problem": "Fallback policy is described, but string-returning callers still have to infer when returning accumulated output, `normalize($html)`, raw input, or `null` preserves the caller contract.",
+      "suggestion": "Add a small policy table for token rewrites: successful scan returns accumulated output; unsupported abort via `get_last_error()` should not silently return partial output unless best-effort is explicit; incomplete trailing syntax is omitted from normalized serialization unless the caller requires complete source bytes; raw input is not normalized output."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_modifiable_text()`",
+      "problem": "The method correctly documents decoded text and special-element behavior, but its name still invites use as a broad text predicate in tasks that mean ordinary DOM text only.",
+      "suggestion": "Add a compact “ordinary text vs modifiable text” example showing that comments and TEXTAREA/SCRIPT/STYLE/TITLE opener tokens can return modifiable text, while ordinary DOM text filters should first require `get_token_type() === '#text'`."
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path, walked tokens structurally, bounded the first table by depth, and collected only `#text` via `get_modifiable_text()`. All called HTML API methods are present in the rendered docs and execution reported no `_doing_it_wrong`. Minor adherence deduction: the extra cell-depth fallback/comment suggests some uncertainty about the documented guarantee that implicit/virtual closers are visited."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Very close to the documented recipe: find the first TABLE with `next_tag()`, then use one depth-bounded `next_token()` loop with row/cell state. Correctly relies on `#text` plus decoded `get_modifiable_text()` and handles implicit closers. All API calls are documented; no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented single-cursor subtree walk. It relies on HTML Processor virtual closers to flush rows/cells, which is documented and appropriate. Slight deduction only for not stating or checking any parser-abort/incomplete-input policy, though this is acceptable for the tested read-only extraction contract. All API calls are documented; no misuse records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs worked well for this task because they directly described the needed mental model: use the HTML Processor when structure matters; create body fragments with `create_fragment()`; use `next_token()` when text matters; bound subtree walks by the depth recorded at the opener; use `>=` rather than `>`; rely on virtual/implied closers for omitted tags; and collect ordinary text only from `#text` tokens using decoded `get_modifiable_text()`. The table cases were especially supported by the `next_token()` passage noting synthesized TBODY around `<table><tr>...`, and by the single-cursor warning against nested token loops for repeated regions. Near-misses: all candidates avoided undocumented calls, but none checked `get_last_error()` or `paused_at_incomplete_token()`, so the docs' completion-policy discussion did not translate into explicit policy code. Trial 1 also added a manual structural-boundary safety path despite the virtual-closer guarantee, suggesting the guarantee could be made even more prominent for optional/end-tag elements.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` docblock / rendered changelog",
+      "problem": "The prose recommends public use for token walking, but the `Since` note still says `Added for internal support; do not use`, which conflicts with the examples and could discourage the correct API.",
+      "suggestion": "Revise the changelog note to clarify historical status, or remove `do not use` from public rendered docs now that token walking is documented as a supported pattern."
+    },
+    {
+      "location": "HTML Processor docs around `next_token()` and `get_current_depth()`",
+      "problem": "The virtual-closer guarantee is present, but examples are generic. Candidates still showed uncertainty about whether omitted table cell/row closers need manual fallback handling.",
+      "suggestion": "Add a general optional-end-tag example showing that elements closed by HTML parsing rules still produce closer tokens, without giving a full table-extraction solution."
+    },
+    {
+      "location": "Completion policy guidance for read-only extraction",
+      "problem": "The docs mention `paused_at_incomplete_token()` and `get_last_error()`, but the examples do not show common policies for read-only extraction after a bounded scan.",
+      "suggestion": "Add small patterns for `return partial result`, `return empty on parser abort`, and `ignore errors after the bounded subtree`, explaining when each policy is appropriate."
+    },
+    {
+      "location": "Rendered Method Index",
+      "problem": "Consumer-facing docs list many private methods alongside public ones. Even though these trials did not call them, this increases the chance that subjects treat private parser internals as usable API.",
+      "suggestion": "Separate private/internal methods from the public API index or collapse them behind an internal section with a clear warning not to call them."
+    }
+  ]
+}

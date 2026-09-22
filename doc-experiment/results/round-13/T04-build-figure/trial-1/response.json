@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor with a template containing the exact HTML structure needed. It uses set_attribute() to safely encode the src and alt values (which handles special characters automatically), then iterates through tokens to find the #text node inside figcaption and replaces it with the caption text using set_modifiable_text(). Finally, it returns the updated HTML using get_updated_html().",
+  "confidence": 85
+}

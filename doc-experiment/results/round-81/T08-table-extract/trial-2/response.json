@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text() so table structure and decoded cell text are handled the way the HTML parser would. The function collects rows and cells only from the first TABLE subtree and returns an empty array when no table is found.",
+  "confidence": 90
+}

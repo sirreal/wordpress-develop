@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, wrapping only ordinary `#text` tokens whose decoded text contains the keyword, and emitted normalized output with `serialize_token()`. Special text-bearing elements are naturally excluded because their contents are not exposed as `#text` tokens in the documented token walk.",
+  "confidence": 93
+}

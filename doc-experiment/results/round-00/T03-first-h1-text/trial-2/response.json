@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment, then next_tag('H1') to locate the first H1 opener. After finding it, I recorded the nesting depth via get_current_depth(). I then iterated with next_token(), collecting get_modifiable_text() for every token whose get_token_type() is '#text' while the current depth remains greater than the H1's depth \u2014 stopping when depth drops back to the H1 level (indicating the H1's closing tag has been processed and we've exited). This correctly handles nested elements (their text nodes are still inside the H1) and elements with no text (empty string is returned, not null), while returning null only when no H1 is present.",
+  "confidence": 82
+}

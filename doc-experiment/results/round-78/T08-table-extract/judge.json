@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural parser, `WP_HTML_Processor::create_fragment()`, and a single `next_token()` walk bounded by `get_current_depth()`. All HTML API methods used are present in the rendered docs. It correctly used `#text` plus `get_modifiable_text()` for decoded cell text and relied on virtual closers for omitted end tags. Minor deductions: it manually scans for the first TABLE instead of the more direct documented `next_tag( 'TABLE' )`, includes an unnecessary `class_exists()` fallback, and does not state a strict policy for `paused_at_incomplete_token()` / `get_last_error()`."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Processor`, found the first TABLE with `next_tag()`, then used a single token-walk state machine. No undocumented API calls and no `_doing_it_wrong` records. It follows the docs on decoded text and ordinary `#text` tokens. Minor deductions for redundant opener-triggered flushing and mostly unused row/cell depth checks, which suggest partial uncertainty about the documented guarantee that `next_token()` emits closers for implicit/end-of-input closes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout: `create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()`. It uses a single stateful walk, handles decoded text, markup, empty cells, omitted closers, and first-table-only traversal. Minor deductions for a dead/impossible text-handling branch inside the tag branch, some reliance on final cleanup rather than purely closer-driven state, and no explicit incomplete-input/error policy."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8, with no errors, trigger errors, or `_doing_it_wrong` records. The docs appear to have successfully taught the key distinctions for this task: use the HTML Processor rather than the Tag Processor when document structure matters; use `create_fragment()` for body fragments; use `next_token()` when text nodes matter; bound subtree walks with `get_current_depth() >= recorded_depth`; gather ordinary DOM-style text only from `#text` tokens; and use `get_modifiable_text()` for already-decoded text. The strongest passages were `Which processor should I use?`, `Recipe: collect DOM-style text from a subtree`, `next_token()`, and `get_current_depth()`. Near-misses were mostly harmless: trial 2 over-engineered implicit closer handling, trial 3 had unreachable text code, and all trials left the completion policy for unsupported or incomplete input implicit rather than checking `paused_at_incomplete_token()` / `get_last_error()`.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-78/html-processor.md, `next_token()`",
+      "problem": "The docs state that closers are emitted for implicit and end-of-input closes, but they do not make optional-end-tag sibling transitions especially concrete. Trial 2 added redundant flushing on new openers, suggesting uncertainty about whether virtual closers are sufficient.",
+      "suggestion": "Add a general note that optional-end-tag elements such as repeated sibling regions emit a closing token at the point the HTML parser closes the previous element, so a single closer-driven state machine can record empty and malformed-but-browser-valid regions without guessing from the next opener."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-78/html-processor.md, `get_tag()` and `get_token_name()`",
+      "problem": "The inherited `get_tag()` documentation is valid, but the example is Tag Processor oriented and does not clearly spell out how `get_tag()` behaves during HTML Processor `next_token()` walks, especially for virtual tag tokens versus non-tag tokens.",
+      "suggestion": "Clarify that on HTML Processor tag tokens, including virtual tokens, `get_tag()` returns the uppercase element name and `get_token_name()` returns the same tag name; on non-tag tokens `get_tag()` returns null while `get_token_name()` returns names such as `#text`."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-78/html-processor.md, `create_fragment()` / read-only extraction recipes",
+      "problem": "Completion policy for read-only extraction is described, but it is scattered across recipes. All trials returned best-effort results without explicitly deciding whether incomplete input or unsupported markup should be rejected.",
+      "suggestion": "Add a compact read-only extraction policy note: accumulated visited tokens remain usable; best-effort extractors may return them; strict extractors should check both `paused_at_incomplete_token()` and `get_last_error()` after the scan, with `get_last_error()` indicating parser abort rather than mere trailing truncation."
+    }
+  ]
+}

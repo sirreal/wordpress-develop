@@ -1,0 +1,43 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor::create_fragment for a body fragment (docs default context is <body>). Every method called exists in the docs: create_fragment (html-processor.md:348), next_token (html-processor.md:606), get_token_type (html-processor.md:1810), get_modifiable_text (html-processor.md:2088). Idiomatic token-walk loop filtering on '#text' === get_token_type(), matching the documented pattern (html-tag-processor.md:173-176). Edge cases handled well: guards null processor (create_fragment returns static|null per docs), returns '' for non-positive limit, does not re-decode (docs at html-processor.md:2100 say #text is already DECODED), passes explicit 'UTF-8' to mb_strlen/mb_substr for codepoint-accurate slicing as the docs instruct. SCRIPT exclusion is correct and non-accidental: it filters by #text token type, and per probe SCRIPT content rides on the #tag token, not a #text child. Chose incremental per-token counting (mb_strlen accumulation + early break) rather than accumulate-then-truncate; equally correct, slightly more code, arguably better for very long inputs. Passed 9/9. Minor: it correctly accumulates across consecutive #text tokens, consistent with the docs note at html-processor.md:618.",
+      "hallucinated_methods_note": ""
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical to the reference solution. Correct processor choice (create_fragment, body context). Only documented methods used: create_fragment, next_token, get_token_type, get_modifiable_text. Textbook idiomatic walk loop, accumulate-then-truncate with a single mb_substr(text, 0, max, 'UTF-8') — exactly the slicing idiom shown at html-processor.md:2101. Edge cases: null guard, non-positive limit returns '', no double-decode, explicit UTF-8 encoding. SCRIPT/STYLE exclusion falls out correctly from #text filtering. Passed 9/9. Cleanest, most idiomatic of the three.",
+      "hallucinated_methods_note": ""
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-2 and the reference. Correct processor, documented methods only (create_fragment, next_token, get_token_type, get_modifiable_text), idiomatic walk loop, single mb_substr with explicit UTF-8 encoding. Edge cases all handled (null guard, zero/negative limit, no re-decode of already-decoded #text). SCRIPT excluded correctly via #text type filter. Passed 9/9. Equivalent quality to trial-2; trailing ?> close tag is a harmless stylistic blemish, not an API issue.",
+      "hallucinated_methods_note": ""
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 9/9, with no _doing_it_wrong or trigger_error records. The task is a strong showcase of what the documentation gets right, so the analysis focuses on the near-misses the docs successfully prevented.\n\nThe two genuinely tricky cases were script-excluded and entities-count-decoded, and the docs defused both:\n\n1. script-excluded (\"<p>before</p><script>var x = 'hidden';</script><p>after</p>\" -> \"beforeafter\"). The trap: get_modifiable_text() explicitly INCLUDES SCRIPT/STYLE contents (stated three times across both files, e.g. html-processor.md:2096, html-tag-processor.md:1834). A subject who walked all tokens and concatenated get_modifiable_text() unconditionally — or who filtered by element name instead of token type — would have leaked the script body. All three correctly filtered on '#text' === get_token_type(). The decisive passage is html-processor.md:2103: \"for elements which cannot contain markup (SCRIPT, STYLE, TEXTAREA, TITLE), the text is carried by the ELEMENT's own token — there is no separate #text child to visit.\" Confirmed by probe: SCRIPT content surfaces as token type '#tag'/name 'SCRIPT', never as '#text'. Because the task wants text-node content only, '#text' filtering is exactly right and the docs make that distinction explicit. This was the most likely failure point and the docs covered it well.\n\n2. entities-count-decoded (\"<p>Fish &amp; Chips</p>\", 6 -> \"Fish &\"). The trap is double-decoding (turning &amp; into & yourself after the parser already did) or counting raw bytes. The docs state plainly that #text is returned DECODED and \"Do not decode it again\" (html-processor.md:2100; html-tag-processor.md:1838 even uses the exact \"&amp; is returned as &\" example), and instruct passing an explicit UTF-8 encoding when measuring/slicing by code points. All three followed this verbatim.\n\n3. multibyte-emoji / accented (codepoint-accurate truncation). The docs' inline guidance \"when measuring or slicing by code points pass an explicit encoding, e.g. mb_substr( $text, 0, $limit, 'UTF-8' )\" (html-processor.md:2100-2101) is essentially the answer; every trial used the exact form. Probe confirms 🌨️ is 2 codepoints (U+1F328 + U+FE0F variation selector) and mb_substr at limit 4 keeps \"ab\" + emoji.\n\n4. malformed-nesting and interelement-whitespace passed because next_token() walks the parser's normalized token stream and reports inter-element whitespace as #text nodes; the task spec told subjects this, and the docs' token-walk model is consistent with it. No subject tried to normalize whitespace.\n\nThe only divergence among trials was trial-1's incremental per-token counting versus trials 2/3's accumulate-then-mb_substr. Both are correct; the per-token approach is not better-documented, just an independent (valid) design. No misconceptions surfaced.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / WP_HTML_Tag_Processor::get_modifiable_text() — 'Note that for elements which cannot contain markup' paragraph",
+      "problem": "The doc correctly states SCRIPT/STYLE/TEXTAREA/TITLE text rides on the element's own token rather than a #text child, but the contrast that matters for text-extraction tasks — 'if you only want visible text-node content, filter on get_token_type() === \"#text\" and SCRIPT/STYLE are naturally excluded' — is left for the reader to infer. The three trials inferred it correctly, but a weaker reader could read 'modifiable text includes SCRIPT/STYLE contents' and conclude they must special-case those elements out.",
+      "suggestion": "Add one sentence to the get_modifiable_text() note making the corollary explicit: 'Conversely, a loop that collects text only from tokens where get_token_type() === \"#text\" will not see SCRIPT, STYLE, or other raw-text element contents, since those are carried on the element token and not emitted as #text.' This generalizes to any plain-text-extraction use case without encoding this task's solution."
+    },
+    {
+      "location": "WP_HTML_Processor / WP_HTML_Tag_Processor — token-walking section (e.g. the 'next_token()' overview and html-tag-processor.md:250-270 example)",
+      "problem": "The canonical text-extraction example walks tokens and appends get_modifiable_text() under a '#text' case, but no single example ties together the three facts a plain-text excerpt needs: (a) accumulate across consecutive #text tokens, (b) the result is already decoded, (c) slice by code points with explicit UTF-8. Each fact is documented separately (html-processor.md:618, :2100), so a reader must assemble them. All trials assembled them, but the docs would be stronger with one consolidated example.",
+      "suggestion": "In the token-walk overview, add a short 'extract the plain text of a fragment' snippet that concatenates get_modifiable_text() for #text tokens and notes inline that the text is already decoded and should be measured/sliced with mb_*(..., 'UTF-8'). Keep it generic (no truncation logic) so it teaches the pattern, not this task's answer."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment()",
+      "problem": "create_fragment() returns 'static|null' per the signature, and all three trials defensively guarded against null, but the docblock does not state WHEN it returns null (e.g. unsupported context, encoding other than UTF-8/windows-1252). Readers guard blindly without knowing the failure modes, and could omit the guard if they assume valid input always succeeds.",
+      "suggestion": "Add a 'Returns null when …' clause to create_fragment() enumerating the documented failure conditions (unsupported context element, unsupported encoding) so callers know the null branch is reachable and why."
+    }
+  ]
+}

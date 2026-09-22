@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walks the document once with `next_token()`. When it sees an `H1` through `H6` opener via `get_tag()` and `is_tag_closer()`, it starts collecting descendant `#text` token content with `get_modifiable_text()`, and when the matching heading closer is reached it records the heading level and accumulated text in document order.",
+  "confidence": 91
+}

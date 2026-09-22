@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which the docs recommend for flat, byte-precise attribute/class edits. It scans the HTML with `next_tag( 'img' )` (case-insensitive, matching only real tags and not comment contents), appends the class with `add_class( 'wp-image' )`, and returns the minimally changed result with `get_updated_html()`.",
+  "confidence": 98
+}

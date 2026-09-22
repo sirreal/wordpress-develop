@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() to parse and serialize both input HTML fragments into their canonical forms. Normalization handles all the variations mentioned in the task: omitted tags are added, tag-names are lowercased, attribute quoting is normalized, and character references are decoded. By comparing the normalized outputs, we determine if both fragments represent the same DOM structure. If either fragment cannot be fully parsed (returns null), we return false per the task requirements.",
+  "confidence": 78
+}

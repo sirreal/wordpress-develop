@@ -1,0 +1,115 @@
+{
+    "id": "T08-table-extract",
+    "title": "Extract table data",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "traversal",
+    "processor": "html",
+    "function": "table_to_array",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<table><tr><th>Name</th><th>Age</th></tr><tr><td>Ada</td><td>36</td></tr></table>"
+            ],
+            "expected": [
+                [
+                    "Name",
+                    "Age"
+                ],
+                [
+                    "Ada",
+                    "36"
+                ]
+            ]
+        },
+        {
+            "id": "thead-tbody",
+            "args": [
+                "<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>a</td></tr><tr><td>b</td></tr></tbody></table>"
+            ],
+            "expected": [
+                [
+                    "H"
+                ],
+                [
+                    "a"
+                ],
+                [
+                    "b"
+                ]
+            ]
+        },
+        {
+            "id": "omitted-closers",
+            "args": [
+                "<table><tr><td>one<td>two<tr><td>three<td>four</table>"
+            ],
+            "expected": [
+                [
+                    "one",
+                    "two"
+                ],
+                [
+                    "three",
+                    "four"
+                ]
+            ]
+        },
+        {
+            "id": "markup-in-cells",
+            "args": [
+                "<table><tr><td><strong>bold</strong> text</td><td><a href=\"#\">link</a></td></tr></table>"
+            ],
+            "expected": [
+                [
+                    "bold text",
+                    "link"
+                ]
+            ]
+        },
+        {
+            "id": "entities-in-cells",
+            "args": [
+                "<table><tr><td>Fish &amp; Chips</td></tr></table>"
+            ],
+            "expected": [
+                [
+                    "Fish & Chips"
+                ]
+            ]
+        },
+        {
+            "id": "no-table",
+            "args": [
+                "<p>no tables here</p>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "first-table-only",
+            "args": [
+                "<table><tr><td>first</td></tr></table><table><tr><td>second</td></tr></table>"
+            ],
+            "expected": [
+                [
+                    "first"
+                ]
+            ]
+        },
+        {
+            "id": "empty-cells",
+            "args": [
+                "<table><tr><td></td><td>x</td></tr></table>"
+            ],
+            "expected": [
+                [
+                    "",
+                    "x"
+                ]
+            ]
+        }
+    ]
+}

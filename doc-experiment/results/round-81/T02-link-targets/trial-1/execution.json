@@ -1,0 +1,80 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-81/T02-link-targets/trial-1/candidate.php",
+  "function": "add_link_targets",
+  "passed": 8,
+  "total": 8,
+  "cases": [
+    {
+      "id": "simple",
+      "status": "pass",
+      "expected": "<a target=\"_blank\" href=\"/x\">go</a>",
+      "actual": "<a target=\"_blank\" href=\"/x\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-href-skipped",
+      "status": "pass",
+      "expected": "<a name=\"anchor\">stay</a><a target=\"_blank\" href=\"/y\">go</a>",
+      "actual": "<a name=\"anchor\">stay</a><a target=\"_blank\" href=\"/y\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "empty-href-counts",
+      "status": "pass",
+      "expected": "<a target=\"_blank\" href=\"\">go</a>",
+      "actual": "<a target=\"_blank\" href=\"\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "valueless-href-counts",
+      "status": "pass",
+      "expected": "<a target=\"_blank\" href>go</a>",
+      "actual": "<a target=\"_blank\" href>go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "existing-target-overwritten",
+      "status": "pass",
+      "expected": "<a href=\"/x\" target=\"_blank\">go</a>",
+      "actual": "<a href=\"/x\" target=\"_blank\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "uppercase-attribute",
+      "status": "pass",
+      "expected": "<a target=\"_blank\" HREF=\"/x\">go</a>",
+      "actual": "<a target=\"_blank\" HREF=\"/x\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "inside-comment-ignored",
+      "status": "pass",
+      "expected": "<!-- <a href=\"/x\">go</a> --><a target=\"_blank\" href=\"/y\">go</a>",
+      "actual": "<!-- <a href=\"/x\">go</a> --><a target=\"_blank\" href=\"/y\">go</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "nested-markup-in-link",
+      "status": "pass",
+      "expected": "<a target=\"_blank\" href=\"/x\"><strong>bold</strong> move</a>",
+      "actual": "<a target=\"_blank\" href=\"/x\"><strong>bold</strong> move</a>",
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

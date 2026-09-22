@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment, structure-aware traversal. Every HTML API method used is present in the rendered docs, there were no _doing_it_wrong records, and the implementation follows the documented bookmark, bounded next_token(), depth, seek, set_attribute(), and get_updated_html() pattern."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. It uses the documented direct-child opener checks and clean-scan checks, and passes all cases. Minor idiom miss: the bookmark is not released before returning, although the docs recommend releasing bookmarks when no longer needed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor with documented structural APIs, bookmarks, depth-bounded token walking, get_last_error()/paused_at_incomplete_token(), set_attribute(), and get_updated_html(). No undocumented methods or misuse records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 11 hidden cases, so there were no failed hidden cases to attribute to a misconception. The docs did well in three important places: the processor-choice guidance clearly points structure-sensitive work to WP_HTML_Processor; the 'scan a region before editing its opener' recipe gives the exact bookmark/seek/update shape; and the 'test subtree membership and direct children' plus get_current_depth() text explains why direct child openers require #tag, !is_tag_closer(), and depth == container_depth + 1. Those passages prevented over-counting nested LI elements and handled omitted LI closers. The incomplete and unsupported cases were also handled because the docs tell callers to check paused_at_incomplete_token() and get_last_error() after the bounded scan before mutating. Near-misses: trial-2 omitted release_bookmark(), and the rendered next_token() method section still contains a confusing 'do not use' since-note despite the overview recipes relying on it as public guidance.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() method docs",
+      "problem": "The method body and overview recipes present next_token() as the right public tool for subtree walks, but the Since note still says 'Added for internal support; do not use.'",
+      "suggestion": "Remove or revise the stale 'do not use' language so it matches the documented public recipes for token walking with structural awareness."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error(), paused_at_incomplete_token(), and HTML Support wording",
+      "problem": "The docs say unsupported markup in the input aborts processing, but do not make the cursor-local timing fully explicit. A reader can infer that later unsupported or incomplete syntax invalidates an already-completed bounded subtree scan.",
+      "suggestion": "Clarify that these indicators report what the processor has encountered so far. Add a general note that a bounded subtree walk can validate the scanned region without proving the rest of the document tail is complete."
+    },
+    {
+      "location": "WP_HTML_Processor::set_bookmark() / Bookmarks section",
+      "problem": "The method-level bookmark example is inherited-style Tag Processor code, while structure-aware bookmark use requires WP_HTML_Processor patterns and explicit cleanup.",
+      "suggestion": "Add an HTML Processor-specific bookmark example that records an opener, walks descendants by depth, seeks back to mutate the opener, and releases the bookmark on success and fallback paths."
+    }
+  ]
+}

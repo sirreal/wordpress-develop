@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` linear scan plus bookmarks: walk every `h2`, remember the last match with `set_bookmark('last-h2')`, then `seek()` back and call `add_class('final-section')`. If no `h2` is found, or the bookmark cannot be revisited, the function returns the original HTML unchanged.",
+  "confidence": 97
+}

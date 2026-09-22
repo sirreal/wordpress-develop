@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so I could collect ordinary `#text` nodes in document order while tracking open `A` elements by depth. Link `href` values come from `get_attribute('href')`, which already returns decoded strings, and link text comes from `get_modifiable_text()` on `#text` tokens only, per the documented HTML Processor subtree-text guidance.",
+  "confidence": 92
+}

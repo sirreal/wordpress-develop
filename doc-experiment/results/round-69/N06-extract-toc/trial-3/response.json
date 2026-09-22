@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and `get_current_depth()` to collect only `#text` tokens inside each heading opener, flushing when the processor depth drops below the heading\u2019s opener depth. This follows the documented HTML Processor subtree-walk and text-extraction APIs, and preserves heading order and empty headings.",
+  "confidence": 93
+}

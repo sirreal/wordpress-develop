@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly used WP_HTML_Processor::create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(); all are documented. Small penalty for falling back to original HTML on any get_last_error(), which can discard valid queued edits made before later unsupported markup, and for no explicit incomplete-token policy."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. API choice and traversal are correct: HTML Processor, fragment mode, all-tag scan with UL/OL branching, breadcrumb ancestor check excluding the current node, add_class(), and get_updated_html(). Same latent issue as trial 1: the get_last_error() fallback may erase earlier valid updates after unsupported later input."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Cleanest ancestor check using array_pop() on get_breadcrumbs(); otherwise same documented, idiomatic API use as the other trials. No hallucinated methods or _doing_it_wrong records. Same small penalty for unconditional original-input fallback on get_last_error()."
+    }
+  ],
+  "failure_analysis": "All trials passed every frozen hidden case, so there are no per-case functional failures to attribute. The docs did well on the central requirements: the Tag Processor overview says it has no tree awareness and points structural work to WP_HTML_Processor; create_fragment() is documented for BODY fragments; next_tag() documents that tag_name is not a list and shows scanning all tags then branching; get_breadcrumbs() explains the root-to-current path; add_class() documents preserving existing classes; get_updated_html() documents byte preservation for untouched input. Near-miss: every trial added a post-scan get_last_error() fallback to the original input. That is understandable from the Unsupported Markup and rewrite guidance, but for queued class/attribute mutations get_updated_html() still applies earlier edits even after later unsupported markup. A read-only probe with an edited nested list before an unsupported table-foster-parenting construct showed the reference returning the earlier class edit, while these candidates return the original HTML. This did not appear in the frozen cases. Another near-miss is incomplete input: none checked paused_at_incomplete_token(), though for the tested and simple truncated cases their behavior matches the reference. The docs discuss incomplete-token policy, but the rule for source-preserving mutation loops is still implicit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error() and WP_HTML_Tag_Processor::get_updated_html()",
+      "problem": "The docs explain how to detect unsupported markup and separately explain queued updates, but they do not clearly state what get_updated_html() returns after the HTML Processor aborts later in the scan. This led all trials to discard earlier valid edits whenever get_last_error() is non-null.",
+      "suggestion": "Add a policy note: get_updated_html() returns queued source-preserving edits even if a later scan hit unsupported markup; fall back to the original only when the caller requires proof that the entire input was processed. Include a generic example with an attribute/class edit before later unsupported markup."
+    },
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() / Breadcrumbs overview",
+      "problem": "The docs define breadcrumbs as including the current element, but do not give an explicit ancestor-only predicate. This task required excluding the current node before testing for ancestor membership.",
+      "suggestion": "Add a general ancestor-check idiom that slices or pops the current element from get_breadcrumbs() before testing ancestors, and remind readers that implicit HTML and BODY entries are included."
+    },
+    {
+      "location": "HTML Processor Usage recipes for mutation loops",
+      "problem": "The examples cover direct breadcrumb queries, subtree scans, and token serialization, but there is no concise source-preserving structural mutation recipe tying next_tag(), get_breadcrumbs(), add_class()/set_attribute(), get_updated_html(), get_last_error(), and paused_at_incomplete_token() together.",
+      "suggestion": "Add a generic recipe for 'mutate matched tags based on structural context' that distinguishes normal source-preserving mutations from serialize_token() rewrites and states the completion/error policy choices."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and HTML Processor scan-completion notes",
+      "problem": "Incomplete-input guidance is present but dispersed, and it is not obvious when a class/attribute mutation loop should reject truncation versus preserve the original trailing bytes.",
+      "suggestion": "Add a short note to mutation-loop guidance: after draining the processor, check paused_at_incomplete_token() only if the function contract requires complete-source coverage; otherwise get_updated_html() preserves untouched incomplete trailing syntax."
+    }
+  ]
+}

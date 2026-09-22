@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path, walked tokens, gated on `#text`, compared decoded `get_modifiable_text()`, and emitted normalized wrappers with `serialize_token()`. All API calls are documented and no `_doing_it_wrong` records appeared. Minor concern: raw-input fallback on processor errors is a clear policy, but not normalized output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and core rewrite pattern. All called methods are documented, including `normalize()`. It omits the documented post-scan `get_last_error()` check, so unsupported markup after earlier emitted tokens would return a partial rewrite rather than a deliberate fallback."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, documented methods only, idiomatic token loop, decoded text comparison, `serialize_token()` wrapping, and post-scan `get_last_error()` fallback. Minor residual concern is that the ultimate fallback can still become raw input, which is not normalized."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across trials: every `execution.json` reports 8/8 passing and no `_doing_it_wrong` entries. The docs did well in the exact areas this task stresses: the processor-choice guidance says to use the HTML Processor for normalized output and implied/missing closing tags; the DOM-style text recipe says ordinary text is only `#text` tokens; `get_modifiable_text()` explains decoded text and special-element opener text; and `serialize_token()` explicitly documents token-by-token normalized rewrites with wrapper markup. The main near-miss is Trial 2's missing `get_last_error()` check, despite the `serialize_token()` section saying to reject or fall back on parser aborts. Trials 1 and 3 chose raw-input fallbacks on hard errors; the docs warn this discards rewrites and is not normalized, but leave the fallback policy to the caller contract.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite checklist",
+      "problem": "The docs warn that raw input and `normalize($html)` discard emitted rewrites, but examples still leave fallback policy open enough that candidates may return raw HTML from functions promising normalized output.",
+      "suggestion": "Add a contract-oriented note: when a caller promises normalized HTML, raw input is not an equivalent fallback; choose an explicit sentinel, accumulated best-effort serialization, or a documented normalized-only fallback."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and `serialize_token()` examples",
+      "problem": "A candidate can follow the main loop pattern and still omit the post-loop parser-abort check.",
+      "suggestion": "Make every token-rewrite example include the small post-loop `get_last_error()` branch, or label omitted error handling as intentionally elided."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() docblock",
+      "problem": "Decoded/raw behavior is described, but the method covers several token categories with different semantics, which is easy to misuse as a text-node predicate.",
+      "suggestion": "Add a compact token-type table directly in the method docblock: `#text` decoded ordinary text, comments raw/non-DOM text, TITLE/TEXTAREA decoded opener-carried text, SCRIPT/STYLE raw opener-carried text."
+    }
+  ]
+}

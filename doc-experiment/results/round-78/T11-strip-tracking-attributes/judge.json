@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "30/30 processor choice: uses WP_HTML_Tag_Processor, the right tool for flat attribute edits. 30/30 API usage: next_tag(), get_attribute_names_with_prefix(), remove_attribute(), and get_updated_html() are documented. 25/25 idiom: walks tags, edits current opener, returns get_updated_html(). 15/15 edge handling: uses documented case-insensitive prefix matching and never inspects attribute values, so null/true/empty-string value semantics do not create risk; empty() safely treats null and array() as no-op states for this task."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "30/30 processor choice: uses WP_HTML_Tag_Processor. 30/30 API usage: all called methods are documented and no _doing_it_wrong records appear. 25/25 idiom: canonical next_tag() loop, prefix enumeration, per-attribute remove_attribute(), get_updated_html(). 15/15 edge handling: checks null from get_attribute_names_with_prefix(), relies on documented lowercase/case-insensitive matching, and avoids text or attribute-value decoding pitfalls."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation pattern as trial-2. Correct Tag Processor choice, only documented methods, idiomatic token walking over tag openers, and appropriate handling of the prefix API's null return. No undocumented calls or misuse signals."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs succeeded because the Tag Processor overview explicitly presents it as the tool for finding tags and changing attributes/classes, while the HTML Processor overview says Tag Processor is valuable for modifying attributes on individual tags. The Tag Processor workflow shows construction with new WP_HTML_Tag_Processor($html), next_tag() traversal, attribute edits, and get_updated_html(). The get_attribute_names_with_prefix() section provided the key contract: lowercase names, case-insensitive matching, and an uppercase DATA-* example. The next_tag() section also protected the comments case by saying only real HTML tags match and tag-like text inside comments/raw text is never modified. get_updated_html() clearly states it is the way to read queued edits while preserving untouched bytes. Near misses were minor: the prefix-name return contract does not explicitly say matched tags with no matching attributes return array(), and remove_attribute() is terse compared with the source behavior around case-insensitive names and duplicate attributes.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() return documentation",
+      "problem": "The rendered docs say the method returns array|null and null when no tag opener is matched, but they do not explicitly distinguish the matched-opener/no-matching-attributes case.",
+      "suggestion": "State that a matched tag opener with no matching attributes returns an empty array, while null means the processor is not currently matched on a tag opener."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() description",
+      "problem": "The docs say matching is case-insensitive and names are lowercase, but the practical implication is easy to miss: returned names are canonical names safe to pass back into attribute APIs.",
+      "suggestion": "Add a sentence that returned lowercase names may be passed directly to get_attribute(), set_attribute(), or remove_attribute() while still targeting source attributes case-insensitively."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() public docblock",
+      "problem": "The method section only says it removes an attribute and returns whether one was removed. It omits important public behavior visible in source: matching is ASCII case-insensitive, false is returned when not on a tag opener or when the attribute was absent, and duplicate attributes with the same normalized name are removed too.",
+      "suggestion": "Expand the public contract with those behaviors, especially the case-insensitive name matching and the safe no-op behavior outside a matched opener or for absent attributes."
+    }
+  ]
+}

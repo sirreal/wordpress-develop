@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the fragment token by token and concatenate `serialize_token()` for everything except `SPAN` tag tokens, which removes both openers and closers while preserving their contents and yielding normalized serialization. If processor creation fails, I fall back to normalized input when available.",
+  "confidence": 92
+}

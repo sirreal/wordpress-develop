@@ -1,0 +1,93 @@
+{
+    "id": "T05-text-excerpt",
+    "title": "Plain-text excerpt with a length limit",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "text",
+    "processor": "html",
+    "function": "html_text_excerpt",
+    "cases": [
+        {
+            "id": "no-truncation-needed",
+            "args": [
+                "<p>Just <a href=\"#\">a link</a> to content.</p>",
+                1000
+            ],
+            "expected": "Just a link to content."
+        },
+        {
+            "id": "truncate-mid-link",
+            "args": [
+                "<p>Just <a href=\"#\">a link</a> to content.</p>",
+                8
+            ],
+            "expected": "Just a l"
+        },
+        {
+            "id": "entities-count-decoded",
+            "args": [
+                "<p>Fish &amp; Chips</p>",
+                6
+            ],
+            "expected": "Fish &"
+        },
+        {
+            "id": "multibyte-emoji",
+            "args": [
+                "<p>ab🌨️cd</p>",
+                4
+            ],
+            "expected": "ab🌨️"
+        },
+        {
+            "id": "accented",
+            "args": [
+                "<p>cafés are nice</p>",
+                5
+            ],
+            "expected": "cafés"
+        },
+        {
+            "id": "script-excluded",
+            "args": [
+                "<p>before</p><script>var x = 'hidden';</script><p>after</p>",
+                1000
+            ],
+            "expected": "beforeafter"
+        },
+        {
+            "id": "textarea-title-counts-script-style-excluded",
+            "args": [
+                "<textarea>form &amp; field</textarea><script>script</script><style>style</style><title>Doc &amp; Title</title><p>Body</p>",
+                1000
+            ],
+            "expected": "form & fieldDoc & TitleBody"
+        },
+        {
+            "id": "interelement-whitespace",
+            "args": [
+                "<p>a</p> <p>b</p>",
+                1000
+            ],
+            "expected": "a b"
+        },
+        {
+            "id": "zero-limit",
+            "args": [
+                "<p>anything</p>",
+                0
+            ],
+            "expected": ""
+        },
+        {
+            "id": "malformed-nesting",
+            "args": [
+                "<div><p>one<p>two</div>tail",
+                1000
+            ],
+            "expected": "onetwotail"
+        }
+    ]
+}

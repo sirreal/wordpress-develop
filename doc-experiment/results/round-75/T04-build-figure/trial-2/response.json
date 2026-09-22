@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I seeded a figure template with placeholder `src`, `alt`, and caption text so the HTML API could preserve the exact attribute order and safely encode each plain input string. The implementation uses `WP_HTML_Tag_Processor::set_attribute()` for `src` and `alt`, `next_token()` plus `get_token_type()` to find the caption text node, `set_modifiable_text()` to encode the caption, and `get_updated_html()` to return the final fragment.",
+  "confidence": 96
+}

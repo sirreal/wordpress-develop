@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() which is specifically designed for normalizing HTML fragments in BODY context. This method returns a string if normalization succeeds, or null if the processor encounters unsupported markup (such as misnested formatting elements). By checking if the result is not null, we determine whether normalization succeeded.",
+  "confidence": 92
+}

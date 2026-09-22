@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so table parsing follows browser-like HTML structure, including implied table elements such as `TBODY` and `TR`. It finds the first `TABLE` with `next_tag()`, then walks that table subtree with a single `next_token()` loop, collecting row boundaries from `TR` opener/closer tokens and concatenating only `#text` token content inside `TD` and `TH` cells via `get_modifiable_text()`, as the docs recommend for ordinary DOM-style text extraction.",
+  "confidence": 89
+}

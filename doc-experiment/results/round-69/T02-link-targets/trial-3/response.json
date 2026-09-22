@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses WP_HTML_Tag_Processor for a linear, byte-preserving attribute rewrite: scan each `a` tag with `next_tag( 'a' )`, test for the presence of `href` with `get_attribute( 'href' ) !== null` so empty and valueless `href` both count, then overwrite `target` via `set_attribute( 'target', '_blank' )` and return the result with `get_updated_html()`.",
+  "confidence": 98
+}

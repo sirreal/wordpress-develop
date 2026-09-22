@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to get tree-aware parsing for a BODY fragment, then walked tokens with next_token(), using get_token_type(), get_tag(), and is_tag_closer() to maintain a list-ancestor stack and add the nested-list class only to UL/OL openers that appear inside another list. The final HTML is returned with get_updated_html(), which preserves untouched bytes exactly.",
+  "confidence": 89
+}

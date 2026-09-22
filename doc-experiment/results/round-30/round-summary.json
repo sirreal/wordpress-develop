@@ -1,0 +1,119 @@
+{
+  "round_score": 99.3,
+  "core_score": 99.3,
+  "by_split": {
+    "train": 99.3
+  },
+  "by_concept": {
+    "traversal": 99.3
+  },
+  "tasks": {
+    "N03-first-list-count": {
+      "score": 100.0,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 11,
+          "total": 11,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-2",
+          "passed": 11,
+          "total": 11,
+          "adherence": 100,
+          "score": 100.0
+        },
+        {
+          "trial": "trial-3",
+          "passed": 11,
+          "total": 11,
+          "adherence": 100,
+          "score": 100.0
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "traversal",
+        "processor": "html",
+        "split": "train"
+      }
+    },
+    "T07-nested-lists": {
+      "score": 98.6,
+      "trials": [
+        {
+          "trial": "trial-1",
+          "passed": 7,
+          "total": 7,
+          "adherence": 96,
+          "score": 98.8
+        },
+        {
+          "trial": "trial-2",
+          "passed": 7,
+          "total": 7,
+          "adherence": 97,
+          "score": 99.1
+        },
+        {
+          "trial": "trial-3",
+          "passed": 7,
+          "total": 7,
+          "adherence": 93,
+          "score": 97.9
+        }
+      ],
+      "labels": {
+        "role": "core",
+        "commonness": "high",
+        "concept": "traversal",
+        "processor": "html",
+        "split": "train"
+      }
+    }
+  },
+  "round_metadata": {
+    "round": "round-30",
+    "mode": "shadow-doc-a/b",
+    "task_ids": [
+      "N03-first-list-count",
+      "T07-nested-lists"
+    ],
+    "task_count": 2,
+    "trials_per_task": 3,
+    "subject": {
+      "model": "gpt-5.4",
+      "reasoning_effort": "medium",
+      "service_tier": "priority"
+    },
+    "judge": {
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh",
+      "service_tier": "priority"
+    },
+    "git_head": "ac5dbf274015ed47b7cb2f1943a5975b03ebbb24",
+    "git_status_short": ""
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-30/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walked tokens with `next_token()` until the first non-closer `H1` opener. From there I accumulated only `#text` tokens inside that subtree using `get_current_depth()` as the boundary and `get_modifiable_text()` for decoded text content, which correctly includes text inside nested elements and returns `''` for an empty heading.",
+  "confidence": 95
+}

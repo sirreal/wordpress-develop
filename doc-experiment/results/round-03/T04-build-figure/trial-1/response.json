@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function builds a figure fragment by first constructing a basic HTML skeleton with the required structure (<figure><img><figcaption>), then uses WP_HTML_Tag_Processor to properly set attributes via set_attribute() (which handles HTML encoding) and text content via set_modifiable_text() (which also handles encoding). This approach leverages the HTML API's built-in escaping rather than manual string assembly.",
+  "confidence": 78
+}

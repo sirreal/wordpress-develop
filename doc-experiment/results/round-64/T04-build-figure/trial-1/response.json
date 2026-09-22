@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` template pattern: seed the exact figure shape with empty `src` and `alt` attributes plus a placeholder text node, then fill `src` and `alt` with `set_attribute()` so their written order is preserved, and replace the caption placeholder with `set_modifiable_text()`. The HTML API handles all necessary encoding for attribute values and text content.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML processor in fragment parsing mode using the default BODY context. If processor creation fails, it returns false. Otherwise, it attempts to serialize the parsed document, which will return null if the processor encountered unsupported markup during parsing (like mis-nested formatting elements). The function returns true if serialization succeeds (document is normalizable) and false if it returns null (unsupported markup encountered).",
+  "confidence": 85
+}

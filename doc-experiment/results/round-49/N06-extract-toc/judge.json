@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single next_token() walk, get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). All are documented. The closer-driven state machine matches the next_token() documentation guarantee that implicit and end-of-input closers are visited, and it reads only #text tokens so entity decoding and nested markup are handled correctly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct structural processor and the documented depth-bounded subtree pattern: next_tag(), get_current_depth(), next_token(), get_token_type(), and get_modifiable_text(). The >= depth guard is exactly the documented boundary for collecting subtree text, and the candidate correctly branches on get_tag() instead of inventing a multi-tag query."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() and a documented one-pass token/state pattern. It avoided undocumented methods, read text only from #text tokens, relied on documented closer visits for malformed/implied closes, and handled empty headings by flushing records on closers or at end of input."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 with no _doing_it_wrong records. The docs were effective for this task because they clearly directed structural text extraction to WP_HTML_Processor rather than WP_HTML_Tag_Processor, documented create_fragment() for BODY fragments, stated that next_token() visits implicit and end-of-input closing tokens, showed the get_current_depth() >= subtree boundary, and warned that get_modifiable_text() should be read only after confirming #text for ordinary DOM-style text. A near-miss is that trial-2 used a nested next_token() loop for repeated headings; this is safe here because the depth guard exits on the heading closer, but the next_token() warning about nested loops could leave readers unsure when this bounded pattern is acceptable.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / Recipe: collect DOM-style text from a subtree",
+      "problem": "The docs show both a one-element subtree walk and a one-pass repeated-region state machine, but do not clearly compare when each pattern is safe.",
+      "suggestion": "Add a general repeated-container text extraction recipe that records empty containers, nested inline text, and implicit/end-of-input closers, and explicitly explains when a bounded inner subtree walk is safe versus when a single stateful loop is preferred."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth()",
+      "problem": "The >= boundary rule is well documented, but the cursor-position consequence after the bounded loop exits is implicit.",
+      "suggestion": "State that after a depth-bounded next_token() loop exits, the processor is already matched on the non-descendant token that ended the walk, so subsequent cursor advances must account for that token."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and WP_HTML_Processor text-extraction recipe",
+      "problem": "The ordinary-text contract is present but spread across multiple passages, which invites accidental use of get_modifiable_text() as a predicate or double-decoding.",
+      "suggestion": "Add a compact contract note: for ordinary DOM-style text, require get_token_type() === '#text'; returned text is already decoded UTF-8; comments and special-element opener text are excluded unless explicitly opted in; empty string is valid content."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() / read-only completion policy",
+      "problem": "Best-effort extraction versus complete-source validation is described abstractly, but not attached to a small read-only collector example.",
+      "suggestion": "Add a short note showing that read-only extractors may return accumulated values after incomplete trailing syntax, while callers requiring complete input should inspect paused_at_incomplete_token() and get_last_error()."
+    }
+  ]
+}

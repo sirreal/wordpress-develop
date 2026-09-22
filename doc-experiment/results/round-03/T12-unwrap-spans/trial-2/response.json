@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the input HTML, then iterates through all tokens using next_token(). When a SPAN tag is encountered (either opener or closer, since get_tag() returns the tag name for both), it continues (skips) to avoid serializing it. All other tokens are serialized and concatenated. The processor automatically handles normalization during serialization, providing the canonical form required by the specification.",
+  "confidence": 78
+}

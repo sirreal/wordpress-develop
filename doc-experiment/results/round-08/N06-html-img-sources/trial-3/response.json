@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML as a fragment in BODY context, then iterates through all IMG tags using next_tag('img'). For each match, it checks that the tag is in the 'html' namespace (not 'svg') using get_namespace() to exclude SVG image elements. It gets the src attribute value using get_attribute(), which returns the decoded value as a browser would interpret it. The function only includes src values that are non-null, non-boolean, and non-empty strings, ensuring we skip images without src attributes or with empty src values. The processor's create_fragment() returns null on failure, so the function safely handles that case.",
+  "confidence": 75
+}

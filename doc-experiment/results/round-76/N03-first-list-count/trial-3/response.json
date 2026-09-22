@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_tag()` and `next_token()` to find the first `UL` or `OL`, count direct `LI` children by comparing `get_current_depth()`, and guard the edit with `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan, I sought back to a bookmark on the list opener and applied `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 87
+}

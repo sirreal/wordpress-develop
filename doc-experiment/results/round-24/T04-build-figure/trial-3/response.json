@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a fixed literal template so the output shape stays exactly `<figure><img ...><figcaption>...</figcaption></figure>` and the `img` attributes remain in `src`, then `alt` order, as documented for `WP_HTML_Tag_Processor` template-based construction. It uses `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()`, relying on the HTML API to perform all required escaping for attribute values and text content.",
+  "confidence": 97
+}

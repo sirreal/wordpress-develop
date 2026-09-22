@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to parse the input as a BODY-context fragment, then `serialize()` to produce normalized HTML. Per the docs, both processor creation failure and later unsupported-markup failure should fall back cleanly, so I return the exact placeholder when `create_fragment()` or `serialize()` fails or `get_last_error()` is non-null.",
+  "confidence": 97
+}

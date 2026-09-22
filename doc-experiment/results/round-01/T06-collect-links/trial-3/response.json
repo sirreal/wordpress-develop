@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in BODY context. For each A tag opener (skipping closers), I check `get_attribute('href')` \u2014 returning null means no href, so those are excluded; string or true (boolean attribute) are both included as-is per the task spec. I record the depth with `get_current_depth()` at the opener, then call `next_token()` in a loop while the current depth remains at or above the A element's depth, accumulating `get_modifiable_text()` for every `#text` token. The loop naturally exits on the A's own closing token (depth drops below the recorded depth), which matches the documented pattern in the `next_token()` example for collecting text inside an element. Text is decoded by the API automatically via `get_modifiable_text()`.",
+  "confidence": 90
+}

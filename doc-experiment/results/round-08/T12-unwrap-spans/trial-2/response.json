@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and walk through every token. It skips both opening and closing SPAN tags by comparing get_tag() against 'SPAN' (which returns uppercase tag names), and serializes all other tokens using serialize_token(). This produces normalized HTML output as specified. The approach is directly adapted from the documented pattern for removing SUP elements from the serialize_token() example.",
+  "confidence": 92
+}

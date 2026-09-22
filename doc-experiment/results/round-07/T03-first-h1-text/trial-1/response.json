@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment, finds the first H1 element using next_tag(), records its depth, then iterates through all tokens while maintaining depth >= the H1's depth. For each text token encountered, it appends the decoded text (via get_modifiable_text(), which automatically decodes character references) to a result string. Character references are handled transparently by the HTML API. Returns null if no H1 is found, or the concatenated text content otherwise.",
+  "confidence": 88
+}

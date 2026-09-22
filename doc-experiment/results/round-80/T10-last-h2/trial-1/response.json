@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because this is a flat, position-based edit: scan all `h2` openers, remember the last one with a bookmark, then `seek()` back and add the `final-section` class with `add_class()`. The result is returned via `get_updated_html()`, which preserves all untouched bytes exactly as documented.",
+  "confidence": 95
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, appending only ordinary `#text` tokens plus opener-carried text from `TITLE` and `TEXTAREA` via `get_modifiable_text()`, while excluding other modifiable-text token types such as `SCRIPT` and `STYLE`. It truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8`, and falls back to `WP_HTML_Tag_Processor` only if the fragment processor cannot provide a complete structural walk.",
+  "confidence": 84
+}

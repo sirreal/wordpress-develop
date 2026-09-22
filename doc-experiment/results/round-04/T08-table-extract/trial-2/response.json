@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with full HTML5 semantics, which automatically handles missing closing tags, optional tbody/thead elements, and table structure properly. It navigates to the first TABLE element, then iterates through all tokens within the table. When it encounters TR tags, it starts a new row; when it encounters TD or TH tags, it collects all text nodes inside the cell (character references are automatically decoded by the processor's text handling). The function tracks depth to properly handle nested structures and collects rows in a 2D array.",
+  "confidence": 72
+}

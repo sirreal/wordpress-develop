@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, next_tag() to find the first UL or OL opener, and next_token() with get_current_depth() to count only direct LI opener children at one level deeper than the list. If the scan is incomplete or the processor reports an error, the function returns the original HTML unchanged; otherwise it seeks back to the bookmarked list opener and writes data-item-count with set_attribute(), then returns get_updated_html().",
+  "confidence": 92
+}

@@ -24,11 +24,33 @@
 /**
  * Core class used to modify attributes in an HTML document for tags matching a query.
  *
+ * ## Which processor should I use?
+ *
+ * The Tag Processor scans a document linearly and has NO awareness of
+ * the document tree: it provides no nesting depth, no ancestor
+ * information, and no guarantee that every opener is paired with a
+ * closer. Methods like `get_current_depth()` and `get_breadcrumbs()`
+ * do not exist on this class — they belong to {@see WP_HTML_Processor},
+ * which builds on this class and adds full structural awareness.
+ *
+ *  - Use the TAG PROCESSOR (this class) for flat, position-based work:
+ *    finding tags by name or class, reading and changing attributes and
+ *    classes, byte-precise edits that preserve the rest of the document
+ *    exactly.
+ *  - Use the HTML PROCESSOR when structure matters: "is this element
+ *    inside that one," collecting an element's text content, walking a
+ *    subtree, handling implied or missing closing tags the way a
+ *    browser would, or producing normalized output.
+ *
  * ## Usage
  *
  * Use of this class requires three steps:
  *
- *  1. Create a new class instance with your input HTML document.
+ *  1. Create a new class instance with your input HTML document:
+ *     `new WP_HTML_Tag_Processor( $html )`. This is the ONLY way to
+ *     construct a Tag Processor — the class has no static factory
+ *     methods. (`create_fragment()` and `create_full_parser()` exist
+ *     only on {@see WP_HTML_Processor}, not on this class.)
  *  2. Find the tag(s) you are looking for.
  *  3. Request changes to the attributes in those tag(s).
  *
@@ -170,6 +192,37 @@
  * of these methods are safe to call without knowing if a given attribute
  * exists beforehand.
  *
+ * ### Building markup from a template
+ *
+ * The Tag Processor can safely fill untrusted values into a known markup
+ * shape: write the shape as a literal template, then replace its
+ * attribute values and text through the API, which handles all of the
+ * necessary encoding. Two rules make the output exact:
+ *
+ *  - Include the attributes in the template (with empty values) so that
+ *    updates preserve their written order. Attributes ADDED to a tag are
+ *    placed after the tag name sorted by name, not in call order — see
+ *    {@see WP_HTML_Tag_Processor::set_attribute}.
+ *  - Include placeholder text inside elements that need text content; an
+ *    empty element contains no text node for
+ *    {@see WP_HTML_Tag_Processor::set_modifiable_text} to replace.
+ *
+ * Example:
+ *
+ *     $processor = new WP_HTML_Tag_Processor( '<a href="" title="">.</a>' );
+ *     $processor->next_tag();
+ *     $processor->set_attribute( 'href', $url );
+ *     $processor->set_attribute( 'title', $title );
+ *     while ( $processor->next_token() ) {
+ *         if ( '#text' === $processor->get_token_type() ) {
+ *             $processor->set_modifiable_text( $link_text );
+ *             break;
+ *         }
+ *     }
+ *     $html = $processor->get_updated_html();
+ *     // <a href="…" title="…">…</a> with every value safely encoded,
+ *     // attributes in template order, and the placeholder replaced.
+ *
  * ### Modifying CSS classes for a found tag
  *
  * The tag processor treats the `class` attribute as a special case.
@@ -249,6 +302,17 @@
  * HTML document using the `next_token()` function. This
  * alternative form takes no argument and provides no built-in
  * query syntax.
+ *
+ * This is lexical token processing: it reports each complete
+ * syntax token in source order and leaves structural questions to
+ * the caller. Use it for flat token filters or scans that intentionally
+ * work with individual tokens. It is not parsed fragment text-content
+ * extraction: this class does not apply BODY-fragment parsing, implied
+ * closing behavior, tree order, or the HTML Processor's
+ * unsupported-markup policy. For DOM-style text extraction from markup
+ * that belongs inside BODY, create a {@see WP_HTML_Processor} with
+ * {@see WP_HTML_Processor::create_fragment} and use an HTML Processor
+ * subtree text walk.
  *
  * Example:
  *
@@ -879,6 +943,20 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next tag matching the $query.
 	 *
+	 * What this matches:
+	 *
+	 *  - Tag-name matching is ASCII case-insensitive: a query of `img`
+	 *    matches `<IMG>`, `<Img>`, and `<img>` alike, and the source
+	 *    document's original casing is preserved in the output.
+	 *  - Only real HTML tags can match. Tag-like text inside comments,
+	 *    CDATA-like sections, and the raw text contents of elements such
+	 *    as SCRIPT, STYLE, TITLE, and TEXTAREA is text, not tags, and is
+	 *    never matched or modified.
+	 *  - A document that ends in the middle of a tag (truncated input)
+	 *    pauses the processor: the incomplete tag is never matched, so it
+	 *    is never modified. See
+	 *    {@see WP_HTML_Tag_Processor::paused_at_incomplete_token}.
+	 *
 	 * @since 6.2.0
 	 * @since 6.5.0 No longer processes incomplete tokens at end of document; pauses the processor at start of token.
 	 *
@@ -886,11 +964,12 @@ class WP_HTML_Tag_Processor {
 	 *     Optional. Which tag name to find, having which class, etc. Default is to find any tag.
 	 *
 	 *     @type string|null $tag_name     Which tag to find, or `null` for "any tag."
+	 *                                     Matching is ASCII case-insensitive.
 	 *     @type int|null    $match_offset Find the Nth tag matching all search criteria.
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
 	 *     @type string|null $class_name   Tag must contain this whole class name to match.
-	 *     @type string|null $tag_closers  "visit" or "skip": whether to stop on tag closers, e.g. </div>.
+	 *     @type string|null $tag_closers  "visit" or "skip" (default): whether to stop on tag closers, e.g. </div>.
 	 * }
 	 * @return bool Whether a tag was matched.
 	 *
@@ -1165,6 +1244,17 @@ class WP_HTML_Tag_Processor {
 	 *     false      === $processor->next_tag();
 	 *     true       === $processor->paused_at_incomplete_token();
 	 *
+	 * In a longer document, drain all tokens first; this method reports
+	 * the state at the point scanning stopped, so it answers "did the
+	 * input end mid-token?" only after the processor has scanned to the
+	 * end of the input:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( $html );
+	 *     while ( $processor->next_token() ) {
+	 *         continue;
+	 *     }
+	 *     $was_truncated = $processor->paused_at_incomplete_token();
+	 *
 	 * @since 6.5.0
 	 *
 	 * @return bool Whether the parse paused at the start of an incomplete token.
@@ -1301,7 +1391,10 @@ class WP_HTML_Tag_Processor {
 	 *
 	 * Bookmarks provide the ability to seek to a previously-scanned
 	 * place in the HTML document. This avoids the need to re-scan
-	 * the entire document.
+	 * the entire document. A common use: to remember "the last
+	 * matching tag" in a single pass, re-set the same bookmark name
+	 * on every match, then seek to it once after the scan completes
+	 * (re-setting a name moves the bookmark, as described below).
 	 *
 	 * Example:
 	 *
@@ -1346,6 +1439,15 @@ class WP_HTML_Tag_Processor {
 	 * names, such as "li_{$index}" with some loop. As a general
 	 * rule they should only be created with string-literal names
 	 * like "start-of-section" or "last-paragraph".
+	 *
+	 * Setting a bookmark with a name that is already in use MOVES that
+	 * bookmark to the current location; it does not leak the old one or
+	 * require releasing it first. Re-setting the same name on every match
+	 * is the supported idiom for remembering "the last X seen so far" —
+	 * the example above moves the `last-li` bookmark to each LI it
+	 * visits, and only the final position survives to be used. This is
+	 * how to track the last occurrence of something in a single pass
+	 * without hitting the bookmark limit.
 	 *
 	 * Bookmarks are a powerful tool to enable complicated behavior.
 	 * Consider double-checking that you need this tool if you are
@@ -2862,6 +2964,13 @@ class WP_HTML_Tag_Processor {
 	 *     $p->next_tag() === false;
 	 *     $p->get_attribute( 'class' ) === null;
 	 *
+	 * String values are returned DECODED: character references in the
+	 * attribute value have already been replaced with the characters they
+	 * represent, so `href="/x?a=1&amp;b=2"` is returned as `/x?a=1&b=2`.
+	 * Do not decode the returned value again. The inverse holds for
+	 * {@see WP_HTML_Tag_Processor::set_attribute}, which accepts plain,
+	 * unescaped values and encodes them as needed.
+	 *
 	 * @since 6.2.0
 	 *
 	 * @param string $name Name of attribute whose value is requested.
@@ -3792,6 +3901,33 @@ class WP_HTML_Tag_Processor {
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
 	 *
+	 * The returned text is already decoded where HTML decodes it: for
+	 * `#text` nodes and for elements whose contents allow character
+	 * references (TEXTAREA, TITLE), character references have been replaced
+	 * by the characters they represent — `&amp;` is returned as `&`. Do not
+	 * decode the returned string again. The returned string is UTF-8;
+	 * when measuring or slicing it by code points pass an explicit
+	 * encoding, e.g. `mb_strlen( $text, 'UTF-8' )`. Contents which HTML treats as raw
+	 * text (SCRIPT, STYLE) and the interiors of comments are returned
+	 * verbatim, as no decoding occurs in those sections of a document.
+	 *
+	 * Example:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<p>Fish &amp; Chips</p>' );
+	 *     $processor->next_token(); // The P opening tag.
+	 *     $processor->next_token(); // The text node inside it.
+	 *     'Fish & Chips' === $processor->get_modifiable_text();
+	 *
+	 * The inverse applies when writing: {@see WP_HTML_Tag_Processor::set_modifiable_text}
+	 * accepts a plain, unescaped string and encodes it as needed, so the
+	 * decoded form is the only form application code should handle.
+	 *
+	 * Reminder when reading text from a complete document (for example a
+	 * TITLE in HEAD): full-document parsing is done with
+	 * WP_HTML_Processor::create_full_parser(). That factory belongs to
+	 * the HTML Processor only — this class is constructed with
+	 * `new WP_HTML_Tag_Processor( $html )` and has no factory methods.
+	 *
 	 * Limitations:
 	 *
 	 *  - This function will not strip the leading newline appropriately
@@ -3921,6 +4057,28 @@ class WP_HTML_Tag_Processor {
 	 * a `>`, which would prematurely terminate the processing instruction, or data
 	 * with leading whitespace, which is indistinguishable from the whitespace
 	 * separating the data from its target.
+	 *
+	 * This method operates on the CURRENTLY MATCHED TOKEN, which must be one
+	 * that carries modifiable text: a `#text` node, a comment, or an element
+	 * whose contents are raw text (SCRIPT, STYLE, TEXTAREA, TITLE, and
+	 * similar). An ordinary container element (P, DIV, FIGCAPTION, SPAN, …)
+	 * carries no text of its own — its text lives in `#text` child tokens —
+	 * so calling this method while matched on such a tag returns `false`
+	 * and changes nothing. Always check the return value.
+	 *
+	 * In particular, an EMPTY element like `<figcaption></figcaption>`
+	 * contains no `#text` token at all, so there is no token on which this
+	 * method could set text: it cannot insert text where none exists. To
+	 * fill empty elements when building markup from a template, include
+	 * placeholder text in the template and replace it:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<figure><figcaption>.</figcaption></figure>' );
+	 *     while ( $processor->next_token() ) {
+	 *         if ( '#text' === $processor->get_token_type() ) {
+	 *             $processor->set_modifiable_text( 'A caption with <safe> encoding' );
+	 *             break;
+	 *         }
+	 *     }
 	 *
 	 * Example:
 	 *
@@ -4575,6 +4733,31 @@ class WP_HTML_Tag_Processor {
 	 *  - When `true` is passed as the value, then only the attribute name is added to the tag.
 	 *  - When `false` is passed, the attribute gets removed if it existed before.
 	 *
+	 * Attribute placement:
+	 *  - Updating an attribute the tag already has replaces its value in
+	 *    place; the attribute keeps its position within the tag.
+	 *  - A NEW attribute is inserted immediately after the tag name,
+	 *    before any existing attributes.
+	 *  - When several new attributes are added to the same tag, they
+	 *    appear sorted by attribute name — not in the order the calls
+	 *    were made.
+	 *
+	 * When the exact attribute order of the output matters, start from
+	 * markup in which the attributes already exist (even with empty
+	 * values) and update them in place:
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<img src="" alt="">' );
+	 *     $processor->next_tag();
+	 *     $processor->set_attribute( 'src', '/dog.jpg' );
+	 *     $processor->set_attribute( 'alt', 'A dog' );
+	 *     // <img src="/dog.jpg" alt="A dog"> — positions preserved.
+	 *
+	 *     $processor = new WP_HTML_Tag_Processor( '<img>' );
+	 *     $processor->next_tag();
+	 *     $processor->set_attribute( 'src', '/dog.jpg' );
+	 *     $processor->set_attribute( 'alt', 'A dog' );
+	 *     // <img alt="A dog" src="/dog.jpg"> — new attributes sort by name.
+	 *
 	 * @since 6.2.0
 	 * @since 6.2.1 Fix: Only create a single update for multiple calls with case-variant attribute names.
 	 * @since 6.9.0 Escapes all character references instead of trying to avoid double-escaping.
@@ -4807,10 +4990,26 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
+	 * If the tag has no `class` attribute, one is created. If it already
+	 * has classes, the new name is appended after them; existing classes
+	 * are never removed, reordered, or re-spaced. This method only ever
+	 * adds — it never removes the `class` attribute. (Dropping the
+	 * attribute when its final class is removed is behavior of
+	 * {@see WP_HTML_Tag_Processor::remove_class}, not of this method.) Adding a class name the
+	 * tag already has is a no-op — no duplicate is appended. The
+	 * already-present check compares class names exactly, byte for byte:
+	 * adding `NOTE` to `class="note"` appends it, since those are
+	 * different class names in CSS terms.
+	 *
 	 * @since 6.2.0
 	 *
 	 * @param string $class_name The class name to add.
-	 * @return bool Whether the class was set to be added.
+	 * @return bool Whether the update was enqueued: `true` whenever the
+	 *              processor is matched on a tag, even if the class was
+	 *              already present (the no-op case); `false` only when
+	 *              there is no matched tag to operate on. There is no
+	 *              need to inspect it in the usual add-then-
+	 *              get_updated_html() flow.
 	 */
 	public function add_class( $class_name ): bool {
 		if (
@@ -4902,7 +5101,20 @@ class WP_HTML_Tag_Processor {
 	}
 
 	/**
-	 * Returns the string representation of the HTML Tag Processor.
+	 * Returns the input document with all queued updates applied.
+	 *
+	 * This is the way to read a document back after modifying it with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::remove_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class},
+	 * {@see WP_HTML_Tag_Processor::remove_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}. Every byte the
+	 * updates did not touch is returned exactly as it appeared in the
+	 * input — no re-encoding, normalization, or reformatting occurs.
+	 * Only attributes the API actually wrote are re-emitted (always
+	 * double-quoted); other attributes on the same tag, including
+	 * unquoted or single-quoted ones, keep their original bytes.
+	 * It is safe to call mid-scan and continue processing afterward.
 	 *
 	 * @since 6.2.0
 	 * @since 6.2.1 Shifts the internal cursor corresponding to the applied updates.

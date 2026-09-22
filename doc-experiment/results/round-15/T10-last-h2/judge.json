@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Tag_Processor is the right tool for a pure attribute mutation. Every method called is documented (next_tag, is_tag_closer, set_bookmark, seek, add_class, release_bookmark, get_updated_html). Uses the exact documented single-pass idiom: re-set the same bookmark name on each match, then seek to it once (set_bookmark() doc, tag-processor.md lines 1147-1158). Gates the final mutation on seek()'s documented bool return, releases the bookmark, reads output via get_updated_html. All 6 hidden cases pass; no _doing_it_wrong. Minor non-idiomatic point: the inner is_tag_closer() guard is redundant because next_tag()'s default tag_closers='skip' only visits openers (html-processor.md line 593 states no guard is needed; tag-processor.md line 952 documents the default). Harmless and arguably defensive, but slightly noisier than the documented pattern. -4 for the redundant guard."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and clean grounding: all methods documented, output via get_updated_html, mutation gated on seek() return, bookmark released. Captures set_bookmark()'s documented bool return into a flag variable to decide whether an H2 was ever found, which is a valid documented signal. All 6 cases pass. Two small over-engineering points relative to the documented idiom: the empty($html) early-return is unnecessary (an empty string simply yields no next_tag matches and returns unchanged) and the set_bookmark()-return tracking is more ceremony than the docs' plain 're-set on every match, then seek once' pattern (set_bookmark() example shows seek-return gating alone suffices). Correct and safe, just less crisp. -5."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Closest match to the canonical reference and the documented idiom. Loops next_tag('H2') re-setting the 'last-h2' bookmark each match, then uses the documented has_bookmark() to detect whether any H2 was found (cleaner than a manual flag), seeks, add_class, release_bookmark, get_updated_html. Uses uppercase 'H2'; tag-name matching is documented ASCII case-insensitive (tag-processor.md line 937), so this is correct. Every method is documented; no redundant closer guard since default tag_closers='skip' is relied upon as documented. All 6 cases pass, no _doing_it_wrong. Essentially textbook use of the API."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 6 hidden cases with no _doing_it_wrong or trigger_error records. This task is strongly supported by the two documentation files, so the analysis is about what the docs did right plus minor near-misses in candidate idiom.\n\nWhat the docs did well: The single most load-bearing concept for this task — tracking 'the last X seen so far' in one pass — is documented explicitly and prominently. The set_bookmark() docblock (tag-processor.md ~lines 1147-1158) states: 'Setting a bookmark with a name that is already in use MOVES that bookmark to the current location; it does not leak the old one or require releasing it first. Re-setting the same name on every match is the supported idiom for remembering the last X seen so far,' and ships a near-identical worked example (mark the last LI). All three subjects reproduced this idiom faithfully, which is why every trial converged on the reference solution. Supporting facts were also well placed: next_tag()'s return semantics (true/false, cursor to EOF on miss), seek() and has_bookmark() bool returns, add_class() preserving existing classes and whitespace (tag-processor.md line 328 / add_class section), get_updated_html() returning every untouched byte verbatim (line 2297), and ASCII case-insensitive tag matching (line 937). The comment-h2-not-counted case passed for free because next_tag() only matches real tags and skips comment content; subjects correctly relied on this without it being a documented edge case per se.\n\nNear-misses in the explanations / idiom (not failures): (1) Trial-1 added an inner is_tag_closer() guard that is unnecessary because next_tag()'s default tag_closers='skip' visits only openers. The html-processor.md next_tag() query doc (line 593) states this crisply ('code following a plain next_tag() match needs no is_tag_closer() guard'), but the html-tag-processor.md next_tag() query table (line 952) documents the 'skip' default without the same explicit 'no guard needed' note — so a subject reading only the Tag Processor doc could reasonably add a defensive guard. (2) Trial-2's empty($html) early-return and set_bookmark()-return flag-tracking are redundant ceremony; nothing in the docs invites this, but nothing discourages over-defensiveness either. None of these affected correctness.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — $query parameter table (html-tag-processor.md, tag_closers entry ~line 952)",
+      "problem": "The Tag Processor doc documents tag_closers='skip' as the default but does not state the practical consequence that a plain next_tag() match visits only openers, so no is_tag_closer() guard is needed afterward. The sibling HTML Processor doc (next_tag, line 593) does say this explicitly. A subject reading only the Tag Processor doc (trial-1) added a redundant closer guard.",
+      "suggestion": "Mirror the HTML Processor wording in the Tag Processor's next_tag() query description: note that because 'skip' is the default, code following a plain next_tag() match visits only openers and needs no is_tag_closer() guard; the guard is only relevant when tag_closers='visit' is explicitly requested."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / seek() (html-tag-processor.md)",
+      "problem": "The 'last X in one pass' example demonstrates the move-on-reset idiom thoroughly, but two valid ways to detect 'was any match found' are left implicit: (a) capturing seek()'s bool return, and (b) calling has_bookmark() before seeking. Subjects independently invented a separate boolean flag (trials 1,2) where has_bookmark()/seek()-return would be cleaner. The docs don't tie these returns to the 'did I find one?' question.",
+      "suggestion": "In the set_bookmark() 'last X' idiom note, add one sentence: after the scan, guard the seek with has_bookmark('name') or rely on seek()'s bool return to determine whether any match occurred — no separate found-flag variable is needed. This generalizes the single-pass pattern and discourages redundant bookkeeping."
+    }
+  ]
+}

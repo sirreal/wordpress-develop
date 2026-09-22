@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function builds a figure fragment by starting with a template HTML structure containing a single space inside the figcaption to ensure there's a text node. It creates a WP_HTML_Processor in fragment parsing mode using create_fragment(). First pass: finds the img tag with next_tag('img') and uses set_attribute() to set src and alt attributes in the specified order\u2014the HTML API automatically handles escaping of special characters like &, <, >, and quotes. Second pass: creates a new processor, finds the figcaption tag, advances to the text node with next_token(), and uses set_modifiable_text() to set the caption with automatic escaping. Returns the complete processed HTML fragment via get_updated_html().",
+  "confidence": 72
+}

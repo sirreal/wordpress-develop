@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element via next_tag(). It then records the H1's depth and iterates through all tokens using next_token(), collecting text from #text nodes that remain within the H1's scope (determined by comparing current depth to the H1's depth). The get_modifiable_text() method automatically decodes character references, and the function returns null only when no H1 is found.",
+  "confidence": 92
+}

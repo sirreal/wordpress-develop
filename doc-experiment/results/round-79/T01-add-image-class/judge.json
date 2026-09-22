@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, documented next_tag array query, add_class, and get_updated_html. This matches the flat byte-preserving class-edit pattern and passed all 8 cases with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor with documented next_tag('img') shorthand, add_class, and get_updated_html. Correctly relied on documented case-insensitive tag matching, class appending, comment skipping, and incomplete-token preservation. Passed all 8 cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern as trial-2: linear Tag Processor scan, add_class on each matched IMG opener, return get_updated_html. No undocumented API usage or edge-case mishandling; passed all 8 cases."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The rendered docs supported this task well: WP_HTML_Tag_Processor > Overview > Which processor should I use explicitly recommends the Tag Processor for flat, byte-preserving tag, attribute, and class edits; Usage and Finding tags show construction with new WP_HTML_Tag_Processor($html), next_tag(array('tag_name'=>'img')), and next_tag('img'); the next_tag() method docs state tag-name matching is ASCII case-insensitive, comments/raw text are not matched as tags, and incomplete trailing tags are not matched; Modifying CSS classes and add_class() explain safe class creation/appending without removing or reordering existing classes; get_updated_html() identifies the correct output method and promises untouched bytes are returned exactly. Near-misses were minor: candidates did not need to reason about get_attribute null/true/'' semantics or serialization APIs, but the docs also gave enough warnings to avoid those paths.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The class helper contract is strong, but it does not explicitly call out how unusual class-attribute states such as missing, empty, or boolean attributes are handled. The broader attribute docs cover null/true semantics, but class-edit users may never read them.",
+      "suggestion": "Add a short contract sentence or compact examples for add_class() covering missing class, empty class, and boolean class attributes, emphasizing that callers should not manually read and merge the class attribute for ordinary class additions."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor usage docs near Finding tags / Modifying CSS classes",
+      "problem": "The docs contain all pieces of the repeated-edit pattern, but the high-level usage example only modifies a single matched tag. Test subjects inferred the loop correctly here, but repeated mutation is a common API use case.",
+      "suggestion": "Add a generic repeated-edit example using while ($processor->next_tag('tag')) { $processor->add_class('class-name'); } followed by get_updated_html(), without tying it to a specific task domain."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() docblock",
+      "problem": "The docblock explains byte preservation after queued edits, while the stronger warning against serialize()/normalize() for retrieving edits appears mainly in HTML Processor docs. Users focused on Tag Processor docs may still look for a serialization method.",
+      "suggestion": "Add a brief see-also warning in get_updated_html(): after set_attribute(), add_class(), remove_class(), or text edits, this is the retrieval API; serialization/normalization APIs are for normalized rewrites and may change untouched markup."
+    }
+  ]
+}

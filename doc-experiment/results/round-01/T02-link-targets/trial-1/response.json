@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to iterate over all `A` tag openers with `next_tag('A')` (which skips closing tags by default). For each matched tag, I call `get_attribute('href')` \u2014 per the documented API, this returns `null` when the attribute is absent, `true` for valueless boolean attributes like `<a href>`, and a string (including `\"\"`) when a value is present. So a `!== null` check covers all three \"href present\" cases. When href is present, `set_attribute('target', '_blank')` is called, which creates or overwrites the target attribute. Finally, `get_updated_html()` returns the modified document.",
+  "confidence": 98
+}

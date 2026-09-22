@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` fragment parser, walked all tokens with `next_token()`, skipped `SPAN` tokens, and emitted normalized output with `serialize_token()`. Every called method is present in the rendered docs and execution recorded no `_doing_it_wrong` misuse. The only minor caveat is the undocumented policy choice to return the original HTML on `get_last_error()`, which is a plausible fallback but not normalized output."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same documented token-serialization rewrite pattern as the reference: `create_fragment()`, `next_token()`, `get_tag()`, `serialize_token()`, plus documented `get_last_error()`. No hallucinated APIs or runtime misuse. Minor caveat: returning `''` on unsupported-parser abort is a reject policy, but the docs do not make that policy explicit for string-returning helpers and it could silently discard content."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented methods throughout. The implementation follows the `serialize_token()` rewrite idiom closely, and hidden execution shows no `_doing_it_wrong` records. As in trial 2, the only adherence wrinkle is the ambiguous `get_last_error()` fallback to `''`, not the core API usage."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. All three passed `simple`, `nested-spans`, `no-spans-normalized-passthrough`, `attributes-discarded`, `adjacent-spans`, `span-with-block-content`, and `unclosed-span`. The docs did especially well in the `WP_HTML_Processor::serialize_token()` section: it explicitly says that concatenating `serialize_token()` while walking `next_token()` reconstructs normalized serialization, that skipped tokens are removed, and that closing tokens of skipped elements must be skipped too. The example removing every `SUP` element while keeping contents directly generalized to `SPAN`. The `create_fragment()` docs also made the BODY-fragment parser choice clear, and the `next_token()` docs explained that virtual closers are visited for unclosed elements, which covers the unclosed-span case. The near-miss is error policy: every candidate added a `get_last_error()` check, but trial 1 returned the original input while trials 2 and 3 returned an empty string. That divergence comes from the docs saying to reject or fall back on unsupported markup without defining what that should mean for a required `string` return value.",
+  "doc_gaps": [
+    {
+      "location": "`html-processor.md` Overview, future-direction bullets mentioning unwrapping/removing nodes",
+      "problem": "The overview says unwrapping/removing nodes is future support, while the `serialize_token()` docs already support streaming rewrites that remove element wrappers by skipping opener and closer tokens. This distinction is easy to miss.",
+      "suggestion": "Clarify that tree-editing node APIs are future work, but token-by-token serialization can already implement streaming filters that drop, wrap, or replace tokens while producing normalized output."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize_token()` error-policy paragraph",
+      "problem": "The docs say to reject or fall back when `get_last_error()` is non-null, but do not define common policies for functions that must return `string`. Candidates chose inconsistent fallbacks.",
+      "suggestion": "Add guidance that partial accumulated output should not be returned after unsupported markup, then show policy options such as nullable return, original-input fallback, or caller-defined error sentinel, with tradeoffs."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` and `paused_at_incomplete_token()` docs",
+      "problem": "The distinction between an unclosed element that receives a virtual closer and a truly incomplete trailing syntax token is spread across multiple passages.",
+      "suggestion": "Add adjacent examples contrasting complete-but-unclosed markup like `<p><span>x` with incomplete syntax like `<p><span` or `<img src=\"`, showing what tokens are visited and when `paused_at_incomplete_token()` matters."
+    },
+    {
+      "location": "`WP_HTML_Processor` Usage/output API guidance",
+      "problem": "The correct output method is documented, but the decision is distributed across `serialize()`, `serialize_token()`, and inherited `get_updated_html()` sections.",
+      "suggestion": "Add a compact decision table: unchanged normalization uses `normalize()` or `serialize()` before scanning; token filtering/wrapping uses `next_token()` plus `serialize_token()`; queued attribute/text edits use `get_updated_html()`."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag( 'TABLE' )` to find the first table, then a single `next_token()` walk bounded by the table depth from `get_current_depth()`. During that walk it tracks `TR`, `TD`, and `TH` openers/closers via `get_tag()` and `is_tag_closer()`, and concatenates only `#text` token content with `get_modifiable_text()`, which the docs say is already character-reference decoded for ordinary text nodes.",
+  "confidence": 88
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment for a body fragment requiring ancestor awareness. All called methods are documented in the two rendered docs. Uses next_tag(), get_tag(), get_breadcrumbs(), add_class(), get_updated_html(), get_last_error(), and paused_at_incomplete_token() idiomatically; excludes the current list from the ancestor check and falls back on unsupported or incomplete input. Passed 7/7."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API surface throughout. The token walk and breadcrumb ancestor check are idiomatic, and get_updated_html() is the right output path after add_class(). Minor edge-case gap: it checks get_last_error() but not paused_at_incomplete_token(), even though the docs describe incomplete trailing syntax as a separate condition. Passed 7/7."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong API use as trial-1: structural processor, documented methods only, correct breadcrumb ancestor logic, add_class() for preserving existing class values, and get_updated_html() for byte-preserving output. It also handles null processor creation, unsupported markup, and incomplete trailing tokens. Passed 7/7."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case: simple nested OL in UL, top-level lists left untouched, UL inside OL, deep descendant lists, preserving an existing class, multiple nested levels, and mixed top-level/nested content. The docs did well in the places this task depended on: the Tag Processor overview explicitly says it has no tree awareness and points structural work to WP_HTML_Processor; the HTML Processor overview and Supported elements sections explain fragment creation and structural awareness; the Breadcrumbs section says get_breadcrumbs() returns the full root-to-current path, which led subjects to ignore the final breadcrumb when checking ancestors; add_class() documentation explains class creation/appending/preservation; and get_updated_html() is documented as the correct byte-preserving output method after queued class edits. The only near-miss was incomplete input handling: trial-2 did not check paused_at_incomplete_token(), likely because that inherited method is documented primarily on the Tag Processor page and only referenced from HTML Processor prose/examples rather than being easy to discover as part of the HTML Processor method surface.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs guide",
+      "problem": "The docs state that breadcrumbs include the currently matched node, but they do not explicitly call out the common ancestor-test pattern or the off-by-one risk.",
+      "suggestion": "Add a short note: when testing ancestors of the current token, ignore the last breadcrumb entry because it is the current matched node; use the full array only when matching the complete path including the current node."
+    },
+    {
+      "location": "WP_HTML_Processor inherited method documentation for paused_at_incomplete_token()",
+      "problem": "paused_at_incomplete_token() is usable on WP_HTML_Processor through inheritance and appears in examples, but it is easier to discover on the Tag Processor page than in the HTML Processor method surface.",
+      "suggestion": "Expose inherited public parser-status methods in the HTML Processor docs, or add a dedicated see-also note near get_last_error() explaining that unsupported markup and incomplete trailing syntax are separate checks."
+    },
+    {
+      "location": "WP_HTML_Processor::add_class() docblock",
+      "problem": "The HTML Processor add_class() entry is brief, while the detailed class-preservation semantics live on the Tag Processor page.",
+      "suggestion": "Add a concise inherited-behavior summary or direct cross-reference stating that add_class() creates a class attribute when missing, appends without removing existing classes, avoids duplicate exact class names, and should be read back with get_updated_html()."
+    }
+  ]
+}

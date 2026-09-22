@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to linearly scan through the HTML document, finding each A tag. For each A tag found, it checks whether an href attribute exists (using get_attribute which returns null if absent, true for boolean attributes, or a string value). When href is present in any form, it sets target=\"_blank\" using set_attribute, which overwrites any existing target value. All other HTML is preserved byte-for-byte through get_updated_html().",
+  "confidence": 70
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each token, it checks if it's a SPAN tag (using get_tag() which returns the uppercase tag name). If it's a SPAN, it skips both the opening and closing tags with continue. All other tokens are serialized using serialize_token() and concatenated into the output. This produces normalized HTML (with quoted attributes, closed tags, and canonical text encoding) while removing all SPAN elements and their attributes.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()` and rebuilt the output with `serialize_token()`, skipping any `SPAN` tag tokens so their contents stay in place while the wrappers are removed. This relies on the documented normalized token serialization behavior of `serialize_token()` and the fragment-normalization support of the HTML Processor.",
+  "confidence": 92
+}

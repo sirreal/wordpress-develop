@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task is structural text extraction from a BODY fragment. It finds the first `H1` with `next_tag()`, records its depth with `get_current_depth()`, then walks that subtree with `next_token()`, concatenating decoded ordinary text from `#text` tokens via `get_modifiable_text()`. It also appends tag-carried modifiable text for nested atomic elements like `TEXTAREA`, `TITLE`, `SCRIPT`, or `STYLE`, which the HTML Processor exposes on the opening tag instead of as child `#text` tokens.",
+  "confidence": 88
+}

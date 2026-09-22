@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize(), a documented static method that normalizes HTML fragments by serializing them. This method handles all the required transformations: attribute quoting styles, optional/implied closing tags, tag-name casing, and equivalent character references. By normalizing both inputs to a canonical form and comparing them, we determine whether they represent the same parsed structure. Returns false if either input cannot be parsed/normalized.",
+  "confidence": 92
+}

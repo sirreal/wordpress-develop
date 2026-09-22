@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `set_bookmark()`, `seek()`, `paused_at_incomplete_token()`, `get_last_error()`, and `set_attribute()` APIs. The function finds the first `UL` or `OL`, counts direct `LI` children by scanning that element\u2019s subtree at one depth deeper, and only applies the attribute after confirming the scan completed cleanly.",
+  "confidence": 92
+}

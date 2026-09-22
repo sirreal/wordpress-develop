@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all IMG tags. For each IMG found, it checks if FIGURE is an ancestor by searching the breadcrumbs (which represent the path from root to current element). It then retrieves the src attribute value, which is automatically decoded by get_attribute(). The function returns only src values that are non-empty strings and skips boolean attributes (true) or missing attributes (null).",
+  "confidence": 75
+}

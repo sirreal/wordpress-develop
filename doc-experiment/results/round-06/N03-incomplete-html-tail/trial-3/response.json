@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor with the input HTML and calls next_tag() to scan through the document. The Tag Processor automatically pauses when it encounters incomplete syntax (unfinished tags, unterminated comments, unclosed special elements like SCRIPT without closing tags). The paused_at_incomplete_token() method returns true when the parser stopped due to incomplete syntax at the end of input, which indicates a truncated HTML document.",
+  "confidence": 92
+}

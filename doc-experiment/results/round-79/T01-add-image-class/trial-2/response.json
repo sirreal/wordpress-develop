@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan only real IMG tag openers with case-insensitive matching via next_tag( 'img' ), then added the class with add_class() so existing classes are preserved and appended without reordering. get_updated_html() returns the original bytes unchanged everywhere except the edited class attributes, which keeps comments and all other content intact.",
+  "confidence": 98
+}

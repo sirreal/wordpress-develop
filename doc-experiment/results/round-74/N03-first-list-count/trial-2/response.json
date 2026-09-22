@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware parsing, then `next_tag()` to locate the first `UL` or `OL`, `get_current_depth()` plus `next_token()` to count only direct `LI` child openers, and `paused_at_incomplete_token()` / `get_last_error()` to fail closed if the scan was incomplete. After a clean scan, I `seek()` back to the bookmarked list opener and used `set_attribute()` with `get_updated_html()` to write the `data-item-count` attribute.",
+  "confidence": 93
+}

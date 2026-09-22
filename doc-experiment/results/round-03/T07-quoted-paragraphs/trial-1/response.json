@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to iterate through tags in the HTML. It tracks the depth of open BLOCKQUOTE elements using a counter that increments when opening tags are found and decrements when closing tags are found. When a P opening tag is encountered while blockquote_depth is greater than zero, the \"quoted\" class is added using the add_class() method. Finally, get_updated_html() returns the modified HTML with all changes applied.",
+  "confidence": 85
+}

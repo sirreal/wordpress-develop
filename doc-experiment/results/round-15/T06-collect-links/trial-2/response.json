@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then searches for all A tags with next_tag(). For each A tag found with an href attribute, it captures the depth and uses next_token() to walk through all nested tokens. Text content is accumulated from #text tokens using get_modifiable_text(), which returns decoded character references. The loop continues until exiting the A element (depth drops below the opening depth).",
+  "confidence": 82
+}

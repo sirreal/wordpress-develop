@@ -1,0 +1,69 @@
+{
+    "id": "T02-link-targets",
+    "title": "Open links in a new tab",
+    "difficulty": "basic",
+    "split": "train",
+    "role": "smoke",
+    "commonness": "high",
+    "concept": "attributes",
+    "processor": "tag",
+    "function": "add_link_targets",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<a href=\"/x\">go</a>"
+            ],
+            "expected": "<a target=\"_blank\" href=\"/x\">go</a>"
+        },
+        {
+            "id": "no-href-skipped",
+            "args": [
+                "<a name=\"anchor\">stay</a><a href=\"/y\">go</a>"
+            ],
+            "expected": "<a name=\"anchor\">stay</a><a target=\"_blank\" href=\"/y\">go</a>"
+        },
+        {
+            "id": "empty-href-counts",
+            "args": [
+                "<a href=\"\">go</a>"
+            ],
+            "expected": "<a target=\"_blank\" href=\"\">go</a>"
+        },
+        {
+            "id": "valueless-href-counts",
+            "args": [
+                "<a href>go</a>"
+            ],
+            "expected": "<a target=\"_blank\" href>go</a>"
+        },
+        {
+            "id": "existing-target-overwritten",
+            "args": [
+                "<a href=\"/x\" target=\"_top\">go</a>"
+            ],
+            "expected": "<a href=\"/x\" target=\"_blank\">go</a>"
+        },
+        {
+            "id": "uppercase-attribute",
+            "args": [
+                "<a HREF=\"/x\">go</a>"
+            ],
+            "expected": "<a target=\"_blank\" HREF=\"/x\">go</a>"
+        },
+        {
+            "id": "inside-comment-ignored",
+            "args": [
+                "<!-- <a href=\"/x\">go</a> --><a href=\"/y\">go</a>"
+            ],
+            "expected": "<!-- <a href=\"/x\">go</a> --><a target=\"_blank\" href=\"/y\">go</a>"
+        },
+        {
+            "id": "nested-markup-in-link",
+            "args": [
+                "<a href=\"/x\"><strong>bold</strong> move</a>"
+            ],
+            "expected": "<a target=\"_blank\" href=\"/x\"><strong>bold</strong> move</a>"
+        }
+    ]
+}

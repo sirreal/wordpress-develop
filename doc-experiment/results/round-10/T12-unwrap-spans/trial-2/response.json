@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's fragment parsing and token-by-token serialization. It creates a fragment processor for the input HTML, then iterates through each token with next_token(). For any token matching a SPAN tag (either opening or closing), it skips serialization by continuing to the next iteration. All other tokens (text nodes, other elements, comments, etc.) are serialized using serialize_token(), which produces normalized HTML. The result is a concatenation of all non-span tokens, giving normalized HTML without any span wrappers.",
+  "confidence": 72
+}

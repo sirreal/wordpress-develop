@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal HTML template so the `img` attributes stay in the required `src`, then `alt` order, and used `WP_HTML_Tag_Processor` to safely encode the unescaped inputs. The implementation relies on the documented constructor, `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()` APIs.",
+  "confidence": 96
+}

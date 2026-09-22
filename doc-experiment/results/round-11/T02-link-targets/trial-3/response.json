@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan for A tags and modify their attributes. It leverages next_tag() to find all A tags, get_attribute() to check for href presence (returning null when absent, or the attribute value/true when present), and set_attribute() to set target=\"_blank\". The processor preserves all other document content byte-for-byte while queuing updates, which are returned via get_updated_html().",
+  "confidence": 92
+}

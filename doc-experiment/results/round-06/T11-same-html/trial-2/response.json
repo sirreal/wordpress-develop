@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() to parse and normalize both HTML fragments. This handles tag-name case normalization, attribute value normalization (double-quoting), implied/omitted tag insertion, character reference normalization, and removes incomplete syntax. If either input fails to parse/serialize (returning null), we return false per spec. Otherwise we compare the normalized strings for equality, which covers all the equivalences mentioned in the task (attribute quoting, optional tags, case, character references).",
+  "confidence": 92
+}

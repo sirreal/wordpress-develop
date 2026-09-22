@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, then iterated all tokens with next_token(). For each token I check get_token_type(): when it's '#tag', I use get_tag() and is_tag_closer() to detect H1\u2013H6 openers and their matching closers (matched by tag name and depth via get_current_depth()). While inside a heading, '#text' tokens have their decoded content accumulated via get_modifiable_text(). When the matching closing heading tag is found, I record the level (parsed from the tag name's second character) and the accumulated text.",
+  "confidence": 82
+}

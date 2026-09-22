@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first opening `UL` or `OL`, bookmarked that opener, then walked tokens with `next_token()` to count only direct child `LI` openers at one depth below the list. Before mutating, I verified the scan completed cleanly with `paused_at_incomplete_token()` and `get_last_error()`, then sought back to the bookmark and set `data-item-count` with `set_attribute()` before reading the result via `get_updated_html()`.",
+  "confidence": 91
+}

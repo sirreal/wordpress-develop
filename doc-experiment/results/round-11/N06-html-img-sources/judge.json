@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor::create_fragment() with null guard. All methods documented (create_fragment, next_tag array-form, get_namespace, get_attribute). Idiomatic token-walking loop. Best edge-case handling of the three: guards $src against null, '', AND true, directly matching the get_attribute docs (string|true|null; boolean attrs return true) and the task's 'src has no value' clause. Namespace filter uses 'html' !== ns (skip anything non-HTML), which is the more robust direction. The namespace check is technically redundant given next_tag('img') matches tag name IMG and SVG <image> reports get_tag()==='IMAGE', but it is correct and harmless. 7/7 passed. Confidence 92, well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and null guard (uses !$processor rather than === null; fine). All methods documented. Idiomatic loop. Comments show good mental model ('SVG <image> elements are different', 'implicit tag closure in SVG contexts'). Two minor weaknesses vs trial 1: (1) filters with 'svg' === ns (skip only SVG) rather than 'html' !== ns — would not exclude a math-namespace match, though irrelevant for these cases; (2) does not guard $src against boolean true — relies on '' !== $src, but a bare <img src> yields true which would slip through as a non-string. Test cases never exercise bare src, so 7/7 passed. Confidence 85, appropriately humble."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and null guard. All methods documented. Uses next_tag('img') string-form (documented). Namespace filter 'html' !== ns, the robust direction (matches trial 1). Like trial 2, does not guard $src against boolean true (uses null !== $src && '' !== $src), so a bare <img src> would append true — but not exercised by tests. Explanation correctly cites that get_attribute returns decoded values 'as documented' and that IMG-in-SVG breaks out to HTML namespace. 7/7 passed. Confidence 92, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 with zero _doing_it_wrong records and zero trigger_errors. The documentation succeeded on this task. What the docs did well, and the one near-miss worth flagging:\n\nWHAT WORKED:\n1. Processor selection. The html-processor.md overview ('Choose it whenever document STRUCTURE matters', and the 'foreign content (SVG and MathML)' support note at line 86) plus the presence of get_namespace() steered all three subjects to create_fragment() rather than the Tag Processor. This is the load-bearing choice — only the HTML Processor applies the foreign-content insertion rules that make <image> normalize to <img> (case image-tag-becomes-img) and make <img> break out of <svg> into the HTML namespace (case img-inside-svg-breaks-out). Both behaviors I confirmed by probe.\n2. get_namespace() docs at html-processor.md:1726-1736 give a tight contract ('One of html, math, or svg') that all three used to write a namespace guard. The guard is what the subjects believed excluded SVG <image>.\n3. get_attribute() docs (html-tag-processor.md:1469-1505, esp. the DECODED note at 1490 and the string|true|null / empty-vs-null distinction at line 89) gave subjects the correct decode-already-done understanding and the empty-string skip. All three correctly avoided double-decoding and skipped empty src.\n\nTHE NEAR-MISS / latent misconception shared by all three:\nEvery subject's explanation attributes SVG <image> exclusion to the NAMESPACE filter. That is not actually how the exclusion happens for these tests. next_tag('img') matches by tag NAME, and the HTML Processor reports get_tag()==='IMAGE' for the SVG <image> element (probe-confirmed), so it never matches next_tag('img') at all — the namespace check never fires for the SVG <image> case (svg-image-excluded). The real discriminator is the HTML Processor's tag-name normalization, not get_namespace(). The subjects got the right answer via a redundant guard built on an incorrect causal story. The docs enabled the correct code but did not correct the misconception, because nothing in get_namespace() or the IMG/breadcrumb examples explains the relationship between next_tag tag-name matching, get_tag() normalization, and namespace. Trials 2 and 3 also left a real latent bug — no guard against get_attribute returning boolean true for a bare <img src> — but the test suite never exercises a value-less src attribute, so it did not surface. Only trial 1 handled it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_namespace() (html-processor.md, section ### get_namespace())",
+      "problem": "The docblock states only that it returns one of 'html','math','svg', with no example tying namespace to a realistic foreign-content scenario. Subjects inferred (incorrectly) that filtering on get_namespace() is what distinguishes an SVG <image> from an HTML <img>. There is no guidance on the interaction between get_namespace(), the matched tag name, and how foreign content is parsed.",
+      "suggestion": "Add a short example showing a tag inside <svg> and the namespace it reports, and note that the HTML Processor's foreign-content parsing can change BOTH the namespace and the normalized tag name. For instance, illustrate that an <img> written inside <svg> breaks out and is reported in the 'html' namespace, while an <svg><image> stays in the 'svg' namespace. This generalizes the namespace concept beyond a bare enum."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() and next_tag() (html-processor.md)",
+      "problem": "get_tag() mentions 'certain tags be reprocessed with a different tag name' but gives only the trivial DIV example. Nothing documents that next_tag('img') matches by the NORMALIZED tag name, nor that elements like <image> may be reprocessed to IMG in HTML context while SVG <image> stays IMAGE. Subjects could not learn that tag-name matching alone already separates HTML <img> from SVG <image>; they leaned on namespace filtering instead and built a correct-but-mis-explained solution.",
+      "suggestion": "In get_tag() (or in the next_tag query description) add a concrete reprocessing example: the HTML <image> element is reprocessed to IMG, so next_tag('img') matches it; an <image> inside <svg> remains IMAGE and does not. State explicitly that next_tag matches against the normalized name returned by get_tag(). This is the general fact that demystifies tag normalization for any element subject to reprocessing."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() (html-tag-processor.md:1469-1505) — return value semantics",
+      "problem": "The docs correctly state the return is string|true|null and that boolean attributes return true, but the common collect-an-attribute-value idiom — guard against BOTH null (absent) and true (present-but-valueless) before treating the result as a string — is not shown. Trials 2 and 3 wrote `null !== $src && '' !== $src`, which would append boolean true for a bare `<img src>`; only trial 1 guarded against true. The latent bug went undetected only because the test suite omits value-less attributes.",
+      "suggestion": "Add a one-line idiom to the get_attribute docblock: when you need the textual value of an attribute, test `is_string( $value )` (or explicitly exclude true) rather than only checking for null, because a present-but-valueless attribute returns boolean true. This generalizes the null/true/'' semantics into the safe extraction pattern."
+    }
+  ]
+}

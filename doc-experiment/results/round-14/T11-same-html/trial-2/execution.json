@@ -1,0 +1,95 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-14/T11-same-html/trial-2/candidate.php",
+    "function": "is_same_html",
+    "passed": 9,
+    "total": 9,
+    "cases": [
+        {
+            "id": "quoting-styles-equal",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "implied-closers-equal",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "tag-case-equal",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entity-spellings-equal",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "attribute-order-differs",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "text-differs",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "structure-differs",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "whitespace-in-tag-equal",
+            "status": "pass",
+            "expected": true,
+            "actual": true,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "misnesting-unsupported-false",
+            "status": "pass",
+            "expected": false,
+            "actual": false,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "Cannot serialize HTML Processor with parsing error: unsupported.",
+                    "level": 512
+                }
+            ]
+        }
+    ]
+}

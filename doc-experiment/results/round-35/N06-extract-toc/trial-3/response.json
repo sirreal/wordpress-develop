@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens once with `next_token()`. It detects heading openers and closers with `get_token_type()`, `get_tag()`, and `is_tag_closer()`, and while inside a heading it concatenates only `#text` token content via `get_modifiable_text()`, which yields heading text without including markup tags.",
+  "confidence": 91
+}

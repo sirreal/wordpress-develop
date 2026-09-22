@@ -1,0 +1,62 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-11/T04-build-figure/trial-2/candidate.php",
+    "function": "build_figure",
+    "passed": 6,
+    "total": 6,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/dog.jpg\" alt=\"A dog\"><figcaption>My dog</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/dog.jpg\" alt=\"A dog\"><figcaption>My dog</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "ampersand-in-caption",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Pair\"><figcaption>Fish &amp; Chips</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Pair\"><figcaption>Fish &amp; Chips</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "quotes-in-alt",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"The &quot;best&quot; photo\"><figcaption>Caption</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/a.jpg\" alt=\"The &quot;best&quot; photo\"><figcaption>Caption</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "angle-brackets-in-caption",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Code\"><figcaption>Use &lt;em&gt; tags &amp; enjoy</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Code\"><figcaption>Use &lt;em&gt; tags &amp; enjoy</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unicode",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Schnée ☃\"><figcaption>Winter 🌨️ scene</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/a.jpg\" alt=\"Schnée ☃\"><figcaption>Winter 🌨️ scene</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "html-in-caption-not-parsed",
+            "status": "pass",
+            "expected": "<figure><img src=\"https://example.com/a.jpg\" alt=\"alt\"><figcaption>&lt;script&gt;alert(1)&lt;/script&gt;</figcaption></figure>",
+            "actual": "<figure><img src=\"https://example.com/a.jpg\" alt=\"alt\"><figcaption>&lt;script&gt;alert(1)&lt;/script&gt;</figcaption></figure>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

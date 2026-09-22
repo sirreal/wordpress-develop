@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates an HTML fragment processor, walks through every token with next_token(), detects #text tokens, checks if the decoded text (from get_modifiable_text()) contains the keyword via case-sensitive strpos(), and if matched, wraps the serialized token in <mark> tags. Non-matching tokens and all other token types are serialized as-is. The serialize_token() method produces normalized output, and concatenating all tokens reconstructs the normalized HTML with <mark> wrappers added.",
+  "confidence": 72
+}

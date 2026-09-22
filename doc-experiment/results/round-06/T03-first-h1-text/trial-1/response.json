@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to find the first H1 tag and accumulate all text nodes within it. It creates a fragment processor, finds the H1 using next_tag(), records the depth at the H1 opener, then iterates with next_token() collecting all #text token content via get_modifiable_text() until the depth decreases (indicating we've exited the H1). Character references are automatically decoded by get_modifiable_text(). Returns null if no H1 is found, or an empty string if H1 contains no text.",
+  "confidence": 75
+}

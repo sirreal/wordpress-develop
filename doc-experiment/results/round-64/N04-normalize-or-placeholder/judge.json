@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor. All called APIs are present in the rendered docs: create_fragment(), serialize(), and get_last_error(). The create_fragment()+serialize() route is documented and valid, though less direct than the task-shaped normalize() API for BODY-context fragments. It used strict null handling, so empty normalized output was not mistaken for failure."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the exact documented high-level API for this task: WP_HTML_Processor::normalize(), with a strict null fallback. No undocumented calls and no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Equivalent to the canonical implementation: WP_HTML_Processor::normalize() followed by strict null handling. No undocumented calls and no misuse records."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed across the three trials; every execution passed 7/7. The docs did well on the key decision points: the Tag Processor docs say to use the HTML Processor for normalized output, the HTML Processor docs describe normalize() as BODY-fragment serialization returning string|null, and the normalization section lists omitted tags, double-quoted attributes, inserted tags, entity/text re-encoding, and trailing incomplete syntax omission. The unsupported-misnested-formatting case was especially well covered by the Supported elements section, which names mis-nested formatting requiring rewinding as unsupported and gives a close example. The anchor-misnesting case was covered only indirectly by the Unsupported Features discussion of adoption/fostering, but the broader contract that unsupported markup makes normalize()/serialize() return null was enough for all subjects. Near-misses: empty-fragment relied on subjects understanding that an empty string is a successful string result, not a falsey failure; all did. Also, execution recorded E_USER_WARNING trigger_error entries for unsupported serialization even for otherwise correct normalize() use, while the rendered docs only said output methods return null.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() return-value docs",
+      "problem": "The docs state string|null but do not explicitly call out that an empty fragment can normalize to the empty string, which must be treated as success rather than fallback-worthy failure.",
+      "suggestion": "Add a sentence such as: \"An empty input fragment may normalize to an empty string; callers using a fallback should test for null explicitly rather than using a truthiness check.\""
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() and WP_HTML_Processor::serialize() failure behavior",
+      "problem": "The rendered docs say unsupported input returns null, but executions show serialization also triggers an E_USER_WARNING via wp_trigger_error when a parsing error prevents serialization.",
+      "suggestion": "Document the warning side effect on unsupported serialization, or clarify the intended quiet/null-only contract if the implementation should change. Callers need to know whether null failure can also log/emit a warning."
+    },
+    {
+      "location": "HTML Support > Unsupported Features",
+      "problem": "The docs describe unsupported adoption/fostering abstractly. The anchor-misnesting case passed, but the connection between common nested/overlapping anchor markup and unsupported parser aborts is not obvious.",
+      "suggestion": "Add one or two general examples of markup patterns that require adoption/fostering or active-formatting reconstruction and state that normalization/serialization returns null for those unsupported patterns."
+    }
+  ]
+}

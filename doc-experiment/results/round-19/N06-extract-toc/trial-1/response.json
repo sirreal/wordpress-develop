@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, scans tags in document order with `next_tag()`, identifies `H1` through `H6` via `get_tag()`, and then walks each heading\u2019s subtree with `next_token()` while the depth stays inside that heading using `get_current_depth()`. Text is collected from `#text` tokens with `get_modifiable_text()`, and also from opening tags whose own token carries modifiable text, which covers special raw-text descendants if present.",
+  "confidence": 90
+}

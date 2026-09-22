@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment() for body-fragment structure, walked tokens, used get_current_depth() to bound heading subtrees, guarded get_modifiable_text() behind #text, and handled virtual/implied closers with explicit state. class_exists() is ordinary PHP, not an API hallucination. Minor limitation: it does not inspect paused_at_incomplete_token() or get_last_error(), though the docs leave read-only partial-result policy to the caller."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all called API methods/options are documented, including next_tag(array('tag_closers'=>'visit')). It follows the documented depth-bounded text walk and decoded #text pattern. Slight idiom penalty because visiting tag closers in the outer next_tag() loop is unnecessary here, and the nested cursor walk is close to the docs' single-cursor caution, though it is safe for this task."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API usage throughout. The implementation closely matches the documented subtree text extraction pattern: match heading openers, record depth, walk #text descendants with get_modifiable_text(), and rely on HTML Processor structure for implied closes. Minor caveat: it uses a nested cursor walk and does not explicitly check incomplete/unsupported parser state after scanning."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 7/7 with no _doing_it_wrong records. The rendered docs did the important things well: 'Which processor should I use?' and the HTML Processor overview made structural extraction a WP_HTML_Processor job; the 'collect DOM-style text from a subtree' recipe mapped directly to heading text extraction; get_modifiable_text() documented decoded #text semantics, preventing double-decoding of '&amp;'; and next_token()/get_current_depth() documented virtual closers and the >= depth guard, which explains why '<h2>One<h3>Two' works. Near-misses were mostly around cursor idioms: trials 2 and 3 used nested token walks for repeated headings despite the single-cursor warning, but their boundary condition exits on the heading's own closer, so no heading opener is skipped. None of the candidates checked paused_at_incomplete_token() or get_last_error(); for this read-only function that is a caller-policy choice in the docs, not a functional failure here.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / next_token()",
+      "problem": "The docs warn that nested next_token() loops can skip boundary tokens, but also show safe depth-bounded subtree walks after next_tag(). The distinction is subtle for repeated extraction tasks.",
+      "suggestion": "Add a short note distinguishing a safe bounded subtree scan that exits on the matched element's own closer from unsafe nested loops where the outer loop still needs to process the boundary token."
+    },
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree",
+      "problem": "The example covers one ARTICLE element; multi-element extraction requires combining 'scan any tag and branch' from next_tag() with the subtree text recipe.",
+      "suggestion": "Add a general example or cross-reference for collecting text from every element whose tag is in a small set, emphasizing next_tag() does not accept a list of tag names."
+    },
+    {
+      "location": "html-processor.md, create_fragment() / get_current_depth() completion-policy notes",
+      "problem": "The docs mention paused_at_incomplete_token() and get_last_error(), but readers may not know when a read-only extractor should ignore, return partial data, or fail closed.",
+      "suggestion": "Add a compact policy table for read-only extraction: best-effort partial extraction, complete-input-required extraction, and mutation/rewrite, with the exact post-scan checks for each."
+    }
+  ]
+}

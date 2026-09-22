@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment. It finds the first H1 tag with next_tag(), records its depth, then walks through all tokens while the current depth remains >= the H1's depth. Text content from #text tokens is accumulated (get_modifiable_text() returns already-decoded text), collecting all text inside the H1 element including text inside nested elements. Returns null if no H1 is found, or the accumulated text (empty string if H1 contains only markup).",
+  "confidence": 92
+}

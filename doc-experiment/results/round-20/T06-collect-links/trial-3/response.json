@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because structure matters, then finds each `A` opener with `next_tag('A')`, reads `href` via `get_attribute()` and keeps only string-valued attributes, excluding missing and boolean `href`. For each matched link it records the opening depth with `get_current_depth()` and walks its subtree with `next_token()`, concatenating decoded text from `#text` tokens via `get_modifiable_text()` and also including modifiable text carried on atomic text elements encountered as opening `#tag` tokens.",
+  "confidence": 82
+}

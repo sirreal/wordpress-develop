@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token() and rebuilt the normalized output via serialize_token(). While walking, I skipped only SPAN opener/closer tokens and tracked nested SPAN depth so contents were preserved and nested spans were unwrapped too.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag('TABLE')` to locate the first table, then `next_token()` plus `get_current_depth()` to walk that table subtree in document order. Inside the walk, I collected only `#text` tokens via `get_modifiable_text()` and used `get_tag()` with `is_tag_closer()` to delimit `TR`, `TD`, and `TH` rows and cells.",
+  "confidence": 91
+}

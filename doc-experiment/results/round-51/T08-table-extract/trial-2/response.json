@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table handling depends on HTML structure such as implied `TBODY`/`TR` elements. It finds the first `TABLE` with `next_tag()`, then walks that table subtree with `next_token()` and `get_current_depth()`, building rows on `TR` open/close events and collecting each cell\u2019s text by appending only `#text` tokens via `get_modifiable_text()` while inside `TD` or `TH` cells.",
+  "confidence": 92
+}

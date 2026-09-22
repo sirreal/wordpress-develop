@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor API for normalized BODY-fragment output: `WP_HTML_Processor::normalize()`. The method is documented under `normalize()` as returning `string|null`, with `null` when unable to normalize. No undocumented calls or `_doing_it_wrong` records. The null fallback handles unsupported markup and empty input cleanly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used documented HTML Processor APIs: `create_fragment()`, `serialize()`, and `get_last_error()`. This is a valid lower-level version of normalization, and `serialize()` was called immediately after creation as the docs require. Slightly less direct than the purpose-built `normalize()` API, but still idiomatic and edge-aware."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used documented HTML Processor APIs: `create_fragment()` and `serialize()`. Correctly treats `null` from processor creation or serialization as the fallback condition. It relies on `serialize()` returning `null` for unsupported markup rather than explicitly checking `get_last_error()`, which is documented but a little less diagnostic than the docs' broader fail-closed guidance."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 hidden cases, so there are no failed hidden cases to attribute to a misconception. The docs did well in three places: the Tag Processor overview explicitly says to use the HTML Processor for normalized output; the `normalize()` section states that it normalizes BODY-context fragments and returns `null` when unable; and the HTML Processor support section explains that unsupported markup aborts processing and makes output-producing methods such as `serialize()` and `normalize()` return `null`. The normalization bullets also covered the successful cases: omitted tags, implied table structure, attribute quoting, entity/text re-encoding, and incomplete trailing syntax. The main near-miss is that trials 2 and 3 chose the lower-level `create_fragment()` plus `serialize()` path instead of `normalize()`. That is documented and correct, but it exposes more failure surface. Another near-miss is visible in execution: unsupported cases produced `wp_trigger_error` warnings from serialization while still returning the expected fallback; the rendered docs explain the `null` return but not the warning side effect.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` docblock",
+      "problem": "The return contract says `null` if unable to normalize, but the failure modes are mostly explained elsewhere in the class overview. A reader has to connect `normalize()` to unsupported-parser aborts from the HTML Support section.",
+      "suggestion": "Add a short failure-contract paragraph to `normalize()`: it returns normalized BODY-fragment serialization, returns `null` when the processor aborts on unsupported markup, and callers needing diagnostic detail should use `create_fragment()` plus `serialize()`/`get_last_error()`."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize()` docblock",
+      "problem": "The docs say `serialize()` returns `null` after scanning has begun or when serialization cannot be generated, but do not mention that these paths call `wp_trigger_error`. Hidden executions recorded warnings on unsupported input even though the return value was handled correctly.",
+      "suggestion": "Document warning side effects for the two `serialize()` null paths: already-started processors and parser errors. Keep the primary contract as `string|null`, but make expected warnings explicit."
+    },
+    {
+      "location": "HTML Processor `HTML Support` / `Unsupported Features` section",
+      "problem": "The section gives useful unsupported examples such as foster parenting and mis-nested formatting, but nested-anchor/adoption-agency cases are only implied by the general adoption wording.",
+      "suggestion": "Add one general unsupported example for adoption-agency-style active formatting or nested-anchor restructuring, without tying it to any particular caller fallback policy."
+    }
+  ]
+}

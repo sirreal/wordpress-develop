@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal template so the `img` attributes keep the required `src` then `alt` order, then used `WP_HTML_Processor::create_fragment()` plus `set_attribute()` for the URL and alt text and `set_modifiable_text()` to replace the figcaption placeholder text with safely encoded plain text.",
+  "confidence": 95
+}

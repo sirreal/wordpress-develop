@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor with breadcrumb matching to find IMG elements nested anywhere inside FIGURE elements. It iterates through matching tags, retrieves the src attribute using get_attribute(), skips entries with missing or empty src values, decodes HTML entities using html_entity_decode(), and accumulates results in document order. The processor is created as a fragment since the input is HTML body content, and null checks ensure graceful handling of creation failures.",
+  "confidence": 65
+}

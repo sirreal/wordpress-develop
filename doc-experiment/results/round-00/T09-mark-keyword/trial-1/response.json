@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterate through every token using next_token(). For each #text token, I call get_modifiable_text() to get the decoded plain text and check if it contains the keyword (case-sensitive substring match). If it does, I call serialize_token() to get the normalized/encoded serialization of that text node, then wrap it in &lt;mark&gt;...&lt;/mark&gt;. For all other tokens (tags, comments, etc.) I just call serialize_token() directly. The final concatenated result is the normalized HTML with matching text nodes wrapped in mark elements. The serialize_token() method handles proper HTML encoding of text content, and the overall normalization (closing optional tags, double-quoting attributes, etc.) comes from serialize_token() for each token.",
+  "confidence": 72
+}

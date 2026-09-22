@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through tags with next_tag(). For each heading tag (H1-H6), it extracts the level from the tag name. Then it uses next_token() to collect all text content within the heading by accumulating text from #text tokens while tracking depth with get_current_depth() to distinguish between direct text and text in nested elements. The get_modifiable_text() method returns decoded character references automatically.",
+  "confidence": 62
+}

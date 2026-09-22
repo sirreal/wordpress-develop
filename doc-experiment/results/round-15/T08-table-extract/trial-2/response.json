@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, handles missing closing tags like a browser would, and navigates the table structure by walking tokens while tracking depth. For each table cell found (TD or TH), it collects text content by walking through nested tokens, accumulating only #text nodes whose content is already decoded by get_modifiable_text(). Rows are collected into subarrays, and the result is returned as an array of rows, each containing an array of cell texts.",
+  "confidence": 42
+}

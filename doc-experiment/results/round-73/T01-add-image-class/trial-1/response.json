@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses `WP_HTML_Tag_Processor` to scan the HTML linearly and match only real `img` tag openers, which are matched case-insensitively and do not include tags inside comments. For each matched image tag, it calls the documented `add_class( 'wp-image' )`, then returns the exact byte-preserving result with `get_updated_html()`.",
+  "confidence": 98
+}

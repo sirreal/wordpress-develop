@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), used next_tag('TABLE'), a single next_token() walk, get_current_depth() >= table depth, closer-driven row/cell state, and get_modifiable_text() for decoded text. All called methods are documented and execution recorded no _doing_it_wrong. Minor adherence issue: it appends get_modifiable_text() on any non-closing tag inside a cell, while the docs recommend limiting DOM-style text extraction to #text tokens unless special element text is intentionally wanted."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Best API adherence. It chose the tree-aware HTML Processor, bounded a single token walk by recorded table depth, used tag closers for rows/cells, included empty cells naturally, and used get_modifiable_text() only for #text plus explicitly selected special text-carrying elements. All methods are documented; no _doing_it_wrong records. Only small gap is no explicit incomplete/unsupported-input policy check."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and broadly idiomatic single-pass subtree walk. It uses documented methods only and no _doing_it_wrong records were emitted. Like trial-1, it calls get_modifiable_text() on all non-closing tag tokens while inside a cell; ordinary container tags return an empty string, so this passes, but the docs warn that modifiable text is broader than ordinary DOM text and should be selected deliberately."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8. The docs succeeded on the main decision points: the HTML Processor overview says to use it for structure, subtree walking, implied/virtual closing tags, and text collection; the DOM-style text recipe shows next_tag(), get_current_depth(), next_token(), get_token_type() === '#text', and get_modifiable_text(); next_token() explicitly warns about implied table structure such as synthesized TBODY, a single shared cursor, and using one stateful loop for repeated regions; get_current_depth() explains why the guard must be >=. Those passages map directly to the candidates' working designs. Near-misses were around modifiable text: trials 1 and 3 treated get_modifiable_text() as harmless on arbitrary tag openers. That is usually empty for ordinary tags, but the same method also exposes SCRIPT/STYLE/TITLE/TEXTAREA text and comments when matched, so it can blur DOM text content with broader modifiable-token content if used less carefully. Incomplete-input handling was also not consistently explicit; the docs mention paused_at_incomplete_token() and get_last_error(), but the task did not define whether extraction should be strict or best-effort, so this did not surface as a hidden failure.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md > Recipe: collect DOM-style text from a subtree / WP_HTML_Tag_Processor::get_modifiable_text()",
+      "problem": "Candidates can still infer that get_modifiable_text() is safe to call on broad token classes because ordinary tags return ''. That hides the distinction between DOM text descendants and other modifiable token payloads.",
+      "suggestion": "Add a compact decision table: include #text for DOM-style text; include SCRIPT/STYLE/TITLE/TEXTAREA only by explicit policy; exclude comments, processing instructions, and ordinary container tags. Mention that an empty return does not prove the token was a text-bearing DOM node."
+    },
+    {
+      "location": "html-processor.md > next_token() incomplete-input notes",
+      "problem": "The docs mention incomplete trailing syntax, but do not give a crisp read-only extraction policy distinction. Candidates either ignored it or checked only get_last_error().",
+      "suggestion": "Add guidance distinguishing best-effort extraction from strict complete-subtree extraction: best-effort may return visited virtual-closer results; strict callers should check both paused_at_incomplete_token() and get_last_error() after the bounded walk."
+    },
+    {
+      "location": "html-processor.md > get_token_type() / get_token_name()",
+      "problem": "The API has two similar token identity methods, and examples alternate between them. This is easy to get subtly wrong in extraction code.",
+      "suggestion": "Add a short 'which getter should I compare?' note: use get_token_type() for token classes such as #text/#comment/#tag, and get_tag() or get_token_name() for element names such as TR, TD, TH."
+    }
+  ]
+}

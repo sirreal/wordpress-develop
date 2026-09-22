@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan through every opening tag in the document with next_tag() (no arguments, so it matches any tag), then called remove_attribute( 'style' ) on each matched tag. The documentation confirms that attribute name matching is case-insensitive (since 6.2.1), so STYLE=\"\u2026\" is handled correctly. The processor preserves surrounding whitespace when removing attributes (noted in the \"Possible future direction\" section as a known behavior), matching the expected output. The processor automatically skips content inside special elements like STYLE and SCRIPT, so HTML comments and raw text regions are untouched. Finally, get_updated_html() returns the modified HTML string.",
+  "confidence": 97
+}

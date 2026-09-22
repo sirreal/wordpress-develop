@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, which the docs recommend for flat, byte-preserving attribute edits. Called only documented APIs: constructor, next_tag(), get_attribute(), set_attribute(), and get_updated_html(). The null check correctly treats href=\"\" and valueless href as present while skipping absent href; set_attribute() correctly overwrites existing target."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern as the reference: linear next_tag('A') walk, null !== get_attribute('href') for presence, set_attribute('target', '_blank') for add/overwrite, and get_updated_html() for byte-preserving output. No _doing_it_wrong records or undocumented API use."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and idiomatic documented API usage. The implementation handles the documented null/empty-string/true attribute semantics and relies on the processor to ignore comments and preserve untouched bytes. No hallucinated methods or misuse records."
+    }
+  ],
+  "failure_analysis": "All trials passed all hidden cases, so there are no failed cases to attribute to a documentation defect. The rendered docs did especially well in four places: the Tag Processor overview says to use this class for flat attribute/class edits and byte-precise preservation; the usage section shows constructing with new WP_HTML_Tag_Processor and walking with next_tag(); the get_attribute() documentation distinguishes null for missing, empty string for present-empty, and true for valueless boolean attributes; and set_attribute()/get_updated_html() document overwrite behavior plus byte-preserving output. The main near-miss is that the model explanations sometimes phrase the href test as just \"checks get_attribute('href')\"; the code used the correct null comparison, but a truthiness check would have failed empty-string href. The docs contain the needed contract, but an explicit presence-test idiom would make that safer.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docblock and high-level Custom queries section",
+      "problem": "The null/empty-string/true distinction is documented, but the common derived rule for attribute presence is implicit. Readers may still write a truthiness check and accidentally reject present-empty attributes.",
+      "suggestion": "Add a short general example showing presence testing with `null !== $processor->get_attribute( $name )`, and state that truthiness is not a valid presence test because `\"\"` is a present value."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute() docblock and Modifying HTML attributes overview",
+      "problem": "Attribute insertion and overwrite ordering are documented in the method details, but byte-exact tasks depend heavily on the rule that existing attributes keep position while new attributes are inserted immediately after the tag name and sorted among other new attributes.",
+      "suggestion": "Surface the insertion-order contract in the overview with a tiny before/after example for one existing attribute update and one newly added attribute."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() docblock",
+      "problem": "The docs imply lexical safety, but the method-level contract could be more explicit that `next_tag()` matches real tag openers only, not markup-looking text inside comments, SCRIPT/STYLE/TITLE/TEXTAREA content, or incomplete trailing syntax.",
+      "suggestion": "Add a concise note under `next_tag()` describing which markup-looking sequences are skipped or paused, with cross-links to the special-element and incomplete-token sections."
+    }
+  ]
+}

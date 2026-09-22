@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterates over every token with next_token(). For each token, it checks get_tag(): if the tag name is 'SPAN' (which covers both openers and closers since get_tag() returns the tag name regardless), it skips that token. For all other tokens (non-span tags, text nodes, comments, etc.), it calls serialize_token() to produce the normalized serialization and appends it to the output string. Because next_token() on the HTML Processor visits every node including text nodes and both opening and closing tags, the SPAN element's contents are visited as their own tokens and serialized normally. The result is already normalized (double-quoted attributes, closed optional tags, re-encoded text) because serialize_token() produces normative HTML.",
+  "confidence": 72
+}

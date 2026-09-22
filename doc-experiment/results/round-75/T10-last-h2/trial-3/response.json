@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, remembered the most recent `h2` opener with a bookmark, then sought back to that location and added the `final-section` class with `add_class()`. If no `h2` is found, the original HTML is returned unchanged, and the modified output is read with `get_updated_html()`.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML fragment processor with the given HTML string. If the processor creation fails, it returns false. Otherwise, it attempts to serialize the fragment using the `serialize()` method, which performs normalization. According to the documentation, `serialize()` returns null when the HTML Processor encounters unsupported markup (like mis-nested formatting elements), and returns the normalized HTML string otherwise. The function returns true if serialization succeeds (returns non-null string), and false if it fails (returns null).",
+  "confidence": 92
+}

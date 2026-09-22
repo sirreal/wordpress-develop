@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML document, finding all A tags. For each A tag found, it checks whether an href attribute exists by calling get_attribute('href') \u2014 which returns null only when the attribute is absent. If href is present (even if empty or a bare attribute), the target attribute is set to '_blank' and applied via set_attribute. The modified HTML is returned via get_updated_html(), preserving all other content byte-for-byte as required.",
+  "confidence": 95
+}

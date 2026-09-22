@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for BODY-fragment normalized output, walked with next_token(), skipped SPAN tokens, and rebuilt with serialize_token(). All called methods are present in the rendered docs and execution reported no _doing_it_wrong records. Minor caveat: the empty-string failure policy for parser errors is arbitrary, though defensible for a string-returning task."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses the same documented token-serialization rewrite pattern and no undocumented methods. The only adherence weakness is returning the original input on create_fragment() failure or get_last_error(); that is a possible 'fallback' per docs, but for a function promising normalized output with spans removed it would return unnormalized, unmodified HTML if triggered."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same strong API use as trial-1: correct processor, documented methods only, idiomatic token walk plus serialize_token(), and clean handling of unclosed elements through the HTML Processor's virtual closers. Same minor arbitrary empty-string parser-error policy."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; all three passed 7/7. The docs did well at steering subjects to the right pattern: 'Which processor should I use?' and HTML Processor support text emphasize normalized output and structural handling; 'Recipe: rewrite while serializing tokens' and the serialize_token() section explicitly show walking tokens, appending normalized serialization, skipping removed tokens, and skipping closing tokens too. The next_token() docs explain that the HTML Processor visits closers for every opener, including implicit/end-of-input closers, which is why nested and unclosed spans were handled. Near-misses: candidates invented different parser-error fallbacks because the docs say to reject or fall back without defining good policies for string-returning normalizers, and they rely on get_tag() across every token, which works, but the method docs could be clearer about opener, closer, virtual closer, and text-token behavior in an HTML Processor token walk.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / Overview and 'Recipe: rewrite while serializing tokens'",
+      "problem": "The overview lists node insertion/removal/unwrapping as future capabilities, while serialize_token() already supports streaming rewrites by omitting emitted tokens. This can read as contradictory.",
+      "suggestion": "Clarify that tree mutation APIs are future work, but callers can build a transformed serialized result today by walking tokens and selectively emitting serialize_token()."
+    },
+    {
+      "location": "html-processor.md / get_tag()",
+      "problem": "The method docs do not explicitly show get_tag() behavior during an HTML Processor next_token() walk for openers, closers, virtual closers, and non-tag tokens.",
+      "suggestion": "Add a small token-walk example showing that tag tokens return their uppercase tag name, matching closers can be detected or skipped with the same name, and text/comment tokens return null."
+    },
+    {
+      "location": "html-processor.md / create_fragment() returns and serialize_token() error-policy paragraph",
+      "problem": "Failure handling is underspecified for callers whose public contract must return a string. Subjects chose different fallbacks: empty string versus original input.",
+      "suggestion": "Document concrete null/error cases for create_fragment() and give general fallback policy examples for string-returning filters, especially warning that returning original input may violate contracts requiring normalized or transformed output."
+    }
+  ]
+}

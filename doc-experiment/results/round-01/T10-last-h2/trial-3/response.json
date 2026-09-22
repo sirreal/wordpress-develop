@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to iterate through all H2 opening tags with `next_tag('H2')` (which skips tag closers and ignores content in HTML comments by default). On each match, I overwrite the single bookmark `'last-h2'` so it ends up pointing at the final H2. If no H2 is found, the original string is returned unchanged. Otherwise, `seek()` moves the cursor back to that last H2, `add_class('final-section')` queues the class addition, and `get_updated_html()` returns the modified document. The documented bookmark pattern in the `set_bookmark()` section shows this exact \"keep updating one bookmark in a loop, then seek back\" idiom.",
+  "confidence": 97
+}

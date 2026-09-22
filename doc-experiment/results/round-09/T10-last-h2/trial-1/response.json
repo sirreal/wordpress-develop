@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to linearly scan through the document for H2 tags. As each H2 is found, a bookmark named \"last-h2\" is set and any previous bookmark is released. This technique of re-setting the same bookmark name efficiently tracks the last occurrence in a single pass without needing to know total count. After scanning completes, it seeks to the last H2 found, adds the \"final-section\" class, and returns the modified HTML via get_updated_html(). The Tag Processor automatically excludes H2 tags inside comments because it only matches real HTML tags, not text-like content in comments.",
+  "confidence": 92
+}

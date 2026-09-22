@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, position-based scan: it walks forward with `next_tag( 'H2' )`, reuses a single bookmark via `set_bookmark()` to remember the last matched `H2`, seeks back to that bookmark with `seek()`, adds the class with `add_class()`, and returns the result with `get_updated_html()`. If no `H2` is found, it returns the input unchanged.",
+  "confidence": 96
+}

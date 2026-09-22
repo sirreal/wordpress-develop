@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for flat attribute/text editing with byte-exact preservation. All methods documented: __construct, next_tag('img') string form (doc 'Finding tags' table line 59), set_attribute, next_token, get_token_type ('#text' value listed at doc line 1694), set_modifiable_text, get_updated_html. Follows the documented 'Building markup from a template' idiom verbatim: template with empty attributes in src,alt order plus '.' placeholder text, then the #text-walk loop. Passed 6/6, no _doing_it_wrong. Minor: does not check set_modifiable_text() return value despite doc line 1876 saying 'Always check the return value'; harmless here since the template guarantees a #text node. Attribute calls are guarded by the next_tag if-check, which is good practice."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1; uses the array query form next_tag( array('tag_name'=>'img') ), also documented (doc line 58). Same correct processor choice, same documented template idiom, same six documented methods, no hallucinations, 6/6 pass, no _doing_it_wrong. Same single minor miss: set_modifiable_text() return value unchecked. Explanation is accurate and notes encoding is handled by set_attribute/set_modifiable_text, matching docs."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Identical approach to trial-1 (string next_tag('img') form), template extracted to a $template variable. Correct Tag Processor choice, only documented methods, idiomatic template-fill pattern straight from the docs, attribute calls guarded by next_tag if-check. 6/6 pass, no _doing_it_wrong. Same minor unchecked set_modifiable_text() return value. Explanation correctly attributes encoding to the API."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 6 cases (simple, ampersand-in-caption, quotes-in-alt, angle-brackets-in-caption, unicode, html-in-caption-not-parsed) with no _doing_it_wrong or trigger_error records, and the output matched the canonical reference exactly.\n\nWhy the docs succeeded here: this task maps almost one-to-one onto two documented passages. (1) The Tag Processor's 'Building markup from a template' section (lines 158-182) spells out both governing rules — include attributes with empty values in the template so written order is preserved, and include placeholder text inside elements that need text because an empty element has no #text node for set_modifiable_text to replace — and gives a near-identical worked example (the <a href title> template with the #text-walk loop). (2) The set_modifiable_text docblock (lines 1876-1888) repeats the empty-element caveat using FIGCAPTION specifically and shows the exact placeholder-and-walk snippet on a <figcaption>.</figcaption> template. All three subjects reproduced this idiom, so the edge cases that could have tripped them were pre-empted by the docs:\n- Attribute ordering (case 'simple'/'quotes-in-alt'): the template-rule note that ADDED attributes sort alphabetically (line 162) steered subjects to put src/alt in the template rather than add them, preserving src-then-alt order.\n- Encoding of &, <, >, quotes (ampersand/angle-brackets/html-in-caption cases): get_attribute/set_attribute and set_modifiable_text docblocks state plainly that these methods accept plain unescaped values and encode them; the set_modifiable_text 'Eggs & Milk -> &amp;' example (lines 1919-1925) is exactly the ampersand case. Subjects correctly avoided manual escaping.\n- HTML-in-caption-not-parsed: handled automatically because set_modifiable_text writes text into a #text node, which the API encodes; no subject mistakenly treated the caption as markup.\n- Unicode: passed trivially because the API is byte-preserving for UTF-8 (doc 'Text Encoding' section); no subject did anything special, which is correct.\n\nNear-misses in the explanations: all three explanations are accurate. The only latent weakness across all trials is that none check the boolean return of set_modifiable_text, contrary to the doc's explicit 'Always check the return value' instruction (line 1876). It is invisible here because the placeholder guarantees a #text token, but on a template lacking placeholder text the same code would silently emit an empty caption. The docs warn about this in prose but the subjects' copied example loops (both in the template section and the set_modifiable_text section) do NOT themselves check the return value — they only break on finding #text — so the subjects faithfully copied the unchecked pattern from the docs.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text and the 'Building markup from a template' section",
+      "problem": "The prose says 'Always check the return value', but every worked example in both the template section (lines 168-182) and the set_modifiable_text docblock (lines 1880-1888, 1900-1911) calls set_modifiable_text without checking its bool return. Subjects copy the example, not the prose, so all three trials ship code that would silently produce empty text if the placeholder were ever missing.",
+      "suggestion": "Make at least one canonical example actually consume the return value, e.g. `if ( ! $processor->set_modifiable_text( $text ) ) { /* template missing placeholder #text node */ } break;`, so the safe pattern is the one that gets copied."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag (or the 'Building markup from a template' section)",
+      "problem": "The template-building example does not guard against next_tag() returning false before calling set_attribute(). For a fixed literal template this can never fail, but the example teaches a pattern that, applied to dynamic input, would call set_attribute() with no matched tag. Two of three subjects added an if-guard on their own; the docs' own template example omits it.",
+      "suggestion": "In the template example, wrap the set_attribute calls in `if ( $processor->next_tag('img') ) { ... }` to model the guard, with a one-line note that on a fixed literal template the match is guaranteed but guarding is the habit to keep."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor 'Building markup from a template' section",
+      "problem": "The example walks tokens with `while ( next_token() ) { if ('#text' === get_token_type()) {...} break; }` to reach the first text node, but does not explain that next_token() will keep walking the whole document if no #text is found, nor that the first #text encountered may not be the intended one in templates with multiple text-bearing elements. For this single-caption shape it is fine, but the idiom is presented without its boundary condition.",
+      "suggestion": "Add a sentence noting that the loop stops at the FIRST #text token in document order and that templates with multiple distinct text slots need a more specific guard (e.g. tracking the enclosing tag via a preceding next_tag, or counting). Keep it general, not figure-specific."
+    }
+  ]
+}

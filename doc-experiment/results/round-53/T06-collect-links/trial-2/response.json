@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment structurally, then walked tokens with next_token(). For each opening A tag, I read href with get_attribute() and only kept string values; for link text, I accumulated decoded content from #text tokens via get_modifiable_text(), using get_current_depth() to close out links in document order.",
+  "confidence": 88
+}

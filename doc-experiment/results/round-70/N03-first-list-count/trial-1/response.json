@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structure awareness, then `next_token()` plus `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_current_depth()` to find the first `UL`/`OL`, count only direct `LI` children, and verify the scan finished cleanly. After that, I used a bookmark with `set_bookmark()` and `seek()` to return to the list opener and `set_attribute()`/`get_updated_html()` to add `data-item-count` only when the full list was scanned successfully.",
+  "confidence": 90
+}

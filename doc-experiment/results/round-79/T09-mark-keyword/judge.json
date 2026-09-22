@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for a BODY fragment, walked tokens with next_token(), restricted matching to ordinary #text tokens, used decoded get_modifiable_text() for the substring test, and emitted normalized wrappers around serialize_token(). All called processor methods are documented in the rendered files, and execution reported no _doing_it_wrong records. Minor near-miss: the error fallback can return raw input via normalize($html) ?? $html, which is an explicit fallback policy but may not preserve the task's normalized-output contract on unsupported input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Very idiomatic token-rewrite solution: HTML Processor fragment parsing, #text guard before reading get_modifiable_text(), serialize_token() for normalized output, and get_last_error() fallback. No undocumented API calls and no runtime misuse. Minor near-miss is the same raw-input fallback on normalize() failure; otherwise it closely follows the docs' serialize_token rewrite recipe."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct API selection and documented method usage throughout. It follows the documented pattern of walking tokens, inspecting decoded text only after confirming #text, and wrapping the serialized current token. The extra empty-string checks are harmless. The only small caveat is fallback behavior on unsupported input: returning the raw original HTML after normalize() returns null may violate a normalized-output contract, though the docs frame this as a caller policy decision."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases. The rendered docs did unusually well for this task: the WP_HTML_Processor overview explicitly says to prefer the HTML Processor when structure, BODY-fragment parsing, implied closing tags, or normalized output matter; the 'Recipe: collect DOM-style text from a subtree' section warns that ordinary text is only #text tokens and excludes comments plus SCRIPT/STYLE/TEXTAREA/TITLE opener text; get_modifiable_text() documents decoded text for #text and TITLE/TEXTAREA; and serialize_token() includes the exact general pattern needed for token-by-token rewrites with wrapper markup. The main near-miss was fallback policy. Candidates consistently used normalize($html) ?? $html on create failure or get_last_error(). That is not hallucinated, but it can silently abandon emitted wrappers or return non-normalized raw input if normalization fails. The docs do warn that normalize($html) starts over from the original bytes and that fallbacks are different policies, so this was not a failure in these trials, but the contract remains easy to under-specify in tasks and examples.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() and string-returning rewrite examples",
+      "problem": "The docs say a null processor means no processor was created, but examples leave the fallback entirely to caller policy. Models tend to write normalize($html) ?? $html, which can return non-normalized input in a function whose contract promises normalized output.",
+      "suggestion": "Add a short guidance note distinguishing fallback choices for string-returning normalizers: fail closed with an empty string/null, return best-effort accumulated serialization, or return raw input only when byte preservation is explicitly more important than normalization."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite while serializing tokens",
+      "problem": "The docs correctly warn that normalize($html) after a rewrite discards emitted changes, but this is easy to miss when handling get_last_error() after the loop.",
+      "suggestion": "Add a compact 'after the loop' decision table for token rewrites: success returns accumulated output; unsupported markup should use an explicit caller-defined fallback; normalize($html) is a restart from the original input and never includes emitted wrappers/skips/replacements."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text()",
+      "problem": "The decoded-text contract is present, but it is split across text extraction and method reference sections. This task depended on using decoded text for matching and serialize_token() for canonical re-encoding.",
+      "suggestion": "Add a concise pair of examples showing that get_modifiable_text() returns decoded plaintext for #text while serialize_token() emits normalized encoded HTML for the same token, without suggesting a task-specific wrapper solution."
+    }
+  ]
+}

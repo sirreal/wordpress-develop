@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in body context and next_token() to walk through all tokens. It finds the first TABLE tag, then tracks depth to stay within the table. When it encounters TD or TH opening tags, it starts collecting text from subsequent text tokens using get_modifiable_text() (which handles character reference decoding). When a cell or row closes, it flushes the collected text and moves to the next cell/row. This approach properly handles omitted closing tags and tbody/thead elements since the browser-like parsing handles these semantically.",
+  "confidence": 75
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 84,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for a flat single-tag attribute edit. All methods (next_tag, set_bookmark, release_bookmark, seek, add_class, get_updated_html) are documented and used correctly; passes all 6 cases. The deduction is for fighting the documented bookmark idiom: it generates programmatic per-iteration names via uniqid() ('last_h2_'.uniqid()) and manually releases each one. The set_bookmark docblock explicitly warns against this ('should not be created with programmatically-made names, such as li_{$index}'; 'create only bookmarks of known string literal names') and documents the simpler supported idiom of re-setting one literal name to track 'the last X seen so far.' It works only because each name is released before the next is set, so the bookmark limit is never hit, but it is the exact anti-pattern the docs caution against and adds needless churn. Relies correctly on next_tag('H2') ignoring the commented fake H2 and on add_class appending to an existing class attribute."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three and textbook-idiomatic: a single string-literal bookmark 'last_h2' re-set on each H2 match, exactly the 'remember the last X seen' idiom the set_bookmark docblock endorses (the last-li example). Correct processor choice; all methods documented; passes all 6 cases. Minor non-ideal touches keep it from 100: the `is_tag_closer()` continue-guard is dead code because next_tag() defaults to tag_closers=>'skip' and never stops on a closer (verified: next_tag('H2') yields only openers), and the post-loop `has_bookmark()` check is redundant since the bookmark is known to exist whenever $last_h2_bookmark is set. Both are harmless and arguably defensive, but they reveal uncertainty about next_tag's default closer behavior. Self-reported confidence 92 is well-calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all-documented methods; passes all 6 cases. Uses the right core idiom (single literal name 'last_h2' re-set each iteration), and idiomatically relies on seek()'s bool return to gate the add_class. But the reasoning is internally inconsistent: it re-sets the SAME literal name every loop (which, per the set_bookmark docs, MOVES the bookmark and needs no release) yet also calls release_bookmark on the previous iteration's bookmark of the same name — redundant churn that contradicts its own approach. Like trial-2 it includes the dead `is_tag_closer()` guard (next_tag defaults to skipping closers). No correctness impact, but the muddled bookmark lifecycle reasoning sits between trial-2's clean version and trial-1's programmatic-name detour."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials pass all 6 cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class), and no _doing_it_wrong or trigger_error records appear in any execution.json. The docs supported this task well. Three things in the docs did the heavy lifting: (1) the set_bookmark docblock explicitly names the 'remember the last X seen so far' idiom and shows re-setting one literal name in a loop (the last-li example), which trials 2 and 3 followed directly; (2) the next_tag() 'What this matches' section states that tag-like text inside comments is text and is never matched, so every trial correctly handled comment-h2-not-counted without special code; (3) the add_class examples show appending to an existing class, covering the existing-class case for free. Near-misses in the candidate reasoning, all of which the docs could have prevented: (a) Trial 1's explanation justifies per-iteration uniqid() bookmark names, the precise programmatic-naming anti-pattern the set_bookmark docblock warns against; the warning is present but buried near the end of a long docblock and is not connected in-place to the 'remember the last X' idiom that makes unique names unnecessary. (b) Trials 2 and 3 both added is_tag_closer() guards that never fire, because the fact that next_tag() defaults to skipping closers (tag_closers default 'skip') is documented only inside the dense inline @type blob of the next_tag() $query parameter and is easy to overlook; the prose 'Finding tags' section never states it plainly. (c) Trial 2 added a redundant has_bookmark() check, indicating uncertainty about whether a just-set bookmark reliably exists. None of these caused failures, but each is wasted or contradictory code traceable to docs that state the relevant fact only obscurely.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — prose 'Finding tags' section",
+      "problem": "That next_tag() skips tag closers by default (only stopping on openers) is documented solely inside the dense inline @type description of the $query 'tag_closers' parameter ('visit' or 'skip' (default)). The 'Finding tags' prose never states it plainly, so subjects added dead is_tag_closer() guards in two of three trials, unsure whether next_tag('H2') would also stop on </h2>.",
+      "suggestion": "Add one sentence to the 'Finding tags' prose: 'By default next_tag() stops only on opening tags; closing tags such as </div> are skipped unless you pass tag_closers => \"visit\".' This generalizes to any single-tag walk and removes a common source of unnecessary closer-handling code."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark()",
+      "problem": "The docblock both endorses the 're-set one literal name to remember the last X' idiom and, separately and much later, warns against programmatic names like 'li_{$index}'. The two ideas are far apart, so a subject (trial 1) reached for uniqid()-generated names plus manual release_bookmark churn — the warned-against pattern — even though the endorsed idiom makes unique names unnecessary.",
+      "suggestion": "Place the anti-pattern warning immediately adjacent to the 'remember the last X' idiom and state the consequence directly: 'To track the last matching element, re-set the SAME literal-named bookmark on each match (it moves to the new location and needs no release). Do not generate a fresh name per iteration (e.g. with uniqid() or a loop index) — that defeats the moving-bookmark behavior, risks the bookmark limit, and adds needless release calls.'"
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / release_bookmark()",
+      "problem": "It is not stated plainly that re-setting an existing bookmark name does NOT require (and is not helped by) calling release_bookmark first, nor that a bookmark just set is guaranteed to exist. This left trials 3 (redundant release of a same-named bookmark) and 2 (redundant has_bookmark check) writing defensive no-op code.",
+      "suggestion": "Add to set_bookmark: 'Re-setting an existing name moves the bookmark in place; you do not need to release it first, and a bookmark you have just set is guaranteed to exist (no has_bookmark() check is needed before seek()).' This clarifies bookmark lifecycle generally, not just for this task."
+    }
+  ]
+}

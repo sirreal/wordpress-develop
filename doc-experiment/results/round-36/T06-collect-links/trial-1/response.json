@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for BODY-fragment parsing, then walks the document once with `next_token()`. On each `A` opener it reads `href` with `get_attribute()` and keeps only string-valued attributes, excluding missing and boolean `href`. While inside links, it concatenates only `#text` token content via `get_modifiable_text()`, so character references are already decoded and markup contributes nothing.",
+  "confidence": 92
+}

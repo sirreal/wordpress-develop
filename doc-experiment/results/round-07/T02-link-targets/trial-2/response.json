@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor to scan for A tags and check for href attributes. The processor's next_tag() method finds each opening A tag, get_attribute() checks if href exists (returning null only when absent), and set_attribute() writes the target value. According to the documentation, get_attribute() returns null when an attribute doesn't exist, true for boolean attributes like bare href, and the decoded string value otherwise. The solution preserves all other HTML byte-for-byte while only modifying matching A tags.",
+  "confidence": 87
+}

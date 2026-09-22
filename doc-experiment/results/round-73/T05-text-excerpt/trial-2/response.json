@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in BODY context, then walked tokens with `next_token()`. I appended decoded plaintext only from `#text` tokens and from opening `TITLE`/`TEXTAREA` tokens via `get_modifiable_text()`, which matches the documented text-bearing cases while excluding script/style contents. The final string is truncated to the requested code-point limit with `mb_substr(..., 'UTF-8')`.\n",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, walks every token with `next_token()`, wraps only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the case-sensitive keyword, and serializes all other tokens with `serialize_token()` so the output stays normalized. Each wrapper is built from a normalized `<mark>.</mark>` fragment and filled via `set_modifiable_text()`, which re-encodes text canonically.",
+  "confidence": 84
+}

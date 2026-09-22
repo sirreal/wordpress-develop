@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then `next_tag('H1')` to find the first H1 opener and `next_token()` plus `get_current_depth()` to walk its subtree. While inside that subtree, I concatenated only `#text` tokens via `get_modifiable_text()`, which returns decoded text content for ordinary text nodes.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in body context, next_tag() to find the first TABLE, and then next_token() with get_current_depth() to walk only that table subtree. Cell text is gathered from #text tokens via get_modifiable_text(), while TR/TD/TH openers and closers define row and cell boundaries, which lets implied table structure be handled by the HTML Processor.",
+  "confidence": 90
+}

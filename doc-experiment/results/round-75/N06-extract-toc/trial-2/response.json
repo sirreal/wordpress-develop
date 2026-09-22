@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and WP_HTML_Processor::next_token(), get_token_type(), get_tag(), get_current_depth(), get_modifiable_text(), and is_tag_closer() to walk the document in order, collecting only ordinary #text content inside H1 through H6 headings and emitting an entry when the matching heading closer is reached.",
+  "confidence": 87
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY-context fragment and `serialize()` to obtain the normalized HTML serialization. If the processor cannot be created or later reports unsupported HTML via `get_last_error()`, the function returns the required fallback markup exactly.",
+  "confidence": 98
+}

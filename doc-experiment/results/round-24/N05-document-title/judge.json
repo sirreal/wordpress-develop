@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_full_parser(), which is the right processor for complete documents and HEAD content. All called methods are documented, and there were no _doing_it_wrong records. The token walk follows the documented TITLE/get_modifiable_text pattern and handles decoded entities plus empty titles. Small deduction: it matches local token name TITLE without checking get_namespace(), so a foreign-content SVG/MathML title could be mistaken for the document title."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correct full-document processor, documented API only, and idiomatic use of next_token(), get_token_name(), is_tag_closer(), and get_modifiable_text() for TITLE text. It passed all cases. Same near-miss: no namespace guard for HTML TITLE."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correctly relies on decoded modifiable text on the TITLE opener and preserves the empty-string/null distinction in the tested cases. No undocumented calls or misuse. Same minor gap: local-name TITLE matching is not constrained to the HTML namespace."
+    }
+  ],
+  "failure_analysis": "All hidden cases passed in all three trials: standard document, entity decoding, absent title, empty title, no doctype, attributes, and implied structure. The docs worked well here: create_full_parser() is clearly described as the full-document factory, next_token() explains that TITLE does not expose child #text tokens, and get_modifiable_text() explicitly says TITLE/TEXTAREA text is decoded and includes a TITLE-reading example. The main near-miss is namespace handling. The canonical reference checks get_namespace() === 'html', but the rendered get_modifiable_text() TITLE example matches only get_token_name() === 'TITLE'. Because get_token_name() is a local name, foreign-content elements such as SVG <title> can also match; in a document with only an SVG title, this implementation would return an empty string rather than null. That misunderstanding is caused by the absence of a namespace caveat near the TITLE example, despite get_namespace() being documented elsewhere.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, get_modifiable_text() TITLE example",
+      "problem": "The example teaches matching TITLE by local token name only, without mentioning that foreign-content elements may share the same local name.",
+      "suggestion": "Add a general note that callers depending on HTML element semantics should also check get_namespace() === 'html', and cross-link to get_namespace()."
+    },
+    {
+      "location": "html-processor.md, get_token_name() / next_tag() method docs",
+      "problem": "The docs do not make namespace collision risk prominent at the point where callers learn to match by tag/token name.",
+      "suggestion": "State that returned and queried tag names are local names, and that namespace-sensitive code should combine them with get_namespace()."
+    },
+    {
+      "location": "html-processor.md, read-only extraction guidance around next_token()",
+      "problem": "Abort/truncation guidance is mostly framed around mutations and rewrites, so extraction code may not know when null means no match versus incomplete or unsupported input.",
+      "suggestion": "Add an extraction-focused note recommending get_last_error() and paused_at_incomplete_token() checks when a result depends on having scanned the full input."
+    }
+  ]
+}

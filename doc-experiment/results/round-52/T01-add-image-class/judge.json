@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Tag_Processor for a flat, byte-preserving class edit. Uses only documented API: constructor, next_tag('img'), add_class('wp-image'), and get_updated_html(). The while loop is the idiomatic token-walking pattern; no bookmarks, breadcrumbs, or serialization were needed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same fully adherent implementation as trial-1. The documented next_tag string query handles case-insensitive IMG matching and ignores comments/incomplete trailing tags; add_class handles absent and existing class attributes; get_updated_html preserves untouched bytes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the same documented HTML API path as trial-1 and trial-2. The extra class_exists() guard is ordinary PHP and unnecessary in the documented WordPress context, but it is not a hallucinated HTML API method and did not affect the tested behavior."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 8/8 cases and execution.json reported no _doing_it_wrong or trigger_error records. The docs did well on the exact decision path. WP_HTML_Tag_Processor > Which processor should I use? says to use the Tag Processor for flat tag/class edits with byte-precise preservation. WP_HTML_Tag_Processor > Usage documents direct construction with new WP_HTML_Tag_Processor($html). WP_HTML_Tag_Processor > Finding tags and the next_tag() method document next_tag('img'), ASCII case-insensitive tag matching, real-tag-only matching that ignores comments/raw text, and pausing on incomplete trailing syntax. WP_HTML_Tag_Processor::add_class() explicitly says it creates a missing class attribute, appends after existing classes, preserves existing class order/spacing, and avoids duplicates. WP_HTML_Tag_Processor::get_updated_html() states it is the way to read queued edits and that untouched bytes, including unrelated unquoted attributes, are preserved. The main near-miss is presentational rather than fatal: the class-level Usage section says there are three steps but does not include the final output-read step in its first example, so a weaker subject could mutate correctly but forget get_updated_html().",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor class docblock, Usage section",
+      "problem": "The Usage section describes three steps ending at requesting changes, and its first example does not show returning or assigning get_updated_html().",
+      "suggestion": "Make reading the result an explicit final step and include a complete minimal example that constructs a processor, walks matches, mutates them, and returns get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() docblock",
+      "problem": "The contract is clear, but the method-level examples are not framed as a full multi-token edit workflow.",
+      "suggestion": "Add a task-agnostic class-edit recipe: loop over matching tags with next_tag(), call add_class()/remove_class(), then read the result with get_updated_html(); note that callers usually do not need to inspect the class attribute first."
+    },
+    {
+      "location": "WP_HTML_Processor class docblock, Usage section",
+      "problem": "The first HTML Processor example also adds a class, which could tempt readers to use the heavier structural processor for flat byte-preserving edits before they reach the later processor-selection guidance.",
+      "suggestion": "Move or repeat the processor-selection note near the top of Usage: use WP_HTML_Tag_Processor for flat attribute/class edits when byte preservation matters; use WP_HTML_Processor when the query depends on structure, breadcrumbs, depth, or normalized serialization."
+    },
+    {
+      "location": "Rendered method reference for both processor classes",
+      "problem": "Private/internal methods appear in the method table near public methods, increasing the chance that readers treat internals as callable task APIs.",
+      "suggestion": "Separate public API methods from private/internal implementation methods, or add stronger generated warnings around private entries so examples and task-oriented docs point readers toward stable public methods only."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance with the input HTML, then loops through all A tags using next_tag() with a tag_name query. For each A tag found, it calls remove_class('external') to remove that specific class (which is a no-op if the class doesn't exist). Finally, it returns the updated HTML via get_updated_html(). The Tag Processor preserves all other markup and classes, and when a class is the only one on an attribute, it removes the entire class attribute while preserving surrounding whitespace.",
+  "confidence": 95
+}

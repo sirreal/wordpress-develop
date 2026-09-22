@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML document linearly. It finds each A tag using next_tag(), checks if it contains the \"external\" class with has_class() (which performs case-sensitive matching), and removes the class using remove_class(). The remove_class() method automatically removes the entire class attribute if \"external\" is the only class present, and preserves other classes and surrounding whitespace. Finally, get_updated_html() returns the modified HTML with all queued changes applied.",
+  "confidence": 92
+}

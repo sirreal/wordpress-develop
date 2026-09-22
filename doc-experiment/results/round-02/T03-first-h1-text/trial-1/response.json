@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment and find the first H1 tag. Records the depth at the H1 opening tag, then iterates through all tokens using next_token() while the depth remains at or above that level, accumulating all #text tokens. The get_modifiable_text() method automatically decodes character references. Returns null if no H1 exists.",
+  "confidence": 92
+}

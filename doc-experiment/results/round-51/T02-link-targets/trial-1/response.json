@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for byte-preserving attribute edits: it scans forward with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so present empty-string and boolean `href` forms are both treated as present while missing `href` returns `null`, then overwrites or adds `target` via `set_attribute()` and returns the result with `get_updated_html()`.",
+  "confidence": 98
+}

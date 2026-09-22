@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment for tree-aware text extraction. All called methods are documented: create_fragment, next_token, get_token_type, get_tag, is_tag_closer, get_attribute, and get_modifiable_text. The one-pass next_token state stack fits the documented closer-driven walking pattern and handles string-only href values plus decoded #text. Small deduction: it avoids the simpler depth-bounded subtree recipe and does not make an explicit policy decision around get_last_error."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Best match to the documented contract. It uses WP_HTML_Processor::create_fragment, next_tag('A'), records get_current_depth(), walks the subtree with next_token until depth drops below the opener depth, reads only #text via get_modifiable_text, and filters href with is_string. paused_at_incomplete_token and get_last_error are documented and no _doing_it_wrong records appeared."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and only documented methods: create_fragment, next_token, get_token_type, get_tag, is_tag_closer, get_attribute, and get_modifiable_text. The closer-driven active-link stack is broadly supported by the next_token documentation's guarantee that virtual and end-of-input closers are visited. Deduction: the final array_pop flush is redundant under that documented guarantee and suggests uncertainty about virtual closers; it also relies on a manual stack rather than the clearer depth-bounded subtree recipe."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases were present: all three trials passed all 8 cases. The docs did well in the passages that matter for this task. The Tag Processor overview's 'Which processor should I use?' and the HTML Processor supported-elements section clearly say to use WP_HTML_Processor for structure, collecting element text, walking subtrees, and implied or missing closers. The HTML Processor 'Recipe: collect DOM-style text from a subtree', next_token(), and get_current_depth() sections show the #text-only accumulation pattern, decoded text via get_modifiable_text(), and the >= depth boundary that preserves text after nested inline markup. get_attribute() documents the string|true|null split, which led all trials to use is_string and exclude missing or valueless href. The near-misses were not functional failures: trials 1 and 3 used manual closer stacks instead of the depth recipe, and trial 3 included an unnecessary EOF flush despite the docs saying end-of-input closers are visited. Trial 2 used paused_at_incomplete_token correctly, but that method is easier to find in the Tag Processor docs than in the HTML Processor method list, so it relied on inferred inheritance from the examples.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute()",
+      "problem": "The HTML Processor method docs show string|true|null and a boolean-attribute example, but they do not explicitly show the empty-string and decoded-string cases in the same place. This task depended on distinguishing missing/null, valueless/true, empty string, and decoded string values.",
+      "suggestion": "Add a compact example covering attr missing => null, attr without value => true, attr=\"\" => '', and attr=\"a&amp;b\" => 'a&b'. State that string checks include the empty string and exclude boolean attributes."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The docs show collecting text for one matched subtree and separately warn against nested next_token loops. They do not make the repeated-subtree case explicit, so readers may be unsure whether an outer next_tag loop plus an inner depth-bounded next_token walk is intended.",
+      "suggestion": "Add a generic repeated-region paragraph: after matching an element opener, record its depth, walk while depth is >= that value, and after the walk the cursor is positioned at the closing token so the next next_tag call resumes after that region."
+    },
+    {
+      "location": "WP_HTML_Processor method index / inherited methods",
+      "problem": "paused_at_incomplete_token() is used in HTML Processor examples but is only indexed as a Tag Processor method. Readers must infer that the inherited method is available on WP_HTML_Processor.",
+      "suggestion": "Add an inherited-method note or explicit see-also entry in the HTML Processor docs for paused_at_incomplete_token(), including the rule that it is meaningful after scanning has stopped or reached the relevant boundary."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag()",
+      "problem": "The get_tag() section documents WP_HTML_Processor but its example instantiates WP_HTML_Tag_Processor, which blurs the distinction between lexical tag scanning and processor-aware token walking.",
+      "suggestion": "Change the example to use WP_HTML_Processor::create_fragment(), or explicitly label it as a comparison with WP_HTML_Tag_Processor and include how virtual/implied closers affect processor-aware walks."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context, then iterates all tokens via next_token(). For each token, it checks get_token_type() === '#text' to identify text nodes only (excluding script/style content, comments, etc.), and accumulates the decoded text content via get_modifiable_text() (which returns character references already decoded). After collecting the full text, it uses mb_strlen() and mb_substr() with UTF-8 encoding to count and truncate at Unicode code point boundaries, returning at most $max_codepoints code points.",
+  "confidence": 90
+}

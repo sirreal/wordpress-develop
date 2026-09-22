@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through every token with next_token(). For each token, it checks if the tag is SPAN and skips it (both opening and closing tags). All other tokens are serialized using serialize_token(), which produces normalized HTML. The concatenated output provides normalized HTML with all SPAN wrappers removed while preserving their contents.",
+  "confidence": 75
+}

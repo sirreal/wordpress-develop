@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor's next_token() to iterate through all tokens. Tracks when entering/exiting heading tags and nested tags using a depth counter. Accumulates all #text tokens encountered inside heading tags by concatenating modifiable text (which automatically decodes character references per the documentation). Returns array of heading entries with level (1-6) and concatenated text content.",
+  "confidence": 55
+}

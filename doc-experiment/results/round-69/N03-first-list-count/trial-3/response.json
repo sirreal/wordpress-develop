@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on tree-aware structure and direct-child counting. The function scans for the first `UL` or `OL`, bookmarks its opener, walks tokens until the list closes while counting only direct `LI` openers at one level deeper, and only writes `data-item-count` after verifying the scan completed cleanly via `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 94
+}

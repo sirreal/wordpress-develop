@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment, `next_tag()` to locate the first `UL` or `OL`, and then a `next_token()` walk with `get_current_depth()` to count only direct `LI` opener tokens inside that list. If the scan does not reach the list closer cleanly, or the processor reports truncation or unsupported markup, the function returns the original HTML; otherwise it seeks back to the bookmarked opener, sets `data-item-count`, and returns `get_updated_html()`.",
+  "confidence": 92
+}

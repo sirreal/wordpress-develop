@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and find all P elements. For each P tag found, it retrieves the breadcrumbs (the ancestor chain from root to current element) and checks if 'BLOCKQUOTE' appears anywhere in that chain using in_array(). If a BLOCKQUOTE ancestor is found, it adds the 'quoted' class using add_class(). Finally, it returns the modified HTML via get_updated_html().",
+  "confidence": 92
+}

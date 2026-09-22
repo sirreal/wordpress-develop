@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor in fragment mode to walk only real tags, inspected each UL/OL opener\u2019s breadcrumbs to see whether any earlier ancestor was UL or OL, and then added the `nested-list` class with `add_class()`; `get_last_error()` guards against unsupported input, and `get_updated_html()` preserves untouched bytes exactly.",
+  "confidence": 91
+}

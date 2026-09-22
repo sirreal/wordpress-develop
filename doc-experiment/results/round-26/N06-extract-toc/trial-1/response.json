@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the input is a BODY-style fragment, then performs a single `next_token()` walk. It starts a heading on `H1` through `H6` opening tags, tracks when that heading\u2019s subtree ends with `get_current_depth()`, collects descendant ordinary text from `#text` tokens via `get_modifiable_text()`, and also includes text carried directly on text-only element tokens such as `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA`, all using documented HTML Processor APIs.",
+  "confidence": 86
+}

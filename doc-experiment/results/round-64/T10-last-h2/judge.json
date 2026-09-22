@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 81,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. All called methods are documented, and the bookmark/seek/add_class/get_updated_html pattern is mostly idiomatic. Main adherence issue: it chose WP_HTML_Processor for a flat source-order class edit, and tries create_full_parser before create_fragment. That is heavier than the documented Tag Processor path and can silently miss later H2 tags if the HTML Processor aborts on unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Correctly uses WP_HTML_Tag_Processor, scans H2 tags linearly, reuses one literal bookmark for the last match, seeks back, calls add_class, and returns get_updated_html. No undocumented API usage or _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6. Correct processor and documented query form. Uses the expected single-pass bookmark pattern, then seek/add_class/get_updated_html. Minor reservation: it ignores the set_bookmark return value, but with one fixed bookmark name this is not a practical issue."
+    }
+  ],
+  "failure_analysis": "All trials passed every frozen case: two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, and existing-class. The docs worked well for the core concepts: next_tag() is case-insensitive and only matches real tags, so comments are not counted; add_class() safely appends while preserving existing classes; bookmarks can be reused to remember the last matching token; get_updated_html() is the right output API after queued class edits. The only substantive near-miss was trial-1’s misconception that “document” or “last heading” implies tree-aware parsing. The Tag Processor “Which processor should I use?” section points to flat, position-based work, but the HTML Processor docs still made the heavier parser feel plausible. A probe confirmed the risk: with unsupported HTML Processor markup before later H2 tags, trial-1 leaves the later heading unmodified, while the Tag Processor solution still performs the flat edit.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor overview, “Which processor should I use?”",
+      "problem": "The flat-vs-structural boundary is present, but it does not explicitly classify first/last/Nth matching tag in source order as flat work. Trial-1 treated “last H2 in the document” as structural.",
+      "suggestion": "Add a sentence such as: source-order queries like first, last, or Nth tag by name/class are flat scans; use WP_HTML_Tag_Processor and bookmarks unless the condition depends on ancestors, descendants, implied elements, or normalized tree behavior."
+    },
+    {
+      "location": "WP_HTML_Processor::create_full_parser() and Usage",
+      "problem": "The docs say a fragment parser is likely more appropriate, but do not strongly discourage trying full-parser first for unknown input. Trial-1 used create_full_parser() as the primary path for a function accepting documents or fragments.",
+      "suggestion": "State that callers should choose create_full_parser() only when the contract is a complete document, choose create_fragment() for BODY-context fragments, and use WP_HTML_Tag_Processor instead for flat attribute/class edits regardless of document-vs-fragment wording."
+    },
+    {
+      "location": "WP_HTML_Processor HTML Support / next_tag()",
+      "problem": "The docs describe unsupported-markup aborts, but the mutation path can still look like ordinary “no later match” unless get_last_error() is checked. This matters when using HTML Processor for a full-input scan.",
+      "suggestion": "Add a mutation-focused warning: if an HTML Processor scan must cover the whole input before deciding an edit, check get_last_error() and paused_at_incomplete_token() after the scan; get_updated_html() only returns queued edits and does not prove the scan reached the end."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor top-level Bookmarks section",
+      "problem": "The high-level bookmark example is more complex than the common “remember the last match” use case; the clearest wording for re-setting one bookmark appears deeper in method docs.",
+      "suggestion": "Promote or duplicate the general bookmark rule near the top-level Bookmarks heading: re-setting the same literal bookmark name moves it, which is the supported idiom for tracking the last occurrence without creating many bookmarks."
+    }
+  ]
+}

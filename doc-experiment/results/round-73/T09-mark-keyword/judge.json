@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_modifiable_text(), serialize_token(), get_last_error(), and normalize(), all documented. Correctly chose the HTML Processor for body-fragment parsing and normalized serialization. Minor reservation: the post-loop normalize($html) ?? $html fallback is a documented policy option, but it discards any accumulated rewrite if unsupported markup appears after emitted wrappers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. API usage is essentially the documented serialize_token wrapper pattern: walk tokens, restrict matching to #text, inspect decoded get_modifiable_text(), and emit serialize_token() inside trusted <mark> wrappers. No _doing_it_wrong records. Same small fallback concern as trial-1: normalize/raw-input fallback after a partial rewrite can drop earlier changes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor and documented methods throughout. The explanation explicitly understood that special text-bearing elements expose text on opener tokens, not ordinary #text children, so they are left alone. Minor edge-policy gap: no explicit paused_at_incomplete_token() decision, though the docs allow best-effort omission for some normalized token rewrites."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs did well in the relevant places: the Tag Processor overview says to use the HTML Processor for implied/missing closing tags and normalized output; create_fragment() describes body fragments and null returns; next_token() explains token walking, #text splitting, virtual closers, and special text-bearing elements; get_modifiable_text() states that #text is decoded and that comments/special elements also have modifiable text; serialize_token() gives the exact wrapper-rewrite pattern of checking decoded text and wrapping serialize_token(). The near-miss across all trials is error fallback policy: each implementation falls back to normalize($html) ?? $html after get_last_error(). The serialize_token() docs warn that this discards emitted changes, but because no hidden test triggered unsupported parser abort after an earlier match, the policy did not affect correctness.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() docs, wrapper-rewrite example",
+      "problem": "The example shows the loop shape but leaves final error and incomplete-input policy abstract, so users may choose normalize($html) or raw input fallbacks that silently discard a partial rewrite.",
+      "suggestion": "Add a complete string-returning rewrite example with post-loop handling: return accumulated output on success; for unsupported markup choose an explicit caller-policy sentinel/fallback; state that normalize($html) and raw input are only appropriate when intentionally discarding emitted changes."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() docs",
+      "problem": "The contract correctly says special-element opener tokens and comments have modifiable text, but this is easy to forget when the task wants ordinary DOM text only.",
+      "suggestion": "Add a compact token table showing token_type, example markup, whether get_modifiable_text() is available, and whether it counts as ordinary #text. Include SCRIPT/STYLE/TEXTAREA/TITLE opener tokens as #tag examples."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() and create_fragment() docs",
+      "problem": "Fallback examples using normalize($html) ?? $html can produce raw, non-normalized output when normalization fails, which conflicts with functions promising normalized HTML strings.",
+      "suggestion": "Document fallback tradeoffs explicitly: raw input preserves bytes but is not normalized and contains no token-loop edits; APIs promising normalized output should prefer null/empty/error policy or accumulated best-effort output over raw fallback."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() cross-links from serialize_token()",
+      "problem": "The docs mention incomplete trailing syntax, but the practical equivalence between normalize() omission and token-loop omission is not prominent in method-level examples.",
+      "suggestion": "Cross-link paused_at_incomplete_token() directly from the serialize_token() examples with one sentence: best-effort normalized rewrites may omit incomplete trailing syntax; complete-source rewrites should reject or fall back when paused_at_incomplete_token() is true."
+    }
+  ]
+}

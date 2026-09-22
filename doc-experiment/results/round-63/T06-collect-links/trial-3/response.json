@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then scanned anchor tags in document order with next_tag() and collected only opener tags whose href attribute was a string. For each matching A element, I used get_current_depth() plus next_token() and get_modifiable_text() to accumulate only ordinary #text descendants, which gives decoded link text while ignoring markup.",
+  "confidence": 93
+}

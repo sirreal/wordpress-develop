@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's core workflow: create an instance with the input HTML, loop through all A tags using next_tag(), check if each A tag has an href attribute (by verifying get_attribute() returns non-null), and set the target attribute to \"_blank\" using set_attribute(). The processor's get_updated_html() method returns the modified HTML with all changes applied while preserving the rest of the document byte-for-byte, as documented.",
+  "confidence": 92
+}

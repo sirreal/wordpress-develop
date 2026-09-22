@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to properly parse the HTML fragment with full structural awareness. It iterates through all tokens, identifies A tag openers that have an href attribute, then collects all text nodes within each link by comparing depths \u2014 when the depth drops to or below the A element's depth, the loop exits. Text is accumulated from each #text token and automatically decoded by get_modifiable_text().",
+  "confidence": 75
+}

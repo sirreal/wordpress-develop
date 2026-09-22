@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, next_tag()/next_token() for structural traversal, get_current_depth() to detect direct LI children, set_bookmark()/seek() to return to the list opener, and set_attribute()/get_updated_html() to apply the attribute change. The function returns the original HTML unchanged when no list is found or when the first list scan is incomplete or unsupported.",
+  "confidence": 92
+}

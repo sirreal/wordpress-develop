@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with proper table structure awareness. It finds the first TABLE element, then iterates through all tokens within the table using next_token() while checking depth to stay within the table. For each TD/TH opening tag, it initializes text collection; for closing tags, it adds the accumulated text to the current row. When TR closing tags are encountered, complete rows are added to the results array. Text content is collected from #text tokens using get_modifiable_text(), which returns already-decoded character references. The function handles omitted closing tags and TBODY/THEAD elements transparently through the HTML Processor's proper parsing.",
+  "confidence": 62
+}

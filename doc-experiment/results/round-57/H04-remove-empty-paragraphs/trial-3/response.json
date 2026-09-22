@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() and serialized them with serialize_token(). While inside a P opener, I buffered the normalized token stream and dropped the buffer only when the paragraph contained no intervening content tokens; if parsing ended incomplete or reported an error, the function returns the original HTML unchanged.",
+  "confidence": 86
+}

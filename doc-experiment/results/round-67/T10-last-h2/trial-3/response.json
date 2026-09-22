@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` for flat source-order scanning, which is sufficient for finding the last `H2` without tree awareness. The function records a bookmark on each matching `h2`, seeks back to the final bookmark, adds the `final-section` class with `add_class()`, and returns `get_updated_html()`; if no `h2` is found, it returns the input unchanged.",
+  "confidence": 95
+}

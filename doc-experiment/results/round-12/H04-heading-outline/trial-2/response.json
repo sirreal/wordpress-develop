@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment. It iterates through tags with next_tag(), identifies headings (H1-H6) by tag name matching, and for each heading, walks through tokens using next_token() bounded by depth to collect all text nodes inside that heading element. The get_modifiable_text() method automatically handles character reference decoding. The level is extracted from the heading tag name, and results are returned as an array of associative arrays with 'level' and 'text' keys in document order.",
+  "confidence": 75
+}

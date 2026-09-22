@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan only `A` tag openers in source order, checks `get_attribute( 'href' )` so empty-string and boolean `href` values count as present, and applies `set_attribute( 'target', '_blank' )` to overwrite or add the target attribute while preserving all untouched bytes via `get_updated_html()`.",
+  "confidence": 97
+}

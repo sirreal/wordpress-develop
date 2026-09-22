@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and concatenated `serialize_token()` for every token except `SPAN` openers and closers, which removes span wrappers while preserving their contents. The result is normalized serialization as documented by the HTML Processor; if parsing fails, I fall back to `WP_HTML_Processor::normalize()`.",
+  "confidence": 90
+}

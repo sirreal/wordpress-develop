@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_tag()`, `is_tag_closer()`, `get_current_depth()`, `get_token_type()`, and `get_modifiable_text()` APIs to walk the fragment in document order and collect only ordinary `#text` descendants for each heading opener, preserving empty headings as empty strings.",
+  "confidence": 87
+}

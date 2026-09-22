@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to properly parse the HTML with full structural awareness, including namespace handling. It iterates through IMG tags using next_tag(), checks that each is in the HTML namespace (not SVG), retrieves the decoded src attribute value, and collects non-empty src values in document order. The get_attribute() method returns decoded values automatically, and returns null for missing attributes or empty string for valueless attributes.",
+  "confidence": 85
+}

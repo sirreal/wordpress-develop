@@ -1,0 +1,179 @@
+{
+  "round": "round-22",
+  "mode": "discoverability-probe",
+  "question_id": "tag-vs-html-text-boundary",
+  "question": "Using only the rendered HTML API docs, decide which processor to use for a function that receives an HTML fragment as found inside BODY and must return parsed text content in document/tree order, including ordinary #text tokens and explicitly selected TITLE/TEXTAREA element text while excluding comments, attributes, SCRIPT, and STYLE. Explain whether the WP_HTML_Tag_Processor next_token text example is sufficient, or whether WP_HTML_Processor::create_fragment() is the better fit. Cite the relevant headings and state the boundary between lexical token text processing and parsed fragment text-content extraction.",
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-22/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "tag-vs-html-text-boundary",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "Use `WP_HTML_Processor::create_fragment()` and walk the parsed subtree. The `WP_HTML_Tag_Processor` `next_token()` text example is not sufficient for this job because it is a lexical token scan with no tree awareness, and `get_modifiable_text()` on every token would also include comment/SCRIPT/STYLE text unless you manually filter them. For BODY-fragment text-content extraction in document/tree order, the docs say to use the HTML Processor, collect ordinary `#text` tokens during a depth-bounded subtree walk, and read `TITLE`/`TEXTAREA` from their own opening tokens only if you explicitly want them. That is the boundary: Tag Processor = lexical token text processing; HTML Processor fragment walk = parsed fragment text-content extraction.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Which processor should I use?",
+            "support": "“The Tag Processor scans a document linearly and has NO awareness of the document tree… Use the HTML PROCESSOR when structure matters: … collecting an element's text content, walking a subtree…”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "The example loops over `next_token()` and appends `#text`, `BR`, and `TITLE`, showing token-by-token lexical processing rather than parsed subtree extraction."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and modifiable text.",
+            "support": "“There are also non-elements… `#text` nodes… HTML comments…`” and the special elements list includes `SCRIPT`, `TITLE`, `TEXTAREA`, `STYLE`, meaning `get_modifiable_text()` applies beyond ordinary text nodes."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text extraction is usually a tree-aware operation, so use the HTML Processor and walk the subtree. Append only ordinary `#text` tokens unless you intentionally want some other token type. Do not call `WP_HTML_Tag_Processor::get_modifiable_text` on every token…”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token… otherwise the `#text` filter above skips it naturally.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "create_fragment()",
+            "support": "“Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document… For most cases this will be the body element.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Supported elements",
+            "support": "“The HTML Processor builds on `WP_HTML_Tag_Processor` and adds full structural awareness… create_fragment() for markup that lives inside a BODY… Choose it whenever document STRUCTURE matters — containment checks, collecting an element's text, walking subtrees…”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“Use this method instead of `WP_HTML_Processor::next_tag` when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure…” and “One important exception… SCRIPT, STYLE, TITLE, TEXTAREA produce NO `#text` child tokens at all. Their text is carried on the element's own token…”"
+          }
+        ],
+        "rationale": "The cited Tag Processor sections define it as a lexical, non-tree-aware scanner, while the HTML Processor sections explicitly prescribe `create_fragment()` plus a subtree walk for BODY-fragment text extraction and explain the special handling needed for `TITLE`/`TEXTAREA` versus `#text`, comments, SCRIPT, and STYLE.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "tag-vs-html-text-boundary",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "Use `WP_HTML_Processor::create_fragment()` for this function. The docs say text extraction is usually tree-aware, and the recipe for collecting DOM-style text is to walk a fragment subtree with `next_token()` and append only `#text` tokens; if you intentionally want `TITLE` or `TEXTAREA` text, read it from those elements’ opening tokens with `get_modifiable_text()`. The `WP_HTML_Tag_Processor` `next_token()` example is not sufficient for this requirement because that class is a lexical, linear scanner with no document-tree awareness, and its token-text APIs also expose comment, `SCRIPT`, and `STYLE` text as modifiable text. The boundary in the docs is: Tag Processor = lexical token text processing; HTML Processor fragment walk = parsed fragment text-content extraction in tree order.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Which processor should I use?",
+            "support": "“The Tag Processor scans a document linearly and has NO awareness of the document tree… Use the HTML PROCESSOR when structure matters: … collecting an element's text content, walking a subtree…”"
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "The `next_token()` example appends `#text`, handles `BR`, and reads `TITLE` directly from the token, showing token-stream processing rather than subtree extraction."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "“Modifiable text… includes the contents of `#text` nodes… comments… SCRIPT and STYLE tags, of TEXTAREA tags, and of any other section… which cannot contain HTML markup.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text extraction is usually a tree-aware operation, so use the HTML Processor and walk the subtree. Append only ordinary `#text` tokens unless you intentionally want some other token type. Do not call `WP_HTML_Tag_Processor::get_modifiable_text` on every token: comments, processing instructions, and special element tokens can also carry modifiable text, but they are not ordinary DOM text descendants.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "“Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token with `WP_HTML_Tag_Processor::get_modifiable_text`; otherwise the `#text` filter above skips it naturally.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "create_fragment()",
+            "support": "“Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document… For most cases this will be the body element.”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "“Use this method instead of `WP_HTML_Processor::next_tag` when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure…” and “Unlike the Tag Processor's purely lexical scan, the HTML Processor visits a closing token for every element it opens…”"
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Supported elements",
+            "support": "“The HTML Processor builds on `WP_HTML_Tag_Processor` and adds full structural awareness… create_fragment() for markup that lives inside a BODY… Choose it whenever document STRUCTURE matters — containment checks, collecting an element's text, walking subtrees…”"
+          }
+        ],
+        "rationale": "These headings directly separate lexical token scanning from tree-aware fragment parsing and give the exact text-collection rule: collect `#text` in subtree order with `WP_HTML_Processor`, adding `TITLE`/`TEXTAREA` only when explicitly desired from their opening tokens.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "tag-vs-html-text-boundary",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "Use `WP_HTML_Processor::create_fragment()` for this function, not the `WP_HTML_Tag_Processor` `next_token()` text example. The docs say fragment parsing is for HTML found inside `BODY`, and text extraction is “usually a tree-aware operation,” so you should walk the parsed subtree, append only ordinary `#text` tokens in tree order, and read `TITLE`/`TEXTAREA` from the element’s own opening token only when you explicitly want those special-element contents. The Tag Processor example is only a lexical token scan: it has no document-tree awareness, and `get_modifiable_text()` spans comments and special-element payloads as token text, so by itself it is not a safe contract for DOM-style fragment text-content extraction.",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "create_fragment()",
+            "support": "\"Use this for cases where you are processing chunks of HTML that will be found within a bigger HTML document\" and \"For most cases this will be the body element.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "\"Text extraction is usually a tree-aware operation, so use the HTML Processor and walk the subtree. Append only ordinary `#text` tokens unless you intentionally want some other token type.\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "Recipe: collect DOM-style text from a subtree",
+            "support": "\"Text in SCRIPT, STYLE, TITLE, and TEXTAREA is different: those elements do not expose their contents as child `#text` tokens. If a caller wants that text, read it from the element's own opening token with {@see WP_HTML_Tag_Processor::get_modifiable_text}; otherwise the `#text` filter above skips it naturally.\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Which processor should I use?",
+            "support": "\"The Tag Processor scans a document linearly and has NO awareness of the document tree\" and \"Use the HTML PROCESSOR when structure matters: ... collecting an element's text content, walking a subtree...\""
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "Tokens and finer-grained processing.",
+            "support": "The example loops over `next_token()` and appends `#text`, handles `BR`, and reads `TITLE` directly from token text, showing a token-stream recipe rather than a parsed-subtree contract."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "\"Modifiable text is text content that may be read and changed without changing the HTML structure ... This includes the contents of `#text` nodes ... as well as the inner contents of HTML comments, Processing Instructions, and others\" and \"They also contain the contents of SCRIPT and STYLE tags, of TEXTAREA tags...\""
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "next_token()",
+            "support": "\"Use this method instead of {@see WP_HTML_Processor::next_tag} when text and other non-tag content matters, while keeping the HTML Processor's full awareness of document structure\" and \"One important exception to the collect-`#text`-tokens recipe: elements whose contents cannot contain markup (SCRIPT, STYLE, TITLE, TEXTAREA) produce NO `#text` child tokens at all.\""
+          }
+        ],
+        "rationale": "These citations draw the boundary directly: `WP_HTML_Tag_Processor` is a lexical token scanner whose modifiable text includes comments and special-element payloads, while `WP_HTML_Processor::create_fragment()` is the documented BODY-fragment, tree-aware API for extracting text content in parsed order by walking a subtree and filtering to `#text`, with optional explicit reads of `TITLE`/`TEXTAREA`.",
+        "confidence": 97
+      }
+    }
+  ]
+}

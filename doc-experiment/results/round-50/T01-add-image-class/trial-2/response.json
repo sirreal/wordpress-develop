@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which is the documented tool for flat, byte-preserving attribute/class edits. The function constructs a processor with the input HTML, repeatedly finds the next `img` tag with `next_tag( 'img' )` (documented as ASCII case-insensitive and as ignoring tag-like text inside comments and raw-text regions), adds the `wp-image` class with `add_class()`, and returns the result with `get_updated_html()` so untouched bytes remain unchanged.",
+  "confidence": 98
+}

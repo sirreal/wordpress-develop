@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with full tree awareness, then walks tokens once with `next_token()`. When it sees an `H1`-`H6` opening tag it starts a TOC entry, appends descendant `#text` token content via `get_modifiable_text()`, and uses `get_current_depth()` plus `is_tag_closer()`/`get_tag()` semantics to know when the heading\u2019s subtree has ended, so nested markup contributes text without tags.",
+  "confidence": 87
+}

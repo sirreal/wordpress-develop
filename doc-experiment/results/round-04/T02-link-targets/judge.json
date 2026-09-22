@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for an attribute-only, non-structural task. Every method used (next_tag with array('tag_name'=>'A'), get_attribute, set_attribute, get_updated_html) is documented in html-tag-processor.md. Idiomatic token/tag walking via while(next_tag(...)), edit-then-get_updated_html pattern exactly matching the class Usage example. Correctly handles the null/''/true attribute distinction with `null !== $href`, which is the precise semantic described in the get_attribute docblock; comment even paraphrases the doc accurately. set_attribute overwrites existing target as documented. Passed 8/8 with no _doing_it_wrong. No deductions."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical correct approach to trial-1 (uses lowercase 'a' in tag_name, which the docs confirm matches case-insensitively; probe verified). All methods documented, idiomatic walk + get_updated_html, correct `null !== $href` guard. Passed 8/8. Tiny ding only on the explanation's garbled prose ('get_attribute returns as null, true, or string' implying null could mean present), but the code's guard is correct and the docblock states the three-valued return clearly, so this is comprehension noise, not API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses string shorthand next_tag('a') — explicitly documented ('Find next image tag (without passing the array)') and probe-confirmed to match uppercase tags case-insensitively. Only documented methods used, idiomatic walk, correct `null !== $href` edge-case handling, get_updated_html for output. Explanation accurately states the string|true|null return contract. Passed 8/8, no _doing_it_wrong."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 8/8 (simple, no-href-skipped, empty-href-counts, valueless-href-counts, existing-target-overwritten, uppercase-attribute, inside-comment-ignored, nested-markup-in-link), with empty _doing_it_wrong and trigger_error arrays throughout. This is a basic smoke task and the docs supported it cleanly.\n\nWhat the docs did well (and which doc passages carried each tricky case):\n- The empty-href and valueless-href cases hinge on get_attribute()'s three-valued return. The Tag Processor's 'Custom queries' note (lines 81-82) and the get_attribute() docblock + return line ('string|true|null ... Boolean attributes return true', line 1450) plus the worked example at lines 1428-1436 (`get_attribute('enabled') === true`, `get_attribute('aria-label') === null`) spell out that null means absent while '' and true both mean present. All three subjects landed on the correct `null !== $href` guard rather than a truthiness check (which would have wrongly skipped empty-href, since '' is falsy). This is the one place the task is designed to trip people, and the docs prevented the trip.\n- The uppercase-attribute case (`<a HREF>`) and lowercase-tag matching ('a' vs 'A') both rely on case-insensitive matching. The Since note 'attribute updates are case-insensitive' (line 315) and the get_attribute_names_with_prefix discussion of ASCII case-insensitive attribute names cover attributes; tag-name case-insensitivity is implied by the all-uppercase get_tag() convention but is not stated outright for next_tag's tag_name. Subjects guessed correctly and the probe confirms it works, but see doc_gaps.\n- inside-comment-ignored and nested-markup-in-link are handled for free by the Tag Processor only parsing real tag openers (lines 5-7, 'only parses the HTML tag openers') and not recursing; subjects didn't need special handling and didn't add any.\n\nNear-miss in explanations: trials 2 and 3 paraphrased get_attribute()'s contract loosely ('returns as null, true, or string' / wording that blurs which value means 'absent'). The code's `null !== $href` guard is correct regardless, so no functional impact, but it signals that the three-valued return is easy to restate incorrectly even when read correctly. Not a doc gap that caused failure.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() $query / tag_name parameter (and the 'Finding tags' section)",
+      "problem": "The docs never state that tag_name matching is case-insensitive. Every example uses lowercase ('img') while get_tag() returns uppercase ('DIV'), and the matching example table mixes cases without comment. Subjects passing 'a'/'A' had to guess that it matches `<A>`/`<a>`/`<HREF>`-bearing tags regardless of case; it happens to work, but the contract is undocumented. A subject could reasonably have written get_tag()==='A' comparisons or worried about normalizing case.",
+      "suggestion": "State explicitly in the next_tag() $query docblock and the 'Finding tags' section that tag_name (and class_name in no-quirks vs quirks mode) matching is ASCII case-insensitive, mirroring the existing note that attribute updates/names are case-insensitive. One sentence: 'Tag names are matched ASCII case-insensitively; get_tag() always reports the uppercase form.'"
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() return description",
+      "problem": "The three-valued return (string | true | null) and its meaning is correct but spread across the 'Custom queries' prose (lines 81-82), the example, and the one-line return note. Two of three subjects restated it inaccurately in their explanations ('returns null, true, or string' without binding which value means 'absent'), showing the distinction is easy to garble. The critical fact for any 'does attribute X exist?' check — that you must compare against null and NOT rely on truthiness, because '' is a valid present value — is implied but never stated as guidance.",
+      "suggestion": "Add an explicit usage note to the get_attribute() docblock: 'To test only for presence of an attribute, compare against null (`null !== $p->get_attribute($name)`); do not use a truthy test, because a present attribute may return the empty string \"\" (value present but empty) or true (valueless/boolean attribute), both of which are falsy.' This generalizes beyond this task to every attribute-presence check."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a BODY fragment, then walks every token with `next_token()`. It removes span wrappers by skipping any `#tag` token whose tag name is `SPAN` (both openers and closers) and appends every other token\u2019s normalized serialization with `serialize_token()`, producing normalized HTML while preserving the spans\u2019 contents in place.",
+  "confidence": 78
+}

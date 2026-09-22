@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor` because the task depends on document structure and the last matching heading, which the Tag Processor cannot determine reliably. The function scans with `next_tag( 'H2' )`, remembers the last match via `set_bookmark( 'last-h2' )`, then returns to that bookmark with `seek()` and applies `add_class( 'final-section' )`, finally reading the result with `get_updated_html()`; if no H2 is found or parsing aborts, it returns the original HTML unchanged.",
+  "confidence": 95
+}

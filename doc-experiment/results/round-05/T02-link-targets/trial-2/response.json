@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML document linearly. For each A tag found via next_tag('a'), it checks if an href attribute is present (including empty href values which return empty string, not null). If href exists, it sets the target attribute to '_blank' using set_attribute(), which handles all necessary encoding. Finally, get_updated_html() returns the modified HTML with all changes applied.",
+  "confidence": 92
+}

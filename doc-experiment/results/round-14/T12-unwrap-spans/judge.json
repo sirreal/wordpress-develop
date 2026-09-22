@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor) for nesting-aware normalized serialization: full marks. Every method called exists in the docs (create_fragment, next_token, get_token_name, serialize_token); no _doing_it_wrong records. Idiomatic token-walk + serialize_token loop matching the documented 'remove SUP, keep contents' example almost exactly. The one deviation from the canonical pattern: it tests the SPAN identity with get_token_name() instead of get_tag(). Functionally equivalent here (get_token_name() returns the uppercase tag name 'SPAN' for both opener and closer tokens, and no non-tag token is ever named 'SPAN'), confirmed by probe, but get_tag() is the more precise/idiomatic tag check the docs demonstrate. Edge cases (closer skipping via continue, unclosed-span normalization, attribute discard) all handled correctly though not explicitly reasoned about. Minor idiomatic deduction only. Lowest self-confidence (72) of the three despite being correct."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Essentially identical to reference.php. Correct processor choice. Uses get_tag() === 'SPAN' to skip both opener and closer via continue, then serialize_token() on everything else — the exact pattern documented at html-processor.md serialize_token() example (lines 1060-1070). No hallucinated or undocumented methods; empty doing_it_wrong. Idiomatic on every axis: create_fragment with null guard, single non-nested next_token() walk, serialize_token() accumulation. Edge cases handled correctly (get_tag() returns null on text tokens so 'SPAN' === null is harmless; unclosed span normalized; attributes discarded with the dropped opener). Explanation correctly attributes normalization to serialize_token()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical in substance to trial-2 and the reference, with explanatory comments. Correct processor, correct null guard, get_tag() === 'SPAN' skip-both-tokens pattern, serialize_token() accumulation — verbatim the documented serialize_token() example transcribed SUP->SPAN. No hallucinated API, no doing_it_wrong. Idiomatic token walking; edge cases (closer skip, incomplete input normalization, attribute discard) all handled by the pattern. Highest self-confidence (92), which is well-calibrated here."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 7/7 with empty doing_it_wrong and no trigger_error. The reason is that html-processor.md's `serialize_token()` section (lines 1046-1075, especially the example at 1060-1070) documents this task's exact pattern almost verbatim: \\\"Remove every SUP element but keep its contents\\\" — create_fragment, `while ( next_token() )`, `if ( 'SUP' === get_tag() ) continue; // Skips both the opener and the closer.`, `$output .= serialize_token();`. The subjects only had to substitute SUP->SPAN. Every load-bearing concept the task needed was spelled out:\\n- Processor choice: the example uses WP_HTML_Processor::create_fragment, steering subjects to the html (not tag) processor that handles nesting/breadcrumbs.\\n- The closer-skipping subtlety (the one genuine trap — forgetting to skip the SPAN end tag would leave a stray `</span>`): the docs preempt it twice, in prose (\\\"Closing tokens of skipped elements must be skipped too.\\\", line 1056) and in the inline comment (\\\"Skips both the opener and the closer.\\\", line 1066). All three subjects relied on this and none emitted a stray closer.\\n- Normalization (cases no-spans-normalized-passthrough and unclosed-span): line 1056 states that walking + concatenating serialize_token() \\\"reconstructs the normalized serialization of the input,\\\" so subjects trusted that optional-tag closing and `&AMP;`->`&amp;` re-encoding happen automatically; confirmed correct by execution.\\n- The null-on-non-tag-token edge (get_tag() returns null for #text, making `'SPAN' === $tag` safely false) is documented at get_tag() (line 1762, `get_tag() === null`) and verified by probe — no subject mishandled it.\\nNear-miss in the explanations, not the code: trial-1 chose get_token_name() rather than get_tag() for the identity check. This is not wrong (probe confirms get_token_name() yields 'SPAN' for both the SPAN opener and closer, and no non-tag token carries that name), but get_token_name() is the more general node-name accessor (it also returns '#text', 'html' for DOCTYPE, PI targets, etc.), so as a *tag* filter it is slightly less precise than the documented get_tag(). The docs could make clearer when each is the right identity check; here it happened not to matter. Overall this is a docs-did-it-well outcome: a strong, copy-ready worked example plus an explicit statement of the single subtle invariant produced three correct, idiomatic solutions with rising self-confidence (72/82/92).",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() and WP_HTML_Tag_Processor::get_tag()",
+      "problem": "get_tag() and get_token_name() both return the uppercase tag name on a tag token, so they are interchangeable for a simple `'SPAN' === ...` element filter (as trial-1 vs trials 2/3 show), but the docs never state how to choose between them. get_tag()'s entry doesn't mention that it returns null for non-tag tokens (text, comments, CDATA), while get_token_name() returns '#text', 'html' (DOCTYPE), PI targets, etc. A reader doing element-name dispatch inside a next_token() walk has no guidance on which is safer.",
+      "suggestion": "In get_tag(), add a one-line cross-reference: \"When walking with next_token(), get_tag() returns null on every non-tag token, so `'DIV' === get_tag()` is a safe element filter; use get_token_name() only when you also need to dispatch on #text / DOCTYPE / PI nodes.\" This generalizes beyond spans to any token-walk dispatch."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() — closer/opener behavior",
+      "problem": "Nothing in get_tag()/get_token_name() states that a tag's name is identical on its opening and closing tokens. The whole unwrap pattern depends on `'SPAN' === get_tag()` being true for BOTH the opener and the closer; this fact currently lives only as an inline comment buried in the serialize_token() example ('Skips both the opener and the closer.'). A reader consulting get_tag() directly wouldn't learn it.",
+      "suggestion": "Add to get_tag() (and get_token_name()): \"The same name is reported on both the opening and the closing token of an element; combine with is_tag_closer() when you need to distinguish them.\" This is the general invariant that makes skip/wrap loops work and is reusable across many tasks."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() — invariant placement",
+      "problem": "The critical correctness rule for any remove/unwrap loop — 'Closing tokens of skipped elements must be skipped too' — is stated only in serialize_token()'s prose and example. Subjects found it here because the task is about serialization, but a reader who arrives via next_token() or get_tag() would miss the trap and emit stray end tags.",
+      "suggestion": "Echo the invariant where the walk is described too: in next_token()'s notes, add a short pointer like \"When dropping an element during a token walk, remember its closing token is a separate token you must also skip (see serialize_token()).\" Keeps the single authoritative statement in serialize_token() but surfaces it on the path most readers take."
+    }
+  ]
+}

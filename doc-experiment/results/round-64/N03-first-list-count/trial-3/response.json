@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` while tracking `get_current_depth()` so only direct `LI` children of the first `UL` or `OL` were counted. The list opener is updated with `set_attribute()`, and the function returns the original HTML unchanged if no list is found or if the scan ends incompletely via `paused_at_incomplete_token()` or `get_last_error()`.",
+  "confidence": 71
+}

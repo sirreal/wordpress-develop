@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all tags using next_tag() with no arguments to match any tag. For each tag, it checks if it's a heading (H1-H6). When a heading is found, it uses next_token() with depth tracking to extract all text nodes inside that heading element, concatenating them into the 'text' field while recording the heading level from the tag name. Returns array of associative arrays with 'level' and 'text' keys in document order.",
+  "confidence": 72
+}

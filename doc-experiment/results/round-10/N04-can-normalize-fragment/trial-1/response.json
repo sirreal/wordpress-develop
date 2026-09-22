@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function delegates to WP_HTML_Processor::normalize(), which attempts to normalize HTML and returns null when it encounters unsupported markup (like mis-nested formatting elements). The function returns true when normalization succeeds (non-null result) and false when it fails (null result, indicating unsupported HTML that the processor cannot handle).",
+  "confidence": 95
+}

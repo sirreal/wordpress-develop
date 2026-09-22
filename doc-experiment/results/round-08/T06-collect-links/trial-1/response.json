@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML, then iterates through A tags using next_tag(). For each A tag with an href attribute, records the current depth and walks subsequent tokens using next_token(). While the depth remains at or above the A element's depth, collects all #text token content using get_modifiable_text() (which returns decoded text). This captures all text concatenated from text nodes inside the A element in document order. Returns an array of associative arrays with 'href' and 'text' keys.",
+  "confidence": 82
+}

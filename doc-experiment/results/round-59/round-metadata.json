@@ -1,0 +1,132 @@
+{
+    "round": "round-59",
+    "mode": "shadow-doc-a/b",
+    "task_ids": [
+        "N03-first-list-count",
+        "T07-nested-lists",
+        "T08-table-extract"
+    ],
+    "task_count": 3,
+    "splits": {
+        "train": 3
+    },
+    "concepts": {
+        "traversal": 3
+    },
+    "trials_per_task": 3,
+    "subject": {
+        "model": "gpt-5.4-mini",
+        "reasoning_effort": "low",
+        "service_tier": "priority"
+    },
+    "judge": {
+        "model": "gpt-5.5",
+        "reasoning_effort": "xhigh",
+        "service_tier": "priority"
+    },
+    "git_head": "29eb0335f0a7e6dd21d432f1a9c5a3a59e3708eb",
+    "git_status_short": "",
+    "source_file_digests": {
+        "ref": "29eb0335f0a7e6dd21d432f1a9c5a3a59e3708eb",
+        "algorithm": "sha256",
+        "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+        "files": {
+            "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+                "source_sha256": "9e431d345cc6d5563a65e3456b8a944fe1def8ceb8db299e89f20e8e9f560058",
+                "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+                "php_without_comments_token_count": 9881
+            },
+            "src/wp-includes/html-api/class-wp-html-processor.php": {
+                "source_sha256": "b15f5162e9876e7e4717577c64710fb5d2892f7fd2aa61e611ca2487f997e039",
+                "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+                "php_without_comments_token_count": 16806
+            }
+        }
+    },
+    "corpus_file_digests": {
+        "ref": "29eb0335f0a7e6dd21d432f1a9c5a3a59e3708eb",
+        "algorithm": "sha256",
+        "tasks": {
+            "N03-first-list-count": {
+                "labels": {
+                    "split": "train",
+                    "role": "core",
+                    "commonness": "high",
+                    "concept": "traversal",
+                    "processor": "html"
+                },
+                "files": {
+                    "doc-experiment/corpus/N03-first-list-count/task.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
+                    "doc-experiment/corpus/N03-first-list-count/reference.php": "588468ac5c4009fd1a1a27a530efa208e1ce08025d34a0e4353ea5b976d705ba",
+                    "doc-experiment/corpus/N03-first-list-count/tests.json": "e0467ccc5475d2c87cc11eb54b4f2cb40fe4d44ef82c761f745d1cca91101314"
+                }
+            },
+            "T07-nested-lists": {
+                "labels": {
+                    "split": "train",
+                    "role": "core",
+                    "commonness": "high",
+                    "concept": "traversal",
+                    "processor": "html"
+                },
+                "files": {
+                    "doc-experiment/corpus/T07-nested-lists/task.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
+                    "doc-experiment/corpus/T07-nested-lists/reference.php": "f082fca4f2419435d0d8fe275068a0d486bda2359a668dc969b6cddf78100a61",
+                    "doc-experiment/corpus/T07-nested-lists/tests.json": "79632d22e7c44696e5779df8ea2351c36e335c20aa316437a8edc885d20c40cd"
+                }
+            },
+            "T08-table-extract": {
+                "labels": {
+                    "split": "train",
+                    "role": "core",
+                    "commonness": "medium",
+                    "concept": "traversal",
+                    "processor": "html"
+                },
+                "files": {
+                    "doc-experiment/corpus/T08-table-extract/task.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+                    "doc-experiment/corpus/T08-table-extract/reference.php": "289b8c6d1b69d4ef4dd7810dbdcba35445c30a7f26b631a00835ef737b78709e",
+                    "doc-experiment/corpus/T08-table-extract/tests.json": "cdec7559d63ee541f1b0dad34a4f9f0982ce66e58ddfea98ec482c425e1b2638"
+                }
+            }
+        }
+    },
+    "created_at_utc": "2026-06-13T20:01:12+00:00",
+    "isolation": {
+        "scratch_contains": [
+            "html-tag-processor.md",
+            "html-processor.md",
+            "tasks/<task-id>.md"
+        ],
+        "subjects_must_not_read": [
+            "reference.php",
+            "tests.json",
+            "source files",
+            "logs",
+            "plans",
+            "hypothesis docs"
+        ]
+    },
+    "scratch": "/tmp/html-api-docs-eval/round-59",
+    "staged_task_files": [
+        "tasks/N03-first-list-count.md",
+        "tasks/T07-nested-lists.md",
+        "tasks/T08-table-extract.md"
+    ],
+    "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-59 exposes 2 docs and 3 task prompt(s), with no forbidden files.",
+    "scratch_file_sha256": {
+        "html-processor.md": "695d3f1c007fff1c00278682a0fab00497f680188397f2d0e9cdb5e92beec88a",
+        "html-tag-processor.md": "8ca4ec32aa54723fe16a0a9f45386ca6ebeecde7a06575d8a782e53fb395a664",
+        "tasks/N03-first-list-count.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
+        "tasks/T07-nested-lists.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
+        "tasks/T08-table-extract.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee"
+    },
+    "shadow_doc_variant": {
+        "name": "html-processor-depth-boundary-next-tag-closer-card",
+        "control_round": "round-58",
+        "edited_files": [
+            "html-processor.md"
+        ],
+        "notes": "Scratch-only rendered-doc variant. Adds compact contrast guidance that depth-boundary scans must use next_token() or next_tag(array(\"tag_closers\"=>\"visit\")) because plain next_tag() skips closers and may scan past the bounded region into later incomplete or unsupported markup. Source docblocks are unchanged."
+    }
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the body fragment token-by-token, because the task needs document-order text extraction from nested markup. The implementation reads `href` with `get_attribute()` only when it is a string, and collects link text from `#text` tokens via `get_modifiable_text()`, flushing each link when its closing `A` token is seen.",
+  "confidence": 90
+}

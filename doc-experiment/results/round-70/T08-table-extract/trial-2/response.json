@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, `next_tag('TABLE')` to find the first table, and `next_token()` with `get_current_depth()` to walk the table subtree in browser-like tree order. Cell text is collected only from `#text` tokens via `get_modifiable_text()`, while `TR`, `TD`, and `TH` opener/closer tokens delimit rows and cells.",
+  "confidence": 88
+}

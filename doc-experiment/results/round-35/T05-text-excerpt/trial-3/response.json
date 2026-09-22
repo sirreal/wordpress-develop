@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with tree awareness, then walks all tokens with `next_token()`, appending decoded text from ordinary `#text` tokens and, as a documented opt-in exception, the opener-token text for `TITLE` and `TEXTAREA` via `get_modifiable_text()`. It excludes other modifiable-text token types such as `SCRIPT` and `STYLE`, preserves whitespace exactly as reported, and truncates by Unicode code points with `mb_substr(..., 'UTF-8')`.",
+  "confidence": 91
+}

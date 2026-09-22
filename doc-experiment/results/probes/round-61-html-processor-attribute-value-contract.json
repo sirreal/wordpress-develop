@@ -1,0 +1,99 @@
+{
+  "round": "round-61",
+  "mode": "discoverability-probe",
+  "question_id": "html-processor-attribute-value-contract",
+  "question": "When using WP_HTML_Processor to read an attribute such as href or src, what can get_attribute() return for an absent attribute, a syntactically valueless attribute, an explicitly empty value, and a non-empty value? Are returned string values already decoded? If a caller needs a usable non-empty URL string, what predicate should it use? Answer only from the rendered docs and cite headings.",
+  "subject": {
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "probe question"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-61/codex-cli-probes"
+  },
+  "result": [
+    {
+      "id": "html-processor-attribute-value-contract",
+      "trial_id": "probe-1",
+      "response": {
+        "answer": "For `WP_HTML_Processor::get_attribute()` / `WP_HTML_Tag_Processor::get_attribute()`: an absent attribute returns `null`; a syntactically valueless boolean attribute returns `true`; an explicitly empty value returns `\"\"`; and a non-empty value returns a `string`. The docs say returned string values are already decoded, so do not decode them again. The docs do not name a special URL predicate; if a caller needs a usable non-empty URL string, the closest contract is to require that `get_attribute()` returned a `string` and that it is not empty, e.g. `is_string( $v ) && '' !== $v` (inference from the return contract).",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "### `get_attribute()`",
+            "support": "`get_attribute()` will return `null` if the attribute wasn't present on the tag when it was called. It may return `\"\"` (the empty string) in cases where the attribute was present but its value was empty. For boolean attributes, those whose name is present but no value is given, it will return `true`... String values are returned DECODED: character references in the attribute value have already been replaced... Do not decode the returned value again."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "### `get_attribute()`",
+            "support": "Returns the value of a requested attribute from a matched tag opener if that attribute exists. Example: `get_attribute( 'data-test-id' ) === '14';` `get_attribute( 'enabled' ) === true;` `get_attribute( 'aria-label' ) === null;` ... `string|true|null` - Value of attribute or `null` if not available. Boolean attributes return `true`."
+          }
+        ],
+        "rationale": "The attribute contract in both docs explicitly covers null, true, empty string, and decoded string returns; neither doc defines a dedicated non-empty-URL predicate, so the final predicate is an inference from the declared return type.",
+        "confidence": 97
+      }
+    },
+    {
+      "id": "html-processor-attribute-value-contract",
+      "trial_id": "probe-2",
+      "response": {
+        "answer": "For `WP_HTML_Processor::get_attribute()`, the docs say it can return `null` when the attribute is absent, `true` for a boolean/syntactically valueless attribute, `\"\"` for an explicitly empty value, and a decoded string for a non-empty value. The string result is already decoded, so it should not be decoded again. The docs do not name a special URL predicate; for a usable non-empty URL string, the caller should treat the result as valid only when it is a string and not `\"\"` (and therefore not `null` or `true`).",
+        "citations": [
+          {
+            "file": "html-processor.md",
+            "heading": "get_attribute()",
+            "support": "Returns: `string|true|null` - Value of attribute or `null` if not available. Boolean attributes return `true`. Example shows an absent attribute returning `null` and a boolean attribute returning `true`. The HTML API docs also state that string values are DECODED: character references have already been replaced, e.g. `href=\"/x?a=1&amp;b=2\"` is returned as `/x?a=1&b=2`."
+          },
+          {
+            "file": "html-tag-processor.md",
+            "heading": "get_attribute()",
+            "support": "Returns: `string|true|null` - Value of attribute or `null` if not available. Boolean attributes return `true`. The method text says `null` if the attribute wasn't present, may return `\"\"` when present but empty, and returns `true` for boolean attributes. It also says string values are returned DECODED and should not be decoded again."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "get_modifiable_text()",
+            "support": "Nearest relevant decoding contract: returned text is already decoded where HTML decodes it, and callers should not decode it again. This supports the same general HTML-API rule that returned strings are already decoded where applicable."
+          }
+        ],
+        "rationale": "The `get_attribute()` sections directly enumerate the four return cases and explicitly state that returned attribute strings are already decoded; the docs do not define a special URL predicate, so the nearest defensible condition is a non-empty string check.",
+        "confidence": 94
+      }
+    },
+    {
+      "id": "html-processor-attribute-value-contract",
+      "trial_id": "probe-3",
+      "response": {
+        "answer": "`WP_HTML_Processor::get_attribute()` can return `null` for an absent attribute, `true` for a boolean/syntactically valueless attribute, `\"\"` for a present but empty value, and a decoded `string` for a non-empty value. The docs say returned string values are already decoded, so callers should not decode again. The docs do not state a specific predicate for “usable non-empty URL string”; they only distinguish `null`, `true`, `\"\"`, and decoded strings, so the nearest contract is `get_attribute()` itself and its return-type notes. If you need a non-empty URL, the docs do not provide that predicate explicitly.",
+        "citations": [
+          {
+            "file": "html-tag-processor.md",
+            "heading": "`get_attribute()`",
+            "support": "\"get_attribute() will return `null` if the attribute wasn't present on the tag when it was called. It may return `\"\"` (the empty string) in cases where the attribute was present but its value was empty. For boolean attributes, those whose name is present but no value is given, it will return `true`...\" and \"String values are returned DECODED...\" plus the return type `string|true|null`."
+          },
+          {
+            "file": "html-processor.md",
+            "heading": "`get_attribute()`",
+            "support": "\"Returns the value of a requested attribute from a matched tag opener if that attribute exists.\" Example shows `null` for a missing attribute, `true` for a boolean attribute, and `string|true|null` as the return type. This is the same contract on `WP_HTML_Processor`."
+          }
+        ],
+        "rationale": "The docs directly define the four return cases and decoding behavior, but they do not name a dedicated predicate for a usable non-empty URL string, so that part cannot be answered beyond pointing to the `get_attribute()` contract.",
+        "confidence": 95
+      }
+    }
+  ]
+}

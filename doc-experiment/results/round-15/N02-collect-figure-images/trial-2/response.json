@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor with create_fragment() to properly parse the HTML, then iterates through all IMG tags using next_tag() with the tag_name query. For each IMG found, it calls get_breadcrumbs() to get the ancestor chain and checks if 'FIGURE' appears anywhere in that chain using in_array(). The src attribute is retrieved with get_attribute() (which returns decoded values as documented), and only non-null, non-empty src values are collected into the result array in document order.",
+  "confidence": 92
+}

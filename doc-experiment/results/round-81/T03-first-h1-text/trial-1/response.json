@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then found the first H1 opener with next_tag(). From there I walked tokens with next_token(), accumulating only #text tokens via get_modifiable_text() until the H1 subtree ended based on get_current_depth(), which preserves nested text and decoded character references while ignoring markup.",
+  "confidence": 96
+}

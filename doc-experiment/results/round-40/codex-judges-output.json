@@ -1,0 +1,143 @@
+{
+  "result": [
+    {
+      "id": "T09-mark-keyword",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), limited matching to #text tokens, used get_modifiable_text() for decoded text, and rebuilt normalized output with serialize_token(). All HTML API methods used are documented; execution recorded no _doing_it_wrong entries."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Essentially the canonical pattern: HTML Processor fragment parser, token walk, #text guard, decoded text via get_modifiable_text(), token-by-token serialization with inserted wrappers, and get_last_error() fallback. All called API methods appear in the rendered docs; no misuse records."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 98,
+            "hallucinated_methods": [],
+            "notes": "Uses the right processor and documented token-serialization pattern. Returning the original input on create_fragment() failure or get_last_error() is a defensible fallback but slightly less aligned with the task’s normalized-output contract than rejecting with an empty string or another explicit failure policy. No undocumented API calls or _doing_it_wrong records."
+          }
+        ],
+        "failure_analysis": "All three trials passed all 8 hidden/frozen cases, so there are no failed cases to attribute to API misunderstanding. The docs did well in four places: the HTML Processor overview explicitly says to use WP_HTML_Processor, not WP_HTML_Tag_Processor, when structure or normalized output matters; the “collect DOM-style text from a subtree” recipe says ordinary text is only #text tokens and warns that comments and special-element opener tokens can also have modifiable text; get_modifiable_text() documents that #text, TITLE, and TEXTAREA text is already decoded; and serialize_token() documents the exact rewrite pattern the candidates needed, including wrapping selected tokens while accumulating normalized serialization. Near-misses: all candidates added get_last_error() fallback logic even though the task did not specify unsupported-markup behavior, and none checked paused_at_incomplete_token(); the serialize_token() docs say this is a caller policy decision, which likely prevented a functional issue here.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::serialize_token() / rewrite-while-serializing recipe",
+            "problem": "The docs explain token-by-token rewrites but do not give a minimal example that inserts wrapper markup around ordinary text tokens specifically.",
+            "suggestion": "Add a general example showing how to wrap or annotate selected #text tokens while serializing, emphasizing that the emitted wrapper string plus serialize_token() is the output and get_updated_html() is not involved."
+          },
+          {
+            "location": "WP_HTML_Processor::get_last_error() and serialize_token() incomplete-input notes",
+            "problem": "The docs say to reject or fall back on get_last_error() and separately decide on paused_at_incomplete_token(), but they do not define common output policies for normalizing filters versus strict validators.",
+            "suggestion": "Add a short policy table: best-effort normalizer may omit unvisited incomplete trailing syntax; strict transformations should reject when paused_at_incomplete_token() is true; unsupported-parser aborts require an explicit fallback."
+          },
+          {
+            "location": "WP_HTML_Tag_Processor::get_modifiable_text() / WP_HTML_Processor text recipes",
+            "problem": "The distinction between ordinary DOM text and other modifiable text is documented well, but it is spread across both class docs.",
+            "suggestion": "Add a compact cross-link near get_modifiable_text(): “For DOM text matching, first require get_token_type() === '#text'; otherwise comments and special elements may match too.”"
+          }
+        ]
+      }
+    },
+    {
+      "id": "T12-unwrap-spans",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly used WP_HTML_Processor::create_fragment() for a BODY fragment, walked all tokens with next_token(), skipped SPAN opener and closer tokens via documented get_tag() behavior, and rebuilt normalized output with serialize_token(). All called methods are present in the rendered docs and execution recorded no _doing_it_wrong entries."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 95,
+            "hallucinated_methods": [],
+            "notes": "Main path is correct and fully documented: HTML Processor fragment parsing, token walking, get_tag(), serialize_token(), and get_last_error(). The only adherence issue is the error fallback: calling WP_HTML_Processor::normalize( $html ) on the original input after a rewrite is exactly the pattern the serialize_token() docs warn can discard emitted changes, although it did not affect these tests."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 94,
+            "hallucinated_methods": [],
+            "notes": "Correct processor choice and idiomatic token serialization; the #tag guard is documented and conservative. All methods are documented and no _doing_it_wrong entries occurred. The weakness is error handling: returning raw $html on create_fragment() failure or get_last_error() violates the normalized-output contract and is not a graceful fallback for unsupported markup."
+          }
+        ],
+        "failure_analysis": "No hidden case failed: every trial passed 7/7. The docs did well on the core path. The HTML Processor overview and HTML Support sections clearly point users to WP_HTML_Processor for structure and normalized output; create_fragment() identifies BODY-fragment parsing; next_token() explains visiting text, openers, closers, implied closers, and unclosed elements; serialize_token() gives a near-direct general recipe for token-by-token rewrites that skip element tokens while preserving contents. The near-misses were around fallback policy. Trial 2 used normalize() on the original input in an error branch despite the serialize_token() warning that this discards loop changes. Trial 3 returned raw input on parser failure, which the docs discourage indirectly but do not make concrete enough for string-returning filters that promise normalized output.",
+        "doc_gaps": [
+          {
+            "location": "WP_HTML_Processor::serialize_token() / Recipe: rewrite while serializing tokens",
+            "problem": "The docs say to reject or fall back on get_last_error(), but 'fall back' is underspecified. Models may normalize the original input or return raw input, both of which abandon the token-rewrite decisions.",
+            "suggestion": "Add a short fallback contract: after a token-rewrite loop, fallback must either signal failure according to the caller contract or reproduce the same transformation with another parser; returning the original input or normalizing the original input discards the rewrite."
+          },
+          {
+            "location": "WP_HTML_Processor::create_fragment() return docs",
+            "problem": "The null return is documented but not tied to caller output obligations. This encouraged ad hoc raw-input fallback in one trial.",
+            "suggestion": "Document the conditions under which null can be returned and state that callers promising normalized output should not treat unprocessed input as a normalized fallback."
+          },
+          {
+            "location": "WP_HTML_Processor::get_tag()",
+            "problem": "The get_tag() contract says it returns the uppercase matched tag, but the opener/closer behavior is clearer in the serialize_token() example than in the method contract itself.",
+            "suggestion": "State directly that get_tag() returns the element name for both opener and closer tag tokens, and null for non-tag tokens; pair this with is_tag_closer() only when opener/closer distinction matters."
+          },
+          {
+            "location": "WP_HTML_Processor::next_token() / incomplete input guidance",
+            "problem": "The docs discuss virtual closers and incomplete trailing syntax, but the distinction is easy to miss: unclosed elements can still produce closing tokens, while truly incomplete trailing syntax may never be visited.",
+            "suggestion": "Add a compact example contrasting an unclosed but tokenizable element with an incomplete trailing token, showing serialize_token() output and when paused_at_incomplete_token() changes the caller's policy."
+          }
+        ]
+      }
+    },
+    {
+      "id": "N04-normalize-or-placeholder",
+      "verdict": {
+        "trials": [
+          {
+            "trial_id": "trial-1",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Used the correct structural processor and the documented `WP_HTML_Processor::normalize()` shortcut for BODY-context fragment normalization. The method exists in `html-processor.md`; no undocumented calls or `_doing_it_wrong` records. Correctly treats only `null` as unsupported, preserving valid empty-string output."
+          },
+          {
+            "trial_id": "trial-2",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Same documented approach as the reference: `WP_HTML_Processor::normalize()` followed by a strict `null` fallback check. No hallucinated API usage, no `_doing_it_wrong`, and the implementation relies on the documented normalization contract instead of unnecessary token walking."
+          },
+          {
+            "trial_id": "trial-3",
+            "adherence": 100,
+            "hallucinated_methods": [],
+            "notes": "Correctly selected `WP_HTML_Processor` for normalized output and used the documented static `normalize()` method. No undocumented methods. The strict `null === $normalized` check handles unsupported markup without confusing empty normalized output with failure."
+          }
+        ],
+        "failure_analysis": "All trials passed all 7 hidden cases. The docs succeeded mainly because `html-tag-processor.md` explicitly says to use the HTML Processor for normalized output, while `html-processor.md` documents `WP_HTML_Processor::normalize()` as a BODY-context fragment normalizer returning `string|null`. The `normalize()` section also lists normalization effects such as quoted attributes, inserted omitted tags, text re-encoding, and omitted incomplete trailing syntax, which directly covers the successful table, attribute, entity, and unclosed-tag cases. The unsupported-markup overview explains that unsupported input aborts processing and output-producing methods such as `serialize()` and `normalize()` return `null`, which explains the fallback behavior for misnested formatting and anchor misnesting. Near miss: unsupported cases emitted `trigger_error` records from internal serialization, but there were no `_doing_it_wrong` records and the candidates handled the returned `null` correctly. The docs could be clearer that these warnings may accompany a `null` result.",
+        "doc_gaps": [
+          {
+            "location": "`html-processor.md` `normalize()` docblock",
+            "problem": "The return contract says `string|null`, but it does not explicitly warn that an empty input can legitimately normalize to `''` while unsupported input returns `null`. Less careful readers could use a truthiness check and incorrectly replace empty valid output with a fallback.",
+            "suggestion": "Add a contract note: callers should test `null === WP_HTML_Processor::normalize( $html )` for failure; empty strings are valid normalized output."
+          },
+          {
+            "location": "`html-processor.md` unsupported-markup overview and `normalize()`/`serialize()` docs",
+            "problem": "Execution shows unsupported normalization may also emit a `trigger_error` from serialization while returning `null`. The rendered docs describe the `null` result but not the possible warning side effect.",
+            "suggestion": "Document whether `normalize()`/`serialize()` may emit a warning on unsupported markup, and how callers should handle that if they intentionally use `null` as a recoverable fallback signal."
+          },
+          {
+            "location": "`html-processor.md` `normalize()` examples",
+            "problem": "The examples demonstrate successful normalization but not the distinct unsupported-output path. The unsupported behavior is described elsewhere, so readers must connect two sections.",
+            "suggestion": "Add a general unsupported-markup example showing that normalization can return `null`, without prescribing any task-specific fallback HTML."
+          },
+          {
+            "location": "`html-processor.md` `normalize()` docblock",
+            "problem": "The distinction between recoverable malformed HTML, incomplete trailing syntax, and unsupported parser aborts is spread across bullets and the broader overview.",
+            "suggestion": "Add a compact summary: ordinary omitted tags are completed, incomplete trailing syntax may be omitted, and only unsupported parser states cause a `null` result."
+          }
+        ]
+      }
+    }
+  ]
+}

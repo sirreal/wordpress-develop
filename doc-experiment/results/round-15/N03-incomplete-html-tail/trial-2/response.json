@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates a WP_HTML_Tag_Processor instance with the input HTML and iterates through all tokens using next_token() until reaching the end of the document. After draining all tokens, it calls paused_at_incomplete_token() which returns true if the processor paused because the input ended mid-syntax-element (like an incomplete tag, comment, or script content). This directly answers the requirement: detecting whether the document was cut off in the middle of an HTML token.",
+  "confidence": 95
+}

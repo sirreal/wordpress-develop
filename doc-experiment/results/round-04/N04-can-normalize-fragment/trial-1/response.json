@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment using WP_HTML_Processor::create_fragment(), which returns null if creation fails. It then calls serialize() on the processor, which returns null if the HTML contains unsupported markup (like problematic misnesting). The function returns true only if both the processor was created successfully and serialization completed without encountering unsupported markup that caused the parser to bail.",
+  "confidence": 85
+}

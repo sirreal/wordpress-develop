@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor for a linear, byte-preserving attribute rewrite: scan each `a` tag with `next_tag( 'a' )`, check `get_attribute( 'href' )` for presence (including empty-string and boolean `href`), and apply `set_attribute( 'target', '_blank' )` only when present. The modified HTML is returned with `get_updated_html()`, which preserves untouched bytes exactly.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through all tokens in the HTML document. It iterates through every token by repeatedly calling next_token() until it returns false, which indicates the end of the document or an incomplete token. Then it checks paused_at_incomplete_token() which returns true if the parser stopped because the input ended mid-token (such as an unfinished tag, unterminated comment, or unclosed special element). This correctly distinguishes between structurally incomplete elements (unclosed tags, which are lexically complete) and lexically incomplete tokens (partial tags, comments, or special element contents).",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize() to convert both HTML fragments to their normalized forms. The normalize() method parses each HTML fragment using the full HTML5 specification (including implicit closing tags, tag-name case normalization, attribute value double-quoting, and character reference decoding), then serializes them back to canonical form. Two HTML fragments that represent the same parsed DOM structure will normalize to identical strings. If either fragment cannot be fully parsed/represented, normalize() returns null, and we return false as specified.",
+  "confidence": 92
+}

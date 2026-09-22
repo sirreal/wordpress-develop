@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the HTML fragment with tree awareness, then walks tokens with `next_token()`, appending ordinary `#text` token text via `get_modifiable_text()` and explicitly opting in to opener-carried text for `TEXTAREA` and `TITLE` while skipping everything else such as `SCRIPT`, `STYLE`, and comments. The result is truncated by Unicode code points with `mb_substr(..., 'UTF-8')`.",
+  "confidence": 90
+}

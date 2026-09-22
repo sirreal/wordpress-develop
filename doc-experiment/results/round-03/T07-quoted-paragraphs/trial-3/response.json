@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and identify all P elements. For each P element, it checks the breadcrumbs (ancestor chain) using get_breadcrumbs() to determine if a BLOCKQUOTE ancestor exists anywhere above it. When found, it adds the \"quoted\" class using add_class(). Finally, it serializes the document back to HTML using serialize(), which preserves the HTML byte-for-byte except for the intentional class additions.",
+  "confidence": 72
+}

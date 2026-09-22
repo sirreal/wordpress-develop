@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor for a linear, byte-preserving edit: scan every `a` opener, check for the presence of `href` with `get_attribute()` (which returns `null` only when absent, and `true`/`\"\"` when present), then overwrite `target` with `set_attribute()`. `get_updated_html()` returns the original document with only those attribute updates applied, preserving all untouched bytes exactly.",
+  "confidence": 98
+}

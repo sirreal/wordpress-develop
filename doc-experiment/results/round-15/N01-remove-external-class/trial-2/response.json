@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates a WP_HTML_Tag_Processor instance to scan through the HTML document. It then loops through each A tag using next_tag('A'), which matches A tags with ASCII case-insensitive comparison. For each matched A tag, it calls remove_class('external') to remove the \"external\" class by exact name match (case-sensitive). When external is the only class, the entire class attribute is removed automatically by the API. Finally, it returns the modified HTML via get_updated_html(), which applies all queued updates while preserving untouched bytes exactly as they appeared in the input.",
+  "confidence": 92
+}

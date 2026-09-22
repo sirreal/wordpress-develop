@@ -1,0 +1,187 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-00/H04-heading-outline/trial-1/candidate.php",
+    "function": "heading_outline",
+    "passed": 7,
+    "total": 7,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 1,
+                    "text": "Title"
+                },
+                {
+                    "level": 2,
+                    "text": "Part one"
+                }
+            ],
+            "actual": [
+                {
+                    "level": 1,
+                    "text": "Title"
+                },
+                {
+                    "level": 2,
+                    "text": "Part one"
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "all-levels",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 1,
+                    "text": "a"
+                },
+                {
+                    "level": 2,
+                    "text": "b"
+                },
+                {
+                    "level": 3,
+                    "text": "c"
+                },
+                {
+                    "level": 4,
+                    "text": "d"
+                },
+                {
+                    "level": 5,
+                    "text": "e"
+                },
+                {
+                    "level": 6,
+                    "text": "f"
+                }
+            ],
+            "actual": [
+                {
+                    "level": 1,
+                    "text": "a"
+                },
+                {
+                    "level": 2,
+                    "text": "b"
+                },
+                {
+                    "level": 3,
+                    "text": "c"
+                },
+                {
+                    "level": 4,
+                    "text": "d"
+                },
+                {
+                    "level": 5,
+                    "text": "e"
+                },
+                {
+                    "level": 6,
+                    "text": "f"
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 2,
+                    "text": "Q&A"
+                }
+            ],
+            "actual": [
+                {
+                    "level": 2,
+                    "text": "Q&A"
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "nested-in-sections",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 2,
+                    "text": "One"
+                },
+                {
+                    "level": 3,
+                    "text": "Two"
+                }
+            ],
+            "actual": [
+                {
+                    "level": 2,
+                    "text": "One"
+                },
+                {
+                    "level": 3,
+                    "text": "Two"
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "none",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-heading",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 2,
+                    "text": "Open ended"
+                }
+            ],
+            "actual": [
+                {
+                    "level": 2,
+                    "text": "Open ended"
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "image-only-heading",
+            "status": "pass",
+            "expected": [
+                {
+                    "level": 3,
+                    "text": ""
+                }
+            ],
+            "actual": [
+                {
+                    "level": 3,
+                    "text": ""
+                }
+            ],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

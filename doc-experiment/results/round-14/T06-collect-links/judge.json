@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor. All methods documented: create_fragment, next_tag, get_attribute, get_current_depth, next_token, get_token_type, get_modifiable_text. No hallucinations, no doing_it_wrong. Idiomatic depth walk via inverted break (break when depth below opener), equivalent to documented greater-or-equal. 8 of 8 pass. Minor deduction: inverted guard slightly less direct than the doc idiom."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 78,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, no hallucinated API, no doing_it_wrong. Defect: walk guard uses strict greater-than the opener depth instead of the documented greater-or-equal. Trailing text node after a nested element sits at the opener depth, so strict greater-than exits at the child closer and drops it. Failed simple case (got second, expected second link). 7 of 8 pass. Lowercase a tag is fine since matching is ASCII case-insensitive."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Canonical, near-identical to reference. Correct processor, all methods documented, no doing_it_wrong. Textbook greater-or-equal depth walk. Handles null vs true href, decoded href and text, empty image-only text, unclosed input. 8 of 8 pass. Best trial."
+    }
+  ],
+  "failure_analysis": "One failure: trial-2 simple case. Misconception: the subtree walk should continue only while depth is strictly greater than the A opener depth. Trial-2 used get_current_depth strictly greater than opener. Probe on the input p a href /b em second em-close space link a-close p-close shows: the A opener is depth 4; em and second are depth 5 and 6; after the em closer (depth 4) the text node space-link is a direct child of A at depth 4, equal to the opener. The strict greater-than guard exits at the em closer and drops the trailing text, yielding second instead of second link. This is a documentation success that trial-2 missed: the greater-or-equal requirement is stated four times (next_token example comment, get_current_depth prose noting a child closer equals the ancestor opener depth, an inline greater-or-equal-and-not-greater annotation, and the is_tag_closer note that a closer reports one less than its opener). Trials 1 and 3 used greater-or-equal (or the equivalent inverted break) and passed all 8. It is the single most-warned pitfall in the token-walking section. All other behaviors were correct in every trial: get_attribute returns true for a valueless href and null for an absent href (both documented); attribute values come back decoded; text comes back decoded via get_modifiable_text; an A containing only an IMG yields empty text; and unclosed input still produces synthesized closers.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor get_current_depth and next_token depth-walk examples",
+      "problem": "The correct greater-or-equal guard is explained in prose and in a comment, but the wrong strict-greater-than form is never shown alongside its concrete failure output, so a skimming reader can copy the loop header and still choose strict greater-than. Trial-2 did exactly this and dropped trailing text after a nested element.",
+      "suggestion": "Add a two-line wrong-versus-right snippet: the same input run with strict greater-than yields x while greater-or-equal yields x tail, because the trailing text is a direct child reported at the opener depth. A demonstrated diff is harder to misread than a prose warning."
+    },
+    {
+      "location": "WP_HTML_Processor get_current_depth and next_token sibling-text note",
+      "problem": "The docs explain the equality case as the element own closer versus a child closer, but never state that direct-child text appearing after a nested element is reported at the container opener depth, identical to the container own closer. That ambiguity is what makes the strict-greater-than guard look plausible.",
+      "suggestion": "Add one sentence: a text node that is a direct child of the walked element reports the same depth as that element opening token, which is also the depth of its own closer; only the greater-or-equal continue form (or the below-opener break form) keeps such trailing text in the walk while still terminating at the element closer."
+    }
+  ]
+}

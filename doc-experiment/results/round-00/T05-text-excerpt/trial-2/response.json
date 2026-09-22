@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then iterated all tokens with `next_token()`. For each token, I checked `get_token_type()` against `'#text'` to select only text nodes \u2014 this naturally excludes SCRIPT and STYLE content, which the docs confirm have modifiable text but are `#tag` tokens, not `#text` tokens. I collected text via `get_modifiable_text()`, which the docs describe as returning decoded (character-reference-resolved) text content for `#text` nodes. Finally, I used `mb_strlen`/`mb_substr` with UTF-8 encoding to count and truncate by Unicode code points without splitting multi-byte characters.",
+  "confidence": 87
+}

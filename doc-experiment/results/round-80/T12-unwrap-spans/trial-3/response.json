@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for BODY-context fragment parsing, then walked tokens with `next_token()` and appended each token's normalized `serialize_token()` output except `SPAN` openers and closers, which removes spans while preserving their contents and normalizing the rest of the fragment. I also checked `get_last_error()` to avoid returning a partial rewrite if the processor aborts.",
+  "confidence": 91
+}

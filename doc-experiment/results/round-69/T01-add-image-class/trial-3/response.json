@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the document linearly, matching only real `img` tags case-insensitively, and `add_class()` to append `wp-image` without disturbing existing classes or byte-exact content elsewhere. The modified document is returned with `get_updated_html()`, which preserves untouched bytes exactly as documented.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with structure awareness, then walks the document once with `next_token()`. It starts a TOC entry on each heading opener, appends descendant text from `#text` tokens via `get_modifiable_text()`, includes special text-carrying element tokens (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) when they appear inside a heading, and finalizes each entry when the matching heading closer is visited.",
+  "confidence": 85
+}

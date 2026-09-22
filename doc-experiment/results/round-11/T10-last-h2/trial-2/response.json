@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan linearly through the HTML document. As each H2 tag is found with next_tag('h2'), a bookmark named 'last-h2' is set on it. Since setting a bookmark with the same name moves it to the new location, after the loop completes, the bookmark points to the last H2 tag. We then seek to that bookmark and add the 'final-section' class using add_class(). The processor handles byte-for-byte preservation through get_updated_html(), and H2 tags inside HTML comments are ignored because next_tag() only matches real HTML tags, not tag-like text inside comments.",
+  "confidence": 92
+}

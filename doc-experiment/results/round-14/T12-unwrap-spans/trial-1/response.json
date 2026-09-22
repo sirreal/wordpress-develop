@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates an HTML Processor fragment from the input HTML and iterates through every token using next_token(). For each token, it checks if it's a SPAN tag (opening or closing) and skips both if so. All other tokens (text, tags, comments, etc.) are serialized using serialize_token() and concatenated. The processor automatically handles normalization during serialization, producing the required normalized output with double-quoted attributes, closed optional tags, and canonical text encoding.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` and concatenated `serialize_token()` for every token except `SPAN` tag tokens, which removes both openers and closers while preserving their contents. The result is normalized serialization from the HTML Processor, and I fall back to `normalize()` only if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 93
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor's next_token() method to iterate through all tokens in the HTML document, checking for #text token types. For each text node, it retrieves the already-decoded text content using get_modifiable_text(). It counts Unicode codepoints using mb_strlen with UTF-8 encoding and truncates using mb_substr to avoid breaking multi-byte characters. The function returns early if the max_codepoints limit is reached, and automatically ignores content from special elements like SCRIPT and STYLE since the Tag Processor handles those elements specially.",
+  "confidence": 72
+}

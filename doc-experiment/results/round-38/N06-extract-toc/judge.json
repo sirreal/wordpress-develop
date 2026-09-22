@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path for BODY-fragment structure, then followed the documented depth-bounded subtree text walk with `next_tag()`, `get_current_depth()`, `next_token()`, `get_token_type()`, and `get_modifiable_text()`. All called API methods are present in the rendered docs, and execution recorded no `_doing_it_wrong`. Minor edge-policy gap: it checks `get_last_error()` but does not check `paused_at_incomplete_token()` when a caller might care about truncated input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor and only documented APIs. The single `next_token()` loop with explicit heading state is idiomatic per the docs' repeated-region guidance, and relying on `is_tag_closer()` is supported because the HTML Processor emits virtual closers for implied/end-of-input closures. It correctly limits text to `#text` tokens. Minor gap: no explicit unsupported/truncated-input policy after the scan."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods. The one-pass token loop is generally idiomatic and handles decoded text, empty headings, and implied heading closes. The main adherence weakness is edge handling: after any `get_last_error()` it returns `array()`, which conflates unsupported input with a real no-match result and discards partial findings; a read-only probe with unsupported table repair returned `[]` while the reference returned the partial heading text. It also does not check `paused_at_incomplete_token()`."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the three trials: every `execution.json` reports 7/7 passed, with empty `_doing_it_wrong` and `trigger_error` records. The docs did well on the central contracts: the `Which processor should I use?` guidance pushed models to `WP_HTML_Processor` for structure and text extraction; `Recipe: collect DOM-style text from a subtree` showed appending only `#text` tokens; `get_modifiable_text()` documented decoded text; `next_token()` documented virtual closers for implicit/unclosed elements; and `get_current_depth()` documented the `>=` subtree boundary rule. Near misses were around policy rather than API discovery: none of the trials checked `paused_at_incomplete_token()`, and trial-3 used `get_last_error()` in a way that turns unsupported markup into an empty TOC. The docs mention both mechanisms, but they do not give a clear read-only extraction policy for partial results versus explicit failure when the function's return type cannot signal errors.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / `WP_HTML_Processor::get_last_error()`",
+      "problem": "The docs explain how to detect unsupported-parser aborts, but not how read-only extraction code should avoid conflating an abort with a valid empty result.",
+      "suggestion": "Add a short extraction-oriented note: after a scan stops with non-null `get_last_error()`, callers should make an explicit policy choice such as returning partial results, returning `null`/an error wrapper, or falling back to another parser; they should not silently report the same value used for 'no matches' unless that is intentional."
+    },
+    {
+      "location": "html-processor.md / `next_token()` and `get_current_depth()`",
+      "problem": "The docs separately describe virtual closers and incomplete trailing syntax, but the distinction is easy to miss: unclosed elements still produce closing tokens, while an incomplete final syntax token is omitted and only detectable after draining the scan.",
+      "suggestion": "Add a compact example contrasting `<p>text` with `<p>text <em`, showing the resulting extraction behavior and when `paused_at_incomplete_token()` becomes relevant."
+    },
+    {
+      "location": "html-processor.md / Usage recipes for subtree walks",
+      "problem": "The docs both recommend depth-bounded inner walks for one subtree and warn that nested `next_token()` loops can skip boundaries. That tension can leave readers unsure when the nested pattern is acceptable.",
+      "suggestion": "Add a general rule of thumb: a depth-bounded inner walk is safe when the outer search intends to resume after the consumed region and does not need the boundary token; for repeated sibling regions where the boundary itself matters, prefer one stateful `next_token()` loop."
+    }
+  ]
+}

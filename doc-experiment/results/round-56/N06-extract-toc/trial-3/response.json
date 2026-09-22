@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_token(), using get_token_type(), get_token_name(), get_current_depth(), is_tag_closer(), and get_modifiable_text() to collect only ordinary #text content inside H1-H6 elements in document order while preserving empty headings.",
+  "confidence": 89
+}

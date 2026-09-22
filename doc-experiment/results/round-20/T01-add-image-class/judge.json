@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, documented constructor, next_tag('img'), add_class('wp-image'), and get_updated_html(). This is the intended flat, byte-preserving class-edit pattern; no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented Tag Processor pattern as the reference. Lowercase img query is supported by the docs' ASCII case-insensitive tag matching; all hidden cases passed without API misuse."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage. The loop is idiomatic for all matching tags, and add_class/get_updated_html preserve the required byte-level behavior outside the touched tags."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial. The rendered docs did the important things well: the Tag Processor overview explicitly says to use it for flat tag/name/class edits and byte-precise preservation; the Usage section shows the constructor-based flow; Finding tags documents next_tag('img'); Modifying CSS classes explains that add_class is safe without prechecking existing class attributes and preserves existing classes; the next_tag method details explicitly cover ASCII case-insensitive tag matching, ignoring tag-like text in comments/raw-text regions, and not matching incomplete trailing tags. Near-misses: the docs contain enough information, but the best solution is spread across overview, usage, class-modification, and method-detail sections. A reader could solve this only after connecting those sections. The examples also imply, but do not centrally summarize, that get_updated_html is the finalization step for queued class/attribute changes.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor overview / Usage",
+      "problem": "The common scan-mutate-return shape is split across several sections, so users must infer the canonical loop for repeated tag edits.",
+      "suggestion": "Add a short generic recipe showing: instantiate Tag Processor, while next_tag('TAG'), mutate the current tag, then return get_updated_html(). Keep the example generic, such as adding a class to matching elements, without embedding this exact task."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::add_class docblock",
+      "problem": "The method-level entry only says it adds a class; the stronger guarantees appear elsewhere in prose.",
+      "suggestion": "State in the add_class docblock that it is safe when the class attribute is absent, preserves existing class order/spacing as much as possible, avoids duplicating an existing class, and queues changes applied by get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html docblock",
+      "problem": "The finalization contract is easy to miss for users who only inspect mutation methods.",
+      "suggestion": "Make the docblock explicit that set_attribute/add_class/remove_class queue lexical updates and callers must use get_updated_html() to retrieve the modified document while untouched bytes are preserved."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag docblock",
+      "problem": "The method detail covers comments, raw text, case-insensitive tag matching, and incomplete input well, but these edge-case guarantees are not summarized near the basic Finding tags table.",
+      "suggestion": "Add one sentence below the Finding tags table: matching is ASCII case-insensitive and only complete real tags are returned; comments, raw-text contents, and incomplete trailing tokens are skipped or cause parsing to pause."
+    }
+  ]
+}

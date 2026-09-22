@@ -1,0 +1,62 @@
+{
+    "id": "N04-normalize-or-placeholder",
+    "title": "Normalize HTML with a fallback",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "normalization",
+    "processor": "html",
+    "function": "normalize_or_placeholder",
+    "cases": [
+        {
+            "id": "unclosed-tags-normalize",
+            "args": [
+                "<div><p>Hello"
+            ],
+            "expected": "<div><p>Hello</p></div>"
+        },
+        {
+            "id": "table-normalizes",
+            "args": [
+                "<table><tr><td>ok</table>"
+            ],
+            "expected": "<table><tbody><tr><td>ok</td></tr></tbody></table>"
+        },
+        {
+            "id": "attribute-quoting-normalizes",
+            "args": [
+                "<a href=x class=test>go</a>"
+            ],
+            "expected": "<a href=\"x\" class=\"test\">go</a>"
+        },
+        {
+            "id": "entities-normalize",
+            "args": [
+                "<p>Fish &amp; chips</p>"
+            ],
+            "expected": "<p>Fish &amp; chips</p>"
+        },
+        {
+            "id": "unsupported-misnested-formatting",
+            "args": [
+                "<b>one<i>two</b>three</i>"
+            ],
+            "expected": "<p>Unsupported HTML</p>"
+        },
+        {
+            "id": "unsupported-anchor-misnesting",
+            "args": [
+                "<a><div><a></div></a>"
+            ],
+            "expected": "<p>Unsupported HTML</p>"
+        },
+        {
+            "id": "empty-fragment",
+            "args": [
+                ""
+            ],
+            "expected": ""
+        }
+    ]
+}

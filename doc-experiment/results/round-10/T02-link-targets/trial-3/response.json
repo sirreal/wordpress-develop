@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor for flat, position-based attribute modifications. Loops through all A tags with next_tag('A'), checks for href presence via get_attribute() which returns null only when attribute is absent, then sets target=\"_blank\" via set_attribute(). Returns updated HTML preserving byte-for-byte everything except the target attribute changes.",
+  "confidence": 92
+}

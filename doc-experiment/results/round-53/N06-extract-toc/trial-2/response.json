@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens in document order with `next_tag()` and `next_token()`. For each heading opener `H1` through `H6`, I recorded its depth with `get_current_depth()` and accumulated only `#text` token content via `get_modifiable_text()` until the walk left that heading subtree, which preserves markup text while excluding tags and includes empty headings as empty strings.",
+  "confidence": 92
+}

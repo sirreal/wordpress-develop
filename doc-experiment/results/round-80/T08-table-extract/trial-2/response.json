@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then a depth-bounded next_token() walk to respect browser-like table structure. Cell text is gathered only from #text tokens via get_modifiable_text(), and TD/TH and TR openers/closers are used to build rows and finalize cells.",
+  "confidence": 92
+}

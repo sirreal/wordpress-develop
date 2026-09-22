@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment for BODY-fragment, tree-aware text extraction. All called API methods are documented, and execution recorded no _doing_it_wrong notices. The single-pass stack walk is a documented next_token pattern and handles decoded text plus null/true href semantics. Minor deduction: it rejects all collected results when paused_at_incomplete_token() is true, which is a defensible policy but can discard complete data in a read-only collector."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical documented pattern: create_fragment, next_tag('A'), is_string(get_attribute('href')), then a depth-bounded next_token walk over #text using get_modifiable_text(). No undocumented API and no misuse records. Minor deduction only for not making an explicit get_last_error()/truncation policy after traversal, so unsupported markup could produce partial best-effort output."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all called methods are documented. The whole-document next_token loop with #tag/#text dispatch and closer-driven stack tracking follows the documented single-cursor/state-variable style, and it checks get_last_error(). Minor deduction: it relies on stack bookkeeping rather than the simpler depth-bounded subtree recipe, and it does not explicitly check paused_at_incomplete_token() if complete input is required."
+    }
+  ],
+  "failure_analysis": "No hidden/frozen case failed in any trial: all three passed simple, no-href-excluded, entity-in-href-decoded, valueless-href, image-link-empty-text, entities-in-text, no-links, and unclosed-link. The docs did well in the key places: 'Which processor should I use?' steered models away from WP_HTML_Tag_Processor for subtree text, get_attribute() documented null vs true vs decoded string values, get_modifiable_text() documented decoded #text content, and the WP_HTML_Processor 'Recipe: collect DOM-style text from a subtree' plus next_token()/get_current_depth() sections explained depth-bounded walks, the required >= comparison, split text nodes, and virtual closers for unclosed elements. Near misses were policy/shape issues rather than failures: trial-1 used paused_at_incomplete_token() as reject-all for truncated trailing syntax, while trial-2 omitted get_last_error() and can return partial data after unsupported markup. That reflects an absence of a clear read-only extraction policy. Trials 1 and 3 used a whole-document stack walk; the next_token() docs support that pattern, but the relationship between single-pass state machines and repeated depth-bounded subtree extraction could be clearer.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and the 'Recipe: collect DOM-style text from a subtree' section",
+      "problem": "The docs contain both a depth-bounded inner-loop recipe and a warning that nested next_token() loops can skip tokens. This can make repeated element extraction feel ambiguous.",
+      "suggestion": "Add a short note explaining when a bounded inner walk is appropriate: when consuming the matched element through its own closer is intentional and the outer search can resume after it. Contrast that with cases that need one-pass state tracking."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction recipe",
+      "problem": "The recipe shows collecting one subtree's text, but not the common pattern of collecting text plus metadata from every matching element.",
+      "suggestion": "Add a general example that collects each matching element's decoded text and one optional attribute, using create_fragment(), next_tag(), is_string(get_attribute()), get_current_depth(), #text, and get_modifiable_text(). Use a neutral element such as headings with id, not this task's link solution."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() / inherited WP_HTML_Processor::get_attribute()",
+      "problem": "The tri-state contract is documented, but the exact predicate for 'attribute exists with a string value' is not highlighted as a reusable idiom.",
+      "suggestion": "Add a small 'valued attribute' note: use is_string($processor->get_attribute($name)); absent attributes return null, valueless boolean attributes return true, and an explicitly empty value returns ''. Mention that string results are already decoded."
+    },
+    {
+      "location": "WP_HTML_Processor::get_last_error() and WP_HTML_Tag_Processor::paused_at_incomplete_token()",
+      "problem": "The docs explain detection of unsupported markup and incomplete trailing syntax, but read-only extraction policy is scattered and left implicit.",
+      "suggestion": "Add a decision note for scanners: after draining tokens, get_last_error() means traversal aborted before the full document was represented; paused_at_incomplete_token() means a trailing syntax token was not visited. Callers should choose and document best-effort partial results versus returning null/empty/fallback."
+    }
+  ]
+}

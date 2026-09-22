@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_token_type()`, `is_tag_closer()`, `get_tag()`, `get_breadcrumbs()`, `add_class()`, and `get_updated_html()` APIs. The function walks the fragment once, detects opener tokens for `UL`/`OL`, checks whether any earlier breadcrumb is also `UL` or `OL`, and adds `nested-list` only in that case so the rest of the HTML stays byte-for-byte preserved.",
+  "confidence": 92
+}

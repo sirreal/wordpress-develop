@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor for a flat, byte-exact attribute edit). Every method called is documented: next_tag, is_tag_closer, release_bookmark, set_bookmark, seek, add_class, get_updated_html. Passes all 6 hidden cases. Uses the exact documented set_bookmark idiom: re-set one literal-named bookmark on each match, seek once after the scan, then add_class + get_updated_html. Edge cases handled (no-H2 guarded by null bookmark; comment-H2 and existing-class handled by the parser/add_class semantics). Minor non-idiomatic noise: the is_tag_closer() guard is redundant because next_tag defaults to tag_closers => 'skip' (verified: next_tag('h2') visits only openers), and the release-then-re-set dance inside the loop is unnecessary since re-setting a name moves the bookmark (documented under set_bookmark). Harmless, so only a 3-point trim for not internalizing the documented default."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Cleanest of the three and structurally closest to the reference. Correct processor. Methods used — next_tag(array('tag_name'=>'h2')), set_bookmark, has_bookmark, seek, add_class, release_bookmark, get_updated_html — are all documented. Passes all 6 cases. Uses the documented 'remember the last X' bookmark idiom verbatim, omits the unnecessary is_tag_closer guard (correctly relying on the documented default tag_closers => 'skip'), and uses has_bookmark() to detect the no-H2 case instead of a side flag. No wasted work, no undocumented assumptions."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all methods documented (next_tag, is_tag_closer, set_bookmark, seek, add_class, release_bookmark, get_updated_html). Passes all 6 cases. Same documented last-bookmark idiom. Same single non-idiomatic point as trial-1: the is_tag_closer() guard is redundant given the documented tag_closers => 'skip' default. Tracks a separate $last_h2_bookmark flag rather than calling has_bookmark(); both are documented and correct, but the flag is slightly less clean. 3-point trim for the redundant closer guard."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed all 6 cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class) with zero _doing_it_wrong records and zero trigger_errors. This task is a near-ideal fit for what the tag-processor doc teaches, and the docs did the heavy lifting.\\n\\nWhat the docs did well:\\n- The set_bookmark section explicitly documents the exact pattern this task requires: \\\"A common use: to remember 'the last matching tag' in a single pass, re-set the same bookmark name on every match, then seek to it once after the scan completes,\\\" backed by a worked last-li example and the statement that re-setting a name MOVES the bookmark without leaking or requiring release. All three subjects reproduced this idiom faithfully rather than inventing reverse-iteration or counting passes.\\n- The 'Which processor should I use?' section steered subjects to the Tag Processor for byte-exact attribute work; none reached for the HTML Processor, which would be overkill and risks normalization.\\n- next_tag's matching contract (\\\"Only real HTML tags can match. Tag-like text inside comments ... is text, not tags\\\") directly explains the comment-h2-not-counted pass; subjects correctly trusted the parser instead of hand-rolling comment skipping.\\n- add_class semantics (\\\"adding ... is a safe operation that doesn't require checking if the attribute or class exists\\\") and the worked examples showing class merge explain the existing-class pass (outro -> outro final-section).\\n- get_updated_html is clearly documented as the way to read output after queued edits, and the add_class return-value note explicitly says \\\"There is no need to inspect it in the usual add-then-get_updated_html() flow,\\\" which kept subjects from over-checking return values.\\n\\nNear-misses in the explanations / reasoning (not failures):\\n- Trials 1 and 3 added an is_tag_closer() guard inside the next_tag('h2') loop. This is dead code: next_tag defaults to tag_closers => 'skip' (verified via probe: next_tag('h2') visits openers only). The next_tag parameter table does document this default, but the default is buried inside a long inline @type blob ('tag_closers \\\"visit\\\" or \\\"skip\\\" (default)') rather than called out, so two of three subjects defensively guarded against closers that never appear. No functional impact, but it indicates the default is under-communicated in the tag-processor doc (the HTML-processor doc, by contrast, explicitly states 'only openers are visited' for its next_tag).\\n- Trial 1 also released and re-set the bookmark on every iteration, missing the documented fact that re-setting a name moves the existing bookmark in place. Again harmless, but a sign the 'moves, does not leak' guarantee could be surfaced more prominently.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — Parameters table ($query @type tag_closers)",
+      "problem": "The default behavior (only tag openers are visited; closers are skipped unless tag_closers => 'visit') is stated only as a parenthetical inside a long inline @type blob in the param table. Two of three subjects added a redundant is_tag_closer() guard after next_tag('h2') because they could not tell from the prose that closers are skipped by default. The sibling WP_HTML_Processor::next_tag doc DOES call this out ('Because skip is the default, code following a plain next_tag() match needs no is_tag_closer() guard'), but the Tag Processor doc does not.",
+      "suggestion": "Add one sentence to the next_tag() description (not just the param table) stating that by default next_tag() stops only on tag openers, so a tag-name query like next_tag('h2') never matches a closer and needs no is_tag_closer() guard; mention that tag_closers => 'visit' is required to also stop on closers."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_bookmark() / release_bookmark()",
+      "problem": "The 're-setting a name MOVES the bookmark, does not leak the old one or require releasing it first' guarantee is present but appears low in a long section after the worked example. One subject defensively called release_bookmark() then set_bookmark() on every loop iteration, doing unnecessary work it believed was required to avoid leaking bookmarks.",
+      "suggestion": "Surface the move-on-reset guarantee earlier — ideally one line right at the top of set_bookmark's description: 'Setting a bookmark whose name already exists moves it; you do not need to release it first.' This prevents the release-then-reset anti-pattern inside last-X tracking loops."
+    }
+  ]
+}

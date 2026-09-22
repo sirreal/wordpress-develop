@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to create a fragment parser from the input HTML, then iterates through all tokens with next_token(). For each token, it checks if the current tag is a SPAN element and skips it if so (this skips both opener and closer). All other tokens are serialized with serialize_token() which produces normalized HTML. The serialize_token() method handles all normalization requirements: double-quoting attributes, canonicalizing text encoding, and closing optional tags according to HTML spec. The processor handles proper tree structure automatically.",
+  "confidence": 72
+}

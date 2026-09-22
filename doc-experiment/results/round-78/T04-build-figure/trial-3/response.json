@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already contains `src` and `alt` in the required order, then updated those attributes in place so the order is preserved and the HTML API handles encoding. For the caption, I replaced the placeholder text node with `set_modifiable_text()`, since the docs note empty elements cannot receive text that way.",
+  "confidence": 95
+}

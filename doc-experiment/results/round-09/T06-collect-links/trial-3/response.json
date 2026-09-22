@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to safely parse the HTML, then iterates through all A tags using next_tag(). For each A tag with an href attribute, it collects the text content by advancing through tokens at the same depth, accumulating #text nodes while filtering out markup. The href attribute is automatically decoded by get_attribute(), and text content is decoded by get_modifiable_text() according to the documented API behavior. This correctly handles nested elements like <a href=\"/b\"><em>second</em> link</a> by concatenating all text nodes while ignoring the EM tag itself.",
+  "confidence": 85
+}

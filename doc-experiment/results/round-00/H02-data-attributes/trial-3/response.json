@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with three documented APIs: `next_tag('DIV')` to find the first DIV element (returns false if not found), `get_attribute_names_with_prefix('data-')` to retrieve all lowercase attribute names starting with 'data-' in document order (returns null when no tag is matched), and `get_attribute($name)` to retrieve each attribute's value (returns a string for valued attributes, `true` for boolean attributes written without a value). The result array preserves insertion order matching document order, as required by the task.",
+  "confidence": 97
+}

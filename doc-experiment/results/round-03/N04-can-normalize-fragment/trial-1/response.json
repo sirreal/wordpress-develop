@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() which attempts to parse and serialize the HTML fragment. According to the documentation, normalize() returns a string when normalization succeeds, or null when the HTML Processor encounters unsupported markup (such as certain mis-nested formatting elements) and aborts early. By checking whether the return value is null, we can determine if the HTML can be normalized.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Tag_Processor` token walk (`next_token`) to read the fragment in document order, appending decoded text from ordinary `#text` tokens and from the special text-bearing `TITLE` and `TEXTAREA` opening-tag tokens via `get_modifiable_text()`, while naturally excluding `SCRIPT` and `STYLE`. It then truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8` encoding.",
+  "confidence": 89
+}

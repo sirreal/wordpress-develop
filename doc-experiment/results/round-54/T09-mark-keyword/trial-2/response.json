@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment parser to walk tokens in body context, serialized untouched tokens with `serialize_token()`, and wrapped only ordinary `#text` tokens whose decoded text contains the keyword. The wrapped text is re-encoded with PHP escaping so the output stays normalized apart from the added `<mark>` elements.",
+  "confidence": 90
+}

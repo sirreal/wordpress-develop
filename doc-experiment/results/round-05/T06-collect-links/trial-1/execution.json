@@ -1,0 +1,119 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-05/T06-collect-links/trial-1/candidate.php",
+    "function": "collect_links",
+    "passed": 1,
+    "total": 8,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/a",
+                    "text": "First"
+                },
+                {
+                    "href": "/b",
+                    "text": "second link"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-href-excluded",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/only",
+                    "text": "real"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entity-in-href-decoded",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/search?q=a&b",
+                    "text": "query"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "valueless-href",
+            "status": "error",
+            "expected": [
+                {
+                    "href": true,
+                    "text": "empty"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "image-link-empty-text",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/img",
+                    "text": ""
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-in-text",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/x",
+                    "text": "Fish & Chips"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-links",
+            "status": "pass",
+            "expected": [],
+            "actual": [],
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-link",
+            "status": "error",
+            "expected": [
+                {
+                    "href": "/x",
+                    "text": "runs to the end"
+                }
+            ],
+            "actual": null,
+            "error": "Error: Call to undefined method WP_HTML_Tag_Processor::get_current_depth()",
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

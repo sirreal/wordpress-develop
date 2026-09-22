@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 85,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 with no _doing_it_wrong records. All processor methods used are documented: create_full_parser, create_fragment, next_tag, is_tag_closer, set_bookmark, has_bookmark, seek, add_class, get_updated_html, release_bookmark. Main adherence loss: this is flat tag/class mutation, where the docs recommend WP_HTML_Tag_Processor; create_full_parser-first is also not the documented fragment-friendly choice."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 with no _doing_it_wrong records. Uses the canonical documented pattern: WP_HTML_Tag_Processor, next_tag by tag_name, repeatedly moving one bookmark to the latest match, seek, add_class, release_bookmark, get_updated_html."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 6/6 with no _doing_it_wrong records. Same correct Tag Processor/bookmark approach as the reference. Minor idiom issue: it ignores set_bookmark's boolean return and relies on seek to fail later, but this is still within the documented API and safe for the single fixed bookmark used here."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all 18 trial-case executions passed, and there were no _doing_it_wrong records. The docs succeeded because the Tag Processor overview clearly assigns flat, position-based class edits to WP_HTML_Tag_Processor; next_tag documents case-insensitive real-tag matching and excludes comments/raw text/incomplete tokens; add_class documents appending to existing classes; get_updated_html is documented as the right output method after queued edits; and the set_bookmark docs explicitly describe re-setting one name as the idiom for remembering the last matching tag. Near-miss: trial-1 chose WP_HTML_Processor and create_full_parser first. The docs do warn that create_fragment is usually more appropriate for chunks and that the lighter Tag Processor suffices for flat class edits, but a model can still over-read 'document or fragment' as a reason to use the structured processor. That did not fail the frozen cases, but it is less robust: if WP_HTML_Processor aborts on unsupported markup before a later H2, a bookmark-based scan may be incomplete unless get_last_error is checked or the Tag Processor is used instead.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / WP_HTML_Processor::create_full_parser()",
+      "problem": "A mixed contract like 'document or fragment' can lead readers to try create_full_parser first even when the operation is only a flat tag/class edit.",
+      "suggestion": "Add a decision note: for byte-preserving tag, attribute, or class edits, use WP_HTML_Tag_Processor for both complete documents and fragments; choose create_full_parser only when full-document structural parsing, HEAD/doctype handling, or normalized serialization is required."
+    },
+    {
+      "location": "html-processor.md / WP_HTML_Processor::set_bookmark()",
+      "problem": "The Processor bookmark section omits the Tag Processor's explicit statement that setting an existing bookmark name moves it, which is the key contract behind 'last occurrence' scans.",
+      "suggestion": "Mirror the Tag Processor wording that re-setting the same bookmark name moves the bookmark and is the supported idiom for remembering the last matching token, with the Processor-specific caveat that virtual tokens cannot be bookmarked."
+    },
+    {
+      "location": "html-processor.md / HTML Support / next_tag() mutation patterns",
+      "problem": "The docs describe unsupported-markup aborts, but do not tie that risk directly to bookmark-driven mutations after a scan: 'last seen' may not mean 'last in the input' if the Processor stopped early.",
+      "suggestion": "Add guidance that after an HTML Processor scan whose result drives an edit, callers should check get_last_error before seek/edit/output and fall back according to their contract; for flat mutations that should continue across unsupported structural markup, prefer WP_HTML_Tag_Processor."
+    }
+  ]
+}

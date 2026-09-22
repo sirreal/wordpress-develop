@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor with a literal figure/img/figcaption template so the img attributes already exist in the required order, then updated src and alt in place and replaced the figcaption placeholder text by walking to the #text token and calling set_modifiable_text. The API handles all HTML encoding, and get_updated_html returns the final fragment without hand-built escaping.",
+  "confidence": 97
+}

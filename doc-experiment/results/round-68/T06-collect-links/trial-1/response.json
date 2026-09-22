@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token(). For each A opener I read the decoded href with get_attribute(), accepted only string values, and accumulated ordinary link text from #text tokens via get_modifiable_text() until the matching closer, returning the collected links in document order.",
+  "confidence": 86
+}

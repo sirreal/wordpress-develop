@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() which returns null when the HTML Processor encounters unsupported markup (like certain misnested formatting elements) and aborts parsing. By checking if the return value is not null, we determine whether the HTML API can successfully normalize the fragment. The normalize() method handles malformed markup gracefully (unclosed tags, implied closing tags, tables), returning a normalized string; it only returns null for truly unsupported constructs.",
+  "confidence": 92
+}

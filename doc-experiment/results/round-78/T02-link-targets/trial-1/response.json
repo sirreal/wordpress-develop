@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the HTML linearly, match only `A` tags, check whether `href` is present via `get_attribute('href')`, and overwrite or add `target` with `set_attribute('target', '_blank')`. `get_updated_html()` returns the original bytes unchanged except for the queued attribute edits, preserving the rest of the document exactly as documented.",
+  "confidence": 97
+}

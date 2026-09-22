@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor because the task is a flat, byte-preserving attribute rewrite. The function scans for `A` tags with `next_tag( 'a' )`, checks `get_attribute( 'href' )` to ensure the attribute is present, and applies `set_attribute( 'target', '_blank' )`, then returns `get_updated_html()`.",
+  "confidence": 94
+}

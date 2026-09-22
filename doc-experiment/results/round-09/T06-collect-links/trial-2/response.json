@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all tokens with next_token(). For each opening A tag with an href attribute, it records the current depth and collects all text tokens inside that element by continuing to iterate while the depth remains at or above the A tag's depth. Text is accumulated using get_modifiable_text() which returns decoded text. The href is retrieved via get_attribute() which returns the decoded attribute value or true for empty attributes.",
+  "confidence": 78
+}

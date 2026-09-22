@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, next_token() to walk the document token-by-token, get_token_type() and get_modifiable_text() to detect decoded text nodes, serialize_token() to emit normalized token HTML, and is_special() to avoid wrapping special-element opener text. The function wraps whole matching #text tokens in <mark> and returns a normalized serialized fragment.",
+  "confidence": 88
+}

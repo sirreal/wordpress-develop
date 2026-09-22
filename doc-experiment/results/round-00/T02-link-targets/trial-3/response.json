@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan through all A tag openers via next_tag('a') in a loop (next_tag skips closers by default). For each matched A tag, I call get_attribute('href') and check if the result is non-null: the docs state get_attribute() returns null when the attribute is absent, true for boolean/valueless attributes like bare `href`, and a string for valued attributes like `href=\"\"` or `href=\"/x\"`. So a null-check correctly identifies all three \"href present\" cases. When href is present, set_attribute('target', '_blank') is called, which overwrites any existing target value per the documented behavior. Finally, get_updated_html() returns the modified HTML string.",
+  "confidence": 98
+}

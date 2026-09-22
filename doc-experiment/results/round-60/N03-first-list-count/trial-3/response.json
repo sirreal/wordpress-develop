@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then `next_tag()` to find the first `UL` or `OL`, and `next_token()` plus `get_current_depth()`, `get_token_type()`, `is_tag_closer()`, and `get_tag()` to count only direct `LI` children. I guarded the mutation by rejecting incomplete scans with `paused_at_incomplete_token()` and `get_last_error()`, then used a bookmark plus `seek()` and `set_attribute()` to write `data-item-count` back onto the first list opener.",
+  "confidence": 92
+}

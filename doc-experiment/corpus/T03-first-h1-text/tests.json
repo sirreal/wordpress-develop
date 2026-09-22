@@ -1,0 +1,69 @@
+{
+    "id": "T03-first-h1-text",
+    "title": "Extract the first heading's text",
+    "difficulty": "basic",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "text",
+    "processor": "html",
+    "function": "get_first_h1_text",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<h1>Hello</h1>"
+            ],
+            "expected": "Hello"
+        },
+        {
+            "id": "nested-markup",
+            "args": [
+                "<h1>A <em>B</em> C</h1>"
+            ],
+            "expected": "A B C"
+        },
+        {
+            "id": "entities-decoded",
+            "args": [
+                "<h1>Fish &amp; Chips &mdash; daily</h1>"
+            ],
+            "expected": "Fish & Chips — daily"
+        },
+        {
+            "id": "no-h1-null",
+            "args": [
+                "<p>No headings here.</p><h2>Sub</h2>"
+            ],
+            "expected": null
+        },
+        {
+            "id": "image-only-empty-string",
+            "args": [
+                "<h1><img alt=\"decorative\"></h1>"
+            ],
+            "expected": ""
+        },
+        {
+            "id": "first-of-two",
+            "args": [
+                "<h1>First</h1><h1>Second</h1>"
+            ],
+            "expected": "First"
+        },
+        {
+            "id": "nested-in-div",
+            "args": [
+                "<div><div><h1>Deep <strong>title</strong></h1></div></div>"
+            ],
+            "expected": "Deep title"
+        },
+        {
+            "id": "unclosed-h1",
+            "args": [
+                "<h1>Runs to <em>the end"
+            ],
+            "expected": "Runs to the end"
+        }
+    ]
+}

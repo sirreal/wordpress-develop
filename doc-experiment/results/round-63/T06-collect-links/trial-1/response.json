@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so text and nested structure are handled correctly. For each `A` opener I read `href` with `get_attribute()` and only kept it when the API returned a string, and I accumulated link text from `#text` tokens via `get_modifiable_text()` until the matching `A` closer was reached.",
+  "confidence": 87
+}

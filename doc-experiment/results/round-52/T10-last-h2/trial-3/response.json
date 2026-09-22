@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan forward through all H2 openers, kept a bookmark on each match so the bookmark ended at the last H2, then sought back to that bookmark and called add_class() before returning get_updated_html(). This stays within the documented Tag Processor API and avoids any tree-structure assumptions.",
+  "confidence": 96
+}

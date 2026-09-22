@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), walked tokens with documented next_token(), get_token_type(), get_token_name(), get_current_depth(), is_tag_closer(), and get_modifiable_text(). No _doing_it_wrong records. The single-pass closer-driven state machine follows the documented one-cursor guidance and correctly reads only #text tokens. Minor risk: it relies on matching virtual heading closers rather than the simpler documented depth-drop boundary, but the docs support that behavior."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor and only documented methods, including paused_at_incomplete_token() and get_last_error(). The one-pass state machine is idiomatic and handles decoded #text extraction. Slight adherence penalty because it treats any incomplete token or parser error as a reason to discard all accumulated read-only results, while the docs say that completion policy is caller-contract-specific; this task did not require fail-closed behavior."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical shape: WP_HTML_Processor::create_fragment(), next_tag() to find heading openers, a get_current_depth() >= bounded next_token() subtree walk, and get_modifiable_text() only for #text tokens. All API calls are documented and no _doing_it_wrong records appear."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 7/7 frozen tests. The docs worked well in several places: the HTML Processor overview clearly says to use it when structure, subtree text, and implied or virtual closing tags matter; create_fragment() is documented as the body-fragment factory; next_token() explains that the HTML Processor visits implicit and end-of-input closers; get_current_depth() explains the >= subtree boundary; and the text-extraction recipe explicitly says to append only #text tokens and then read get_modifiable_text(), which returns decoded entity text. Near-misses: trial-2 over-applied the completion-policy guidance by returning an empty array after paused_at_incomplete_token() or get_last_error(), even though the docs also say read-only extraction may return accumulated data depending on the function contract. Trial-1 used a closer-driven state machine instead of the depth-drop recipe, but the next_token() docs make that valid because virtual closers are visited.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / next_token() and get_current_depth() docblocks",
+      "problem": "The docs warn broadly that nested next_token() loops can skip boundaries, while nearby examples also show bounded subtree walks. This can leave readers uncertain which nested walks are safe.",
+      "suggestion": "Clarify that a bounded inner subtree walk is safe when the caller intentionally resumes from the boundary token, but repeated-region extraction should prefer one stateful next_token() loop when the outer loop must process every boundary token itself."
+    },
+    {
+      "location": "html-processor.md / completion-policy guidance near text extraction",
+      "problem": "Readers may treat paused_at_incomplete_token() and get_last_error() as automatic reasons to discard read-only extraction results.",
+      "suggestion": "State more explicitly that these flags report scan completeness, not invalidity of already-visited tokens; read-only APIs should only fail closed when their own contract requires complete-source certainty."
+    },
+    {
+      "location": "html-processor.md / Supported markup examples",
+      "problem": "The heading-implied-close example is not as direct as the common case where a new heading opener closes the previous heading.",
+      "suggestion": "Add or adjust a general example showing that heading start tags can implicitly close an open heading and that the HTML Processor exposes this as normal tree structure with virtual closers."
+    },
+    {
+      "location": "html-processor.md / get_tag() and get_token_name() docblocks",
+      "problem": "Both methods can be used to identify tag names after a #tag check, but the intended distinction is easy to miss.",
+      "suggestion": "Add a short note recommending get_tag() for element-name checks and get_token_name() for generic token dispatch, with the requirement to check get_token_type() or is_tag_closer() when appropriate."
+    }
+  ]
+}

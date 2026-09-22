@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware traversal, then next_token(), get_token_type(), is_tag_closer(), get_tag(), and get_breadcrumbs() to detect UL/OL elements whose ancestors include another UL or OL. Matching opener tags get add_class('nested-list'), and the final output comes from get_updated_html() so untouched bytes are preserved exactly.",
+  "confidence": 91
+}

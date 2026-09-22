@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then scanned tokens with `next_token()` to find the first `UL` or `OL`, counted only direct `LI` opener tokens at one depth below that list, and rejected truncated or unsupported scans using `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan I returned to the bookmarked list opener with `seek()` and wrote `data-item-count` via `set_attribute()`, then read the result with `get_updated_html()`.",
+  "confidence": 87
+}

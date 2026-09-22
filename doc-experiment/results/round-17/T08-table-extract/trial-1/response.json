@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to properly parse HTML with full structural awareness including implied closing tags. Navigates to the first TABLE element, then iterates through tokens within the table depth. For each TD/TH cell opening tag, it collects all subsequent #text tokens (with character references decoded via get_modifiable_text()) until the cell closes. Rows are accumulated on TR closing tags. This correctly handles missing </td> and </tr> tags via the HTML processor's implicit tag closing logic.",
+  "confidence": 48
+}

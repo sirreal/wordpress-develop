@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, walked A tags with next_tag(), tested href presence with get_attribute() !== null, overwrote target with set_attribute(), and returned get_updated_html(). All API methods are documented and execution had no _doing_it_wrong records. Minor non-doc-pattern noise: the class_exists() fallback is unnecessary for the task environment, but it is a PHP built-in, not a hallucinated HTML API method."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Canonical documented pattern: construct WP_HTML_Tag_Processor, loop over next_tag( 'a' ), use null !== get_attribute( 'href' ) so empty and valueless href count, call set_attribute(), then get_updated_html(). All hidden cases passed and no misuse records appeared."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented approach as the reference: Tag Processor for byte-preserving flat attribute edits, null check for href presence, set_attribute() for overwrite/create behavior, and get_updated_html() for output. All methods used are present in the rendered docs."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, so there are no failed-case misconceptions to attribute. The docs worked well for this task because the Tag Processor overview explicitly directs flat attribute/class edits with byte-precise preservation to WP_HTML_Tag_Processor, next_tag() documents case-insensitive tag matching and ignoring tag-like text in comments/raw text, get_attribute() explains absent attributes as null while present empty attributes may be \"\" and valueless attributes return true, set_attribute() says existing attributes are overwritten and new attributes are inserted after the tag name, and get_updated_html() is clearly identified as the way to retrieve queued edits while preserving untouched bytes. The main near-miss is that the most important presence-test contract is split between the overview prose and the method example; a weaker model could still conflate empty string, true, and null if it only scanned the formal method section.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md, get_attribute() method Returns section",
+      "problem": "The formal return description is less explicit than the overview about the three presence states: absent, empty-valued, and valueless attributes.",
+      "suggestion": "Add a Returns note: null means the attribute is absent or no tag is matched; true means the attribute is present without a value; '' means the attribute is present with an empty string value."
+    },
+    {
+      "location": "html-tag-processor.md, Usage / Finding tags",
+      "problem": "The docs show a single-tag mutation and a custom while loop, but not the common all-matching-tags mutation pattern in its shortest form.",
+      "suggestion": "Add a compact example of `while ( $processor->next_tag( 'tagname' ) ) { ... }` for applying the same attribute/class edit to every matching opener."
+    },
+    {
+      "location": "html-tag-processor.md, Modifying HTML attributes for a found tag",
+      "problem": "The overwrite/create behavior is documented, but the presence-test idiom for conditional mutation is not shown adjacent to the attribute mutation section.",
+      "suggestion": "Add a general example that conditionally mutates based on `null !== $processor->get_attribute( 'name' )`, with a note that empty-string and valueless attributes still count as present."
+    }
+  ]
+}

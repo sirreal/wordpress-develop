@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat known-template construction task. All called APIs are documented: constructor, next_tag(), set_attribute(), next_token(), get_token_type(), set_modifiable_text(), and get_updated_html(). Pattern matches the docs' template-building guidance, including predeclared attributes for order and placeholder text for caption replacement."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used documented APIs only, including WP_HTML_Processor::create_fragment() and inherited mutation methods. The result is safe and idiomatic, but WP_HTML_Processor is heavier than needed for a flat known-template edit; the docs say to prefer WP_HTML_Tag_Processor when parsed structure is unnecessary. Otherwise it follows the documented token-walk, text replacement, and get_updated_html() pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong API usage as trial-1. Correct processor, no undocumented calls, no _doing_it_wrong records, and the implementation follows the documented template-filling pattern for preserving attribute order and safely encoding attribute/text values."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the three trials; all 21 executions passed and execution.json records no _doing_it_wrong entries. The docs did well in three places: the Tag Processor 'Building markup from a template' section directly described using a literal template, predeclared attributes to preserve order, placeholder text for elements needing text, next_token() plus get_token_type() to reach #text, set_modifiable_text() for plaintext, and get_updated_html() for output. The set_attribute() docs explicitly say unescaped strings are encoded, true creates a boolean attribute, false removes it, and newly added attributes are sorted rather than inserted in call order; this explains the correct handling of quotes, ampersands, angle brackets, and required src-before-alt order. The set_modifiable_text() docs explicitly say plaintext is encoded and not parsed as HTML, which prevented caption inputs such as '<script>...</script>' from becoming markup. The only near-miss was trial-2 choosing WP_HTML_Processor despite the task needing no tree awareness; it still worked because the HTML Processor inherits the mutation APIs and get_updated_html(), but the processor-choice guidance could steer template-filling tasks more forcefully toward the Tag Processor.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor overview / processor-choice guidance",
+      "problem": "A model can reasonably map 'build a fragment' to WP_HTML_Processor::create_fragment(), even when the task is only filling a known template and needs no structural parsing.",
+      "suggestion": "Add an explicit cross-reference: for filling a known markup template with attribute and text values while preserving byte-exact shape and attribute order, use WP_HTML_Tag_Processor and see its 'Building markup from a template' section; reserve WP_HTML_Processor for structural queries, subtree walks, or normalized serialization."
+    },
+    {
+      "location": "WP_HTML_Processor::set_attribute() documentation",
+      "problem": "The HTML Processor docs document set_attribute() but do not repeat the Tag Processor's attribute-placement contract, especially that newly added attributes sort by name and existing attributes keep their position.",
+      "suggestion": "Mirror or link the full attribute placement rules from WP_HTML_Tag_Processor::set_attribute() in the HTML Processor method docs, since callers using either processor need the same ordering contract."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor 'Building markup from a template' and set_modifiable_text() examples",
+      "problem": "The method docs say to always check set_modifiable_text()'s return value, while the template-building example omits that check. The successful trials copied the unchecked form, which is fine for this fixed template but weaker as general guidance.",
+      "suggestion": "Align the examples with the contract: either check the return value in template examples, or state that after matching a known #text placeholder in a literal template failure is unexpected, while dynamic or caller-supplied templates should handle false."
+    }
+  ]
+}

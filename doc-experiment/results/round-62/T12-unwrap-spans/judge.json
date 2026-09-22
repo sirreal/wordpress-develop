@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), a single next_token() walk, get_token_type()/get_tag() to identify SPAN tag tokens, and serialize_token() to build normalized rewritten output. All called methods are documented in the rendered files and no _doing_it_wrong records occurred. Minor issue: the raw-input fallback on create_fragment() failure or get_last_error() would not satisfy a normalized rewritten-output contract if reached."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API surface throughout, including documented WP_HTML_Processor::normalize(). The main loop is idiomatic and matches the serialize_token() rewrite pattern. The weakness is the fallback: normalize($html) after a token rewrite is specifically warned about because it restarts from the original bytes and would discard skipped SPAN tokens if that branch were reached."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Uses the intended HTML Processor fragment parser and the canonical token-serialization rewrite pattern. All methods are documented, and no misuse was reported. Minor edge-policy gap: it returns raw input if processor creation fails and never checks get_last_error(), so unsupported-parser aborts could produce a partial rewrite rather than an explicit fallback."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 7/7. The docs appear to have succeeded because the HTML Processor overview explicitly says to use it for structure and normalized output, create_fragment() matches body-fragment input, next_token() explains that walks see text plus opening and closing tokens including virtual closers, and serialize_token() directly documents the needed rewrite pattern: concatenate serialized tokens, skip tokens to remove them, and skip closers too. The serialize_token() section’s analogous SUP-removal example likely prevented the common mistakes of using get_updated_html(), using next_tag() without closers, or rebuilding text manually. Near-misses were limited to fallback semantics: candidates still wrote raw-input or normalize-original fallbacks, even though the docs warn those discard the accumulated rewrite. The unclosed-span case was handled because an unclosed element is virtually closed and serialized; it is not the same as a truncated/incomplete syntax token.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite-loop guidance",
+      "problem": "The docs warn that raw input and normalize($html) discard a rewrite, but candidates still used those as fallbacks in string-returning rewrite functions.",
+      "suggestion": "Add a short contract-oriented note: for functions promising normalized rewritten HTML, returning raw input or normalize($html) is not equivalent to returning the rewrite; choose accumulated best-effort output, null/empty failure, or another explicit documented policy."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and paused_at_incomplete_token()",
+      "problem": "The distinction between an unclosed element that receives a virtual closer and a truly incomplete trailing syntax token is easy to miss.",
+      "suggestion": "Add a compact example contrasting '<p><em>x' with '<p><em', showing virtual closer serialization, paused_at_incomplete_token(), and omitted trailing incomplete syntax."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() / get_token_type()",
+      "problem": "Element-token filtering depends on knowing that tag closers are also '#tag' tokens and get_tag() returns the same tag name for opener and closer.",
+      "suggestion": "State explicitly in get_tag() or get_token_type() that opener and closer tag tokens both report '#tag' and the tag name; use is_tag_closer() only when the opener/closer distinction matters."
+    }
+  ]
+}

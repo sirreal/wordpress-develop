@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 78,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used structural depth with next_token(). All API method names it called are present in the rendered docs. The main adherence failure is pattern-level: it scans past the list opener without bookmarking it, then calls set_attribute() on the boundary/closer token, where the API returns false. It also checks get_last_error() but not paused_at_incomplete_token()."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Uses the documented processor, opener bookmark, bounded token walk, depth plus opener checks for direct children, paused/error clean-scan guard, seek back, set_attribute(), get_updated_html(), and release_bookmark(). No undocumented API usage observed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 66,
+      "hallucinated_methods": [],
+      "notes": "All called method names are documented, but seek('section-start-not-used') is an invalid use of the bookmark API because that bookmark was never created. That produced PHP warnings and crashed every case that reached the edit path. The traversal logic otherwise uses the right processor, depth, token type checks, and clean-scan checks, but it avoids the documented bookmark/seek pattern and ignores the failed seek."
+    }
+  ],
+  "failure_analysis": "No trial chose the wrong processor; the processor-selection docs worked well here. Failed cases simple-ul, ol, existing-count-overwritten, omitted-li-closers, and nested-list-counts-direct-children share one misconception in trial-1: after walking the list contents, the candidate assumed it could still edit the list opener. In reality the cursor is on the list closer or boundary token, so set_attribute() returns false. The relevant docs are HTML Processor > Usage > Recipe: scan a region before editing its opener, which says to bookmark the opener, walk forward, seek back, then edit, and set_attribute(), which says it updates the currently matched tag. Trial-3 failed the same cases for a related bookmark misconception: it called seek() with a made-up bookmark name and no prior set_bookmark(), which the docs do not make dangerous enough and the implementation surfaces as PHP warnings. Failed cases incomplete-token-after-closed-list and unsupported-after-closed-list show the same issue under trailing bad input: the first list was fully scanned before the trailing incomplete/unsupported markup, so a bookmarked opener can still be edited. Trial-1 never returned to the opener, and trial-3 crashed on the unknown bookmark before its re-scan fallback could run. The inside-list incomplete/unsupported cases passed because the docs' paused_at_incomplete_token() and get_last_error() guidance was clear enough for the candidates to fail closed when the list scan itself was not clean.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::set_attribute() docblock",
+      "problem": "It says the method updates the currently matched tag, but does not spell out the common failure mode after a subtree walk: the current token is no longer the opener the caller originally matched.",
+      "suggestion": "Add an explicit note that set_attribute() only applies to the currently matched real opening tag and returns false on closers, text/comment tokens, virtual tokens, or after the cursor has advanced past the target. Cross-reference the bookmark/seek pattern for edits based on later-scanned content."
+    },
+    {
+      "location": "WP_HTML_Processor::seek() docblock",
+      "problem": "The precondition that the bookmark must already exist is not explicit enough, and the current behavior for unknown bookmarks can emit PHP warnings before returning false.",
+      "suggestion": "Document that callers must only seek to names previously created by set_bookmark(), should check set_bookmark()/has_bookmark()/seek() results, and that unknown bookmark names are invalid rather than a harmless no-op."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() docblocks",
+      "problem": "The docs explain bounded walks, but candidates still missed that when the loop exits the cursor is positioned at the boundary token, not restored to the opener.",
+      "suggestion": "Add a short post-loop note: after a depth-bounded walk, any mutation targets the current boundary token unless the caller saved and seeks back to a bookmark."
+    },
+    {
+      "location": "HTML Processor overview recipe: scan a region before editing its opener",
+      "problem": "The recipe is directionally correct, but one example may not be enough to make computed-subtree edits stick for weaker models.",
+      "suggestion": "Add a generic non-list-specific example that computes a fact about an element's direct children, checks scan completion, seeks back to the opener, and writes an attribute."
+    },
+    {
+      "location": "paused_at_incomplete_token() / bounded-scan guidance",
+      "problem": "The docs distinguish truncation and parser errors, but could be clearer about subtree-local completion versus whole-document completion.",
+      "suggestion": "State that for mutations scoped to a completed bounded region, callers can stop at the depth boundary and check whether that scan encountered truncation or parser errors; they only need to continue through trailing markup when their own contract requires whole-document cleanliness."
+    }
+  ]
+}

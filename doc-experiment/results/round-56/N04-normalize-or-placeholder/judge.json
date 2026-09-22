@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor path: `WP_HTML_Processor::create_fragment()` followed immediately by `serialize()`. Both methods are documented, and the docs explicitly allow `serialize()` on a fresh processor for normalized fragment output. Strict `null` handling preserves valid empty-string output. All tests passed; unsupported-case `trigger_error` records are the documented null-return path from serialization, not `_doing_it_wrong` misuse."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical pattern: `WP_HTML_Processor::normalize( $html )` with a strict `null` fallback. Correct processor, documented API, idiomatic use, and graceful handling of unsupported markup and empty fragments. All tests passed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same canonical implementation as trial 2. Uses the documented `normalize()` body-fragment API and treats only `null` as failure, so `''` remains a valid normalized result. No undocumented calls or `_doing_it_wrong` records. All tests passed."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The rendered docs did the important things well: the processor-selection guidance says to use `WP_HTML_Processor` for normalized output; the `normalize()` section says it normalizes BODY-context fragments and returns `string|null`; the HTML Support section says unsupported markup causes output methods such as `serialize()` and `normalize()` to return `null`; and the normalization examples cover omitted tags, table insertion, attribute quoting, entity/text re-encoding, and trailing incomplete syntax. The near misses are mostly clarity issues: the docs rely on the `string|null` type to imply that an empty string is a successful normalization, and they do not clearly say that unsupported serialization may also emit an `E_USER_WARNING` while still returning `null`. The unsupported anchor-misnesting case is also only indirectly covered by the broad adoption/fostering wording, though the candidates avoided that ambiguity by using the generic null fallback contract.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::normalize()` return documentation",
+      "problem": "The return type says `string|null`, but it does not explicitly call out that `''` is a valid successful normalization and only `null` means failure.",
+      "suggestion": "Add a short return-contract note: callers should use a strict `null` check or `??` fallback, not truthiness, because empty input normalizes to an empty string."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` and `WP_HTML_Processor::serialize()` docblocks",
+      "problem": "Unsupported input returns `null`, but execution also records a warning from `serialize()` when the parser has bailed. The docs do not mention this side effect.",
+      "suggestion": "Document that serialization failure after an unsupported-parser abort may trigger a warning while returning `null`, and distinguish that from API misuse such as calling `serialize()` after scanning has begun."
+    },
+    {
+      "location": "`WP_HTML_Processor::normalize()` usage guidance",
+      "problem": "The docs describe `normalize()` and `create_fragment()->serialize()` separately, but the preferred shorthand for ordinary BODY fragments is not stated as directly as it could be.",
+      "suggestion": "Add a sentence such as: for an unchanged BODY-context fragment, prefer `WP_HTML_Processor::normalize( $html )`; use `create_fragment()` plus `serialize()` when a custom context or processor instance is needed."
+    },
+    {
+      "location": "HTML Processor unsupported-markup overview",
+      "problem": "The unsupported categories are accurate but broad. Cases involving adoption/active-formatting behavior, such as nested anchors or difficult formatting misnesting, are not equally concrete.",
+      "suggestion": "Add one or two general examples of unsupported adoption/active-formatting constructs and state that normalization callers should rely on the `null` output contract rather than trying to pre-detect every unsupported shape."
+    }
+  ]
+}

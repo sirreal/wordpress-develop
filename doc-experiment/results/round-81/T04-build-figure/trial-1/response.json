@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template with placeholder attribute values and placeholder figcaption text, then updated the `<img>` opener with `set_attribute()` and replaced the text node with `set_modifiable_text()`. This preserves the required `src` then `alt` order and lets the documented HTML API handle all necessary encoding.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment structurally, then walks all tokens with `next_token()`, appending ordinary `#text` token content via `get_modifiable_text()` and additionally appending `get_modifiable_text()` from opening `TITLE` and `TEXTAREA` tags, whose contents are carried on the element token itself. It then truncates by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8` encoding.",
+  "confidence": 86
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in a BODY context (default). It iterates through all tokens with next_token(), collects text only from #text token types using get_modifiable_text() (which automatically decodes character references and is already UTF-8), and skips all other tokens including contents of SCRIPT, STYLE, TITLE, TEXTAREA and other special elements (whose text is not part of separate #text nodes). Finally, it truncates the accumulated text to the requested number of Unicode code points using mb_substr() with explicit UTF-8 encoding, which handles multi-byte characters correctly.",
+  "confidence": 92
+}

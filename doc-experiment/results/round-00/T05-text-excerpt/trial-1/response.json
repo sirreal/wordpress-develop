@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in body context, then iterated tokens with `next_token()`. For each token, I checked `get_token_type()` for `#text` to identify true text nodes (which excludes SCRIPT, STYLE, and other non-text content). I collected the decoded text content via `get_modifiable_text()`, which returns character references already decoded for text nodes. Finally, I used `mb_strlen` and `mb_substr` with UTF-8 encoding to count Unicode code points and truncate at the exact codepoint boundary without cutting multi-byte characters.",
+  "confidence": 88
+}

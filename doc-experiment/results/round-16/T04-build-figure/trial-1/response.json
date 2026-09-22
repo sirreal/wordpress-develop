@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Used WP_HTML_Tag_Processor with a literal template to safely construct the figure fragment. The template includes empty attribute placeholders (required to preserve attribute order per documentation) and placeholder text in figcaption. After creating the processor, I found the img tag and set src/alt attributes using set_attribute() for proper encoding, then found the figcaption and replaced its text node with set_modifiable_text(). Finally, get_updated_html() returns the safely-encoded result with all values properly escaped.",
+  "confidence": 92
+}

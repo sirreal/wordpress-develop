@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat, byte-preserving scan of every tag with `next_tag()`. For each matched opener, it calls the documented `get_attribute_names_with_prefix( 'data-track-' )` to find only attributes whose names begin with that exact prefix, removes each one with `remove_attribute()`, and returns the result via `get_updated_html()`.",
+  "confidence": 96
+}

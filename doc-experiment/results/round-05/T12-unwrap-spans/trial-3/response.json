@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment token by token. For each SPAN tag encountered (whether opening or closing), it skips serialization via `continue`. All other tokens are serialized using `serialize_token()`, which produces normalized HTML. This approach preserves the contents of removed SPAN elements while discarding their attributes and tags, and the serialization automatically normalizes the output with proper quoting, case handling, and encoding as documented in the WP_HTML_Processor::normalize() method.",
+  "confidence": 92
+}

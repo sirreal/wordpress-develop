@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then iterates through all tags using next_tag(). It checks each tag against a regex pattern to identify headings (H1-H6), extracting the level from the tag name. For each heading found, it uses next_token() to walk through child tokens while tracking depth with get_current_depth(). Text nodes are collected using get_modifiable_text(), which automatically decodes character references. The inner loop exits when depth decreases below the heading's depth, indicating the heading has closed.",
+  "confidence": 45
+}

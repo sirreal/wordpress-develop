@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-context fragment, walks every token with `next_token()`, skips any token whose tag is `SPAN` so both span openers and closers are removed, and concatenates `serialize_token()` for everything else. That produces the normalized serialization directly, including proper closing of optional tags, canonical quoting, and normalized text encoding.",
+  "confidence": 86
+}

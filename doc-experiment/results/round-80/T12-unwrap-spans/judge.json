@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_tag(), and serialize_token(). This follows the documented token-rewrite pattern and the serialize_token() wrapper-removal example closely. Minor edge-policy weakness: on processor creation failure it falls back to normalize/raw input, which is documented API but would not preserve the unwrap contract if it ever mattered."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API use. The get_tag()-only SPAN test is idiomatic here and matches the serialize_token() docs' remove-element example, because get_tag() is null for non-tags and matches both openers and closers. Minor weakness: the get_last_error() branch returns the same accumulated output as the success path, so it does not actually implement the docs' recommended explicit unsupported-markup policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "Correct main loop and documented methods throughout. The main rewrite is idiomatic, but the post-loop error path uses normalize($html) or raw input after already emitting a token rewrite. The serialize_token() docs explicitly warn that this discards skipped/replaced tokens; in unsupported-markup cases it can reintroduce spans or return non-normalized raw input."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, so there are no failed hidden cases to diagnose. The docs did especially well at steering subjects to the HTML Processor: the Tag Processor overview says to use WP_HTML_Processor for normalized output, missing/implied closing tags, and structure-aware walks. The HTML Processor 'Recipe: rewrite while serializing tokens' and serialize_token() section were decisive: they explain that concatenating serialize_token() while walking every token reconstructs normalized output and that skipping both opener and closer removes a wrapper while preserving contents. The next_token() docs also explain why the unclosed-span case works: the HTML Processor visits closing tokens for elements left unclosed at end of input. Near-misses were concentrated around error policy, not the core rewrite. Trial 1 did not check get_last_error() after the loop. Trial 2 checked it but did not change behavior. Trial 3 used the exact normalize-after-rewrite anti-pattern in the unsupported-markup path. These did not affect the supplied tests, but they show that the fallback contract after a token-by-token rewrite is still easy to blur.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock",
+      "problem": "The method explains how to inspect parser failure, but not enough in the local docblock about how this interacts with accumulated token-serialization rewrites.",
+      "suggestion": "Add a short example showing a serialize_token() loop followed by get_last_error(), with distinct policies such as returning null, returning best-effort accumulated output, or rejecting the rewrite. State that a check which returns the same value on both branches is only a best-effort policy, not validation."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock / rewrite recipe",
+      "problem": "The anti-pattern warning against normalize($html) after a rewrite exists, but trial 3 still used it in the error branch, suggesting the warning is easy to treat as only a normal-success-path concern.",
+      "suggestion": "Repeat the warning directly in the post-loop error-handling paragraph: after any emitted skip/wrap/replacement, normalize($html) and raw input discard the accumulated rewrite even when used as an error fallback."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() docblock",
+      "problem": "Subjects chose inconsistent string fallbacks for a null factory result, including raw input and normalize($html). The docs say null means no processor was created, but do not give guidance for string-returning filters that promise normalized rewritten output.",
+      "suggestion": "Document the exact conditions under which the default BODY/UTF-8 factory can return null, and add guidance that callers should choose a fallback matching their public contract, because normalize/raw input will not include token-level rewrites."
+    }
+  ]
+}

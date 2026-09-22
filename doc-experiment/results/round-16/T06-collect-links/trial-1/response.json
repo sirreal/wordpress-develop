@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, iterates through A tags with next_tag(), reads the decoded href attribute with get_attribute(), and collects decoded text content from inside each element using next_token() with depth tracking (the documented pattern from the HTML Processor documentation). Text nodes are concatenated using get_modifiable_text() which returns already-decoded text.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` as a token stream over the fragment, appending decoded text from `#text` tokens and from the opening `TITLE` and `TEXTAREA` tokens, whose text is carried on the element token itself per the documentation. It ignores comments, doctypes, and raw-text elements like `SCRIPT` and `STYLE`, then truncates the final UTF-8 string by Unicode code points with `mb_strlen()` and `mb_substr()` as the docs recommend.",
+  "confidence": 90
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment with BODY context (default). It iterates through all A tags using next_tag() with tag_name 'A', skips those without href attributes, then collects text content by walking tokens while the depth remains inside the A element (depth > opener depth). Text tokens are accumulated with get_modifiable_text(). The href attribute value is automatically decoded by get_attribute().",
+  "confidence": 72
+}

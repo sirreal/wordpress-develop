@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor::create_fragment() to create a processor for the HTML fragment, then iterates through every token with next_token(). For each text node (#text token type), it checks if the decoded text (via get_modifiable_text()) contains the keyword using a case-sensitive substring match (strpos). If found, it wraps the serialized token output in <mark> tags; otherwise it outputs the token as-is. All other token types (tags, comments, etc.) are serialized unchanged. The serialize_token() method handles normalization of the output automatically, ensuring the result is valid normalized HTML with properly closed tags.",
+  "confidence": 75
+}

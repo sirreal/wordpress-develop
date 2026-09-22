@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to create a fragment parser for the HTML input. It iterates through all IMG tags using next_tag(), checks if the IMG's breadcrumbs array contains 'FIGURE' (indicating it's nested inside a figure at any depth), retrieves the decoded src attribute value using get_attribute(), and skips IMG tags without a src attribute or with an empty src value. The decoded src values are collected in document order and returned as a numeric array.",
+  "confidence": 75
+}

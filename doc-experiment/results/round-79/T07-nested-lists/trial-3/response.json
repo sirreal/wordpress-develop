@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then walked tokens with `next_token()` while tracking the current nesting of `UL`/`OL` elements. When an opening list tag appeared while another list was already open, I added the `nested-list` class via `add_class()`, and returned the final bytes with `get_updated_html()` so untouched content stays byte-for-byte preserved.",
+  "confidence": 92
+}

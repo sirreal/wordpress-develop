@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation creates a template figure fragment with placeholder values, then uses WP_HTML_Tag_Processor to find and populate the img and figcaption elements. For the img tag, set_attribute() handles proper encoding of the src and alt attribute values. For the figcaption text content, next_token() advances to the text node inside the element, and set_modifiable_text() handles encoding the caption text. All values are automatically HTML-encoded by the API, and get_updated_html() returns the final string.",
+  "confidence": 70
+}

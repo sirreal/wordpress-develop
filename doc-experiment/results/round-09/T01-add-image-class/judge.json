@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Canonical solution. Correct processor choice: Tag Processor for flat, byte-exact attribute/class edits, exactly as the 'Which processor should I use?' section prescribes (no structure needed). Uses next_tag( array( 'tag_name' => 'img' ) ) — the documented array query form from the query table (lines 55-61) — plus add_class() and get_updated_html(), all three documented and used idiomatically. Loop-while-next_tag is the documented finding-tags idiom. Edge cases all handled by the API without extra code: uppercase IMG (case-insensitive match, line 937), comment-ignored and unquoted attributes pass, incomplete-tag-at-end pauses (line 941). Passed 8/8 hidden cases, no _doing_it_wrong. Explanation is accurate, though it slightly overclaims add_class 'creates' vs 'appends' nuance — harmless and correct. Confidence 95 well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trial-1. Same canonical Tag Processor idiom, all methods documented, 8/8 pass, no _doing_it_wrong. Explanation correctly cites byte-exact preservation, automatic case-insensitive matching in next_tag, add_class not removing/reordering existing classes, and comments being ignored. All claims verified against docs (lines 22, 937-939, 328). Confidence 95 calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to trials 1 and 2. Same canonical idiom and outcome: 8/8 pass, no hallucinated API, no _doing_it_wrong. Explanation is the most thorough of the three and entirely accurate (case-insensitive 'tag_name' matching, append-not-reorder class semantics, byte-for-byte preservation, comment content ignored, get_updated_html applies enqueued changes). Confidence 92 calibrated."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three candidates are byte-identical and pass all 8 hidden cases, including every edge case the task targets. This is the \"smoke\" test (difficulty: basic) and the documentation supported it completely. What the docs did well, mapped to the cases that could have tripped a subject:\n\n- uppercase-tag (<IMG SRC>): next_tag() docstring (lines 937-939) states tag-name matching is ASCII case-insensitive AND that original source casing is preserved in output. Subjects relied on this without writing any normalization. Correct.\n- inside-comment-ignored: next_tag() \"What this matches\" bullet (line 939) explicitly says tag-like text inside comments is text, not tags, and is never matched. All three explanations cite this; none attempted manual comment-skipping. Correct.\n- incomplete-tag-at-end (<img src=\"a.jpg with no closer): next_tag() bullet (line 941) and the \"When matching fails\" section (lines 92-119) state a truncated tag pauses the processor and is never matched/modified, so the trailing partial IMG is preserved untouched. Expected output preserves it byte-for-byte; candidates pass without special handling. Correct.\n- existing-classes: add_class()'s documented behavior plus the \"Modifying CSS classes\" examples (lines 184-217) show add_class appends to existing classes preserving whitespace and order; the \"Design and limitations\" note (line 328) reinforces order/whitespace preservation. Output 'photo large wp-image' matches. Correct.\n- unquoted-attributes: the byte-exact preservation contract in get_updated_html() (line 2297: every untouched byte returned exactly) means src=a.jpg width=10 survive unquoted while only the inserted class attribute is double-quoted. Note the doc caveat at line 328 — attribute UPDATES become double-quoted — correctly does NOT apply here because src/width are never updated, only the new class is added. Candidates pass.\n- no-images / simple / multiple: trivially covered by the loop-while-next_tag idiom shown in the Usage and Custom-queries sections.\n\nNear-misses in the explanations (not affecting scores, since adherence judges API usage and all is correct): trial-1 says add_class \"handles both cases where the class attribute doesn't exist (creates it) and where it does (appends)\" — accurate. All three correctly attribute comment-skipping to next_tag rather than inventing a guard. No explanation overreached into undocumented territory. The processor-choice reasoning in trials 2 and 3 (\"flat, position-based work\", \"byte-exact preservation\") quotes the decision guidance almost verbatim, indicating the \"Which processor should I use?\" section successfully steered subjects to the Tag Processor over the heavier HTML Processor.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor :: get_updated_html() and the 'Design and limitations' paragraph (line ~328)",
+      "problem": "The byte-exact preservation contract and the 'attribute updates become double-quoted' caveat live in two distant places. A reader could wrongly infer that ADDING a class re-quotes or reflows neighboring unquoted attributes (the unquoted-attributes case). The docs do not state in one place that untouched attributes — including unquoted/single-quoted ones not being edited — are left exactly as written while only the specific attribute being created/updated is emitted double-quoted.",
+      "suggestion": "In get_updated_html() (or the add_class/set_attribute docblocks), add one sentence: 'Only the attribute or class being created or updated is re-emitted (always double-quoted); all other attributes on the same tag, including unquoted or single-quoted ones, are preserved byte-for-byte.' This generalizes beyond this task and prevents over-cautious manual quoting."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor :: next_tag() — query parameter documentation",
+      "problem": "The two equivalent query forms (string shorthand 'img' vs array array('tag_name'=>'img')) are shown side-by-side in the query table but the prose docblock for the $query parameter only describes the array keys. A subject must cross-reference the Overview table to learn the shorthand is exactly equivalent. All three subjects chose the more verbose array form, suggesting the shorthand's equivalence wasn't reinforced at the method level.",
+      "suggestion": "In the next_tag() $query parameter description, add: 'Passing a bare string is shorthand for array( \"tag_name\" => $string ); the two are identical.' This is a general clarity improvement, not task-specific."
+    }
+  ]
+}

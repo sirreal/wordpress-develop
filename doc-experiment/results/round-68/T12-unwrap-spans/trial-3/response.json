@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor's fragment parsing and token-by-token serialization: `create_fragment()` to parse body-fragment HTML, `next_token()` and `get_token_name()` to skip every `SPAN` opener and closer, and `serialize_token()` to emit normalized HTML for all other tokens. This preserves surrounding structure while removing spans and their attributes.",
+  "confidence": 92
+}

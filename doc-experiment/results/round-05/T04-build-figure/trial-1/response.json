@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor with a template approach: starts with a template containing the exact HTML structure and placeholder text, then uses set_attribute() to set src and alt attributes (which handles escaping), and set_modifiable_text() to replace the figcaption placeholder with the caption text (which also handles escaping). Finally returns the modified HTML via get_updated_html().",
+  "confidence": 92
+}

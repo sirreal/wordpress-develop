@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal template so the `img` attributes stay in the required `src` then `alt` order, then used `WP_HTML_Tag_Processor::set_attribute()` to safely encode the unescaped `src` and `alt` values and `set_modifiable_text()` to replace the caption placeholder text with encoded caption content. The final HTML is returned with `get_updated_html()`.",
+  "confidence": 96
+}

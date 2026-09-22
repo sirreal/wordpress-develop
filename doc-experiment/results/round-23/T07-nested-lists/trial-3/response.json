@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on document structure. It first does a read-only scan with `next_tag()` and aborts back to the original HTML if `get_last_error()` reports unsupported markup, then rescans and for each `UL` or `OL` opener checks `get_breadcrumbs()` for any `UL` or `OL` ancestor and applies `add_class( 'nested-list' )`; the final result is returned with `get_updated_html()` so untouched bytes stay unchanged.",
+  "confidence": 87
+}

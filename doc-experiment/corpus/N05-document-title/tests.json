@@ -1,0 +1,62 @@
+{
+    "id": "N05-document-title",
+    "title": "Extract the document title",
+    "difficulty": "intermediate",
+    "split": "holdout",
+    "role": "core",
+    "commonness": "high",
+    "concept": "full-document",
+    "processor": "html",
+    "function": "get_document_title",
+    "cases": [
+        {
+            "id": "standard-document",
+            "args": [
+                "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>My Site &mdash; Home</title></head><body><p>x</p></body></html>"
+            ],
+            "expected": "My Site — Home"
+        },
+        {
+            "id": "entities-decoded",
+            "args": [
+                "<!DOCTYPE html><html><head><title>Fish &amp; Chips</title></head><body></body></html>"
+            ],
+            "expected": "Fish & Chips"
+        },
+        {
+            "id": "no-title-null",
+            "args": [
+                "<!DOCTYPE html><html><head></head><body><h1>not a title</h1></body></html>"
+            ],
+            "expected": null
+        },
+        {
+            "id": "empty-title",
+            "args": [
+                "<!DOCTYPE html><html><head><title></title></head><body></body></html>"
+            ],
+            "expected": ""
+        },
+        {
+            "id": "no-doctype",
+            "args": [
+                "<html><head><title>Bare</title></head><body></body></html>"
+            ],
+            "expected": "Bare"
+        },
+        {
+            "id": "attributes-on-elements",
+            "args": [
+                "<!DOCTYPE html><html lang=\"en\"><head data-x=\"1\"><title>With Attrs</title></head><body class=\"page\"></body></html>"
+            ],
+            "expected": "With Attrs"
+        },
+        {
+            "id": "minimal-document",
+            "args": [
+                "<title>Implied structure</title><p>body content</p>"
+            ],
+            "expected": "Implied structure"
+        }
+    ]
+}

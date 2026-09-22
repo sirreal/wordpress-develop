@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` scan-and-bookmark flow: one forward pass to remember the last `H2` opener with `set_bookmark()`, then `seek()` back to that bookmark and `add_class()` to enqueue `final-section` before reading the result with `get_updated_html()`. If no `H2` is found, the function returns the input unchanged.",
+  "confidence": 95
+}

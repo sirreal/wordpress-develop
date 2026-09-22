@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then walks through every token with next_token(). For each token, it checks if the current tag is a SPAN element; if so, it skips serializing it (which skips both the opening and closing tags). All other tokens are serialized with serialize_token() and concatenated. This automatically removes SPAN elements while preserving their contents and producing normalized output because serialize_token() handles normalization internally.",
+  "confidence": 72
+}

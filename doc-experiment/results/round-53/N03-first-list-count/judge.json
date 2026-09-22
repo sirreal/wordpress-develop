@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for structure-aware fragment parsing. All HTML API methods used are present in the rendered docs. The implementation follows the documented depth-bounded token walk, bookmark/seek/edit/get_updated_html pattern, releases the bookmark, and checks both paused_at_incomplete_token() and get_last_error() before mutating."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all called HTML API methods are documented. The depth-bounded next_token() scan, bookmark, seek, set_attribute(), and get_updated_html() usage matches the docs. Minor idiom deduction: it leaves the bookmark unreleased even though the docs say to release bookmarks when no longer needed."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment() and documented methods only. The implementation follows the documented pattern: find opener, record depth, scan tokens until depth drops, count only direct child opener tags, reject incomplete/unsupported scans, seek back to the bookmark, set the attribute, release the bookmark, and return get_updated_html()."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 11 hidden cases, with no _doing_it_wrong records. The docs did well on the exact concepts this task needed: the HTML Processor overview directs structural tasks to WP_HTML_Processor rather than WP_HTML_Tag_Processor; next_tag() documents how to find the first of several tag names by scanning any tag and branching on get_tag(); the “test subtree membership and direct children” recipe gives the direct-child opener checks used by the candidates; get_current_depth() explains the >= subtree guard and the < depth exit condition; and the scan-before-edit recipe tells readers to bookmark the opener, walk forward, check paused_at_incomplete_token() and get_last_error(), seek back, and then edit. The edge cases around incomplete or unsupported markup were also handled because the docs distinguish structural boundary detection from source completeness. A near-miss is that the paused_at_incomplete_token() method docs say to drain all tokens to answer whether the input ended mid-token; for this region-scoped task, draining past the closed list would incorrectly reject incomplete syntax after the list. The HTML Processor recipes contain the right nuance, but the method-level docs could cross-link that distinction more directly.",
+  "doc_gaps": [
+    {
+      "location": "html-tag-processor.md > paused_at_incomplete_token()",
+      "problem": "The method-level guidance emphasizes draining the whole document before checking for truncation. That is correct for whole-input completeness, but can mislead region-scoped mutations into scanning past the region they actually depend on.",
+      "suggestion": "Add a note or cross-reference: when an HTML Processor mutation depends only on a bounded subtree, check paused_at_incomplete_token() after the bounded walk; drain the rest only if the caller’s contract requires the entire input to be complete."
+    },
+    {
+      "location": "html-processor.md > get_last_error() / unsupported markup overview",
+      "problem": "The docs explain that unsupported markup aborts parsing, but are less explicit that the error is discovered lazily only when scanning reaches that markup.",
+      "suggestion": "Clarify that region-scoped operations may safely apply after a clean bounded scan, even if later unscanned markup might be unsupported; if scanning the required region sets get_last_error(), fall back according to the caller contract."
+    },
+    {
+      "location": "html-processor.md > set_bookmark() / seek()",
+      "problem": "The method-level bookmark example is Tag Processor oriented, while the successful pattern for structural edits lives mostly in the overview recipes.",
+      "suggestion": "Add a short HTML Processor bookmark example showing a generic structural summary: record opener depth, walk the subtree, seek back to the opener, set an attribute, call get_updated_html(), and release the bookmark."
+    }
+  ]
+}

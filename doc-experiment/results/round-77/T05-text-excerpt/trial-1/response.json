@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment in document order, then `next_token()`, `get_token_type()`, `get_modifiable_text()`, and `get_token_name()` to collect only ordinary `#text` nodes plus the opener-carried text from `TITLE` and `TEXTAREA`, excluding `SCRIPT` and `STYLE`. Truncation is done at Unicode code-point boundaries with `mb_strlen()`/`mb_substr()` and a UTF-8 regex fallback.",
+  "confidence": 94
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse and iterate through all tokens in the HTML fragment. For each token, it checks if the tag name is SPAN (case-insensitive matching is handled by get_tag() returning uppercase); if so, it skips both the opening and closing tags by continuing the loop. All other tokens are serialized and accumulated into the output string, which automatically produces normalized HTML (with double-quoted attributes, closed optional tags, etc.) as a side effect of the serialization process.",
+  "confidence": 72
+}

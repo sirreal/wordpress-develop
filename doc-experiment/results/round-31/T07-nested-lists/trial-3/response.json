@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure. It walks all tag openers and closers with `next_tag( array( 'tag_closers' => 'visit' ) )`, tracks the current nesting depth of `UL`/`OL` elements using `get_tag()` and `is_tag_closer()`, adds `nested-list` with `add_class()` only when another list is already open above, and returns the byte-preserving edited result with `get_updated_html()`.",
+  "confidence": 89
+}

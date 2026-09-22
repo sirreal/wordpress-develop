@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to build the figure fragment. It creates a template with the exact required structure, then: (1) finds the img tag and sets src and alt attributes in the required order; (2) walks through tokens to find the text node inside figcaption and replaces the placeholder with the caption using set_modifiable_text(), which handles all HTML encoding automatically; (3) returns the updated HTML. The API handles all attribute encoding and text escaping according to HTML5 spec.",
+  "confidence": 92
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware `WP_HTML_Processor::create_fragment()` path for BODY-fragment text extraction. Every called method is documented. The implementation follows the rendered subtree text recipe exactly: find `H1`, record depth, walk tokens with a `>=` depth guard, collect only `#text` via `get_modifiable_text()`. No `_doing_it_wrong`; passed 8/8 cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same API shape as the reference. Correct processor choice, no undocumented methods, idiomatic token walking, correct decoded text handling through `get_modifiable_text()`, and robust depth-bounded traversal for nested and unclosed markup. No `_doing_it_wrong`; passed 8/8 cases."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and all methods are documented, including `get_token_name()` and `is_tag_closer()`. The core subtree walk is idiomatic and passed 8/8 cases. Small adherence deduction: it additionally includes `SCRIPT`, `STYLE`, `TITLE`, and `TEXTAREA` modifiable text. That behavior is documented, but the task asked for text nodes, and the docs' ordinary subtree recipe says to append only `#text` unless special-element data is intentionally wanted."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the three trials. The docs did well on the exact points this task needed: `html-tag-processor.md` under “Which processor should I use?” says to use the HTML Processor for collecting text content, walking subtrees, and handling missing closing tags; `html-processor.md` under “Recipe: collect DOM-style text from a subtree” gives essentially the required `create_fragment()` + `next_tag()` + depth-bounded `next_token()` + `#text` + `get_modifiable_text()` pattern; `next_token()` explains that text may be split across tokens and that unguarded token walks continue beyond the matched element; `get_current_depth()` explains the `>=` depth guard; and `get_modifiable_text()` states that normal text and TITLE/TEXTAREA text are decoded, so models avoided double-decoding. The only near-miss is Trial 3: the special-element note in `next_token()` / `get_modifiable_text()` led it to include special element DATA inside an H1. That was documented API use and did not affect these hidden cases, but it shows a possible ambiguity between ordinary descendant `#text` extraction and a broader text-content policy that intentionally includes SCRIPT/STYLE/TITLE/TEXTAREA contents.",
+  "doc_gaps": [
+    {
+      "location": "`html-processor.md` / `WP_HTML_Processor::next_token()` and “Recipe: collect DOM-style text from a subtree”",
+      "problem": "The docs correctly warn that SCRIPT, STYLE, TITLE, and TEXTAREA do not expose child `#text` tokens, but the distinction between ordinary descendant text-node extraction and deliberately including special-element DATA is easy to blur. Trial 3 chose the broader policy.",
+      "suggestion": "Name the two policies explicitly: ordinary `#text`-token extraction excludes comments, processing instructions, and special-element DATA; callers that need special-element contents must opt in and should handle raw-vs-decoded sections deliberately."
+    },
+    {
+      "location": "`html-processor.md` / `WP_HTML_Processor::get_current_depth()` and subtree-walk recipe",
+      "problem": "The docs contain the necessary `>=` depth guidance and incomplete-input caveat, but users must combine several passages to infer that read-only extraction may accept EOF-generated virtual closers while mutations may need `paused_at_incomplete_token()` checks.",
+      "suggestion": "Add one sentence to the subtree-walk recipe clarifying that implicit and end-of-input closers are visited for read-only walks, and that callers should separately decide whether truncated input is acceptable."
+    },
+    {
+      "location": "`html-tag-processor.md` / “Tokens and finer-grained processing”",
+      "problem": "The Tag Processor section includes a lexical text-collection example near strong warnings that DOM-style text extraction should use the HTML Processor. It did not mislead these trials, but it remains a plausible source of wrong processor choice in adjacent tasks.",
+      "suggestion": "Label the example as lexical token extraction, not subtree text-content extraction, and cross-link back to the HTML Processor subtree recipe when containment, nesting, or malformed BODY fragments matter."
+    }
+  ]
+}

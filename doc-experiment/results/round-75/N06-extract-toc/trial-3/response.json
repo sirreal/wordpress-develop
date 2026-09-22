@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then walked tokens with next_token() and collected only ordinary #text tokens while tracking heading subtree depth via get_current_depth(). This keeps markup inside headings out of the result while preserving document order and empty headings.",
+  "confidence": 94
+}

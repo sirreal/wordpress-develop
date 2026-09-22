@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, respecting how browsers parse HTML (handling optional closing tags, invalid nesting, etc.). It iterates through IMG tags using next_tag('IMG'), checks the namespace to exclude SVG image elements, and collects decoded src attribute values using get_attribute(). The documentation confirms get_attribute() returns decoded values, and returns null for missing attributes or true for boolean attributes, which are filtered out appropriately.",
+  "confidence": 85
+}

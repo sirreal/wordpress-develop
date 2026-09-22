@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment, finds the first H1 tag using next_tag(), then walks through all tokens inside that element using next_token(). It collects text from all #text nodes at any nesting depth within the H1 by checking the current depth, which automatically handles nested elements like `<h1>A <em>B</em> C</h1>`. The get_modifiable_text() method returns character references already decoded, meeting the requirement for `&amp;` to become `&`. When the depth drops below the H1's opening depth, the loop exits, having collected only the H1's text content.",
+  "confidence": 92
+}

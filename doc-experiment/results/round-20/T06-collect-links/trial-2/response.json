@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, `next_tag( 'A' )` plus `get_attribute( 'href' )` to find only anchor openers with string-valued `href` attributes, and then a depth-bounded `next_token()` walk with `get_current_depth()`, `get_token_type()`, `is_tag_closer()`, and `get_modifiable_text()` to concatenate decoded text content inside each link in document order.",
+  "confidence": 84
+}

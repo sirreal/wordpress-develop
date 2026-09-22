@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Tag Processor: correct choice for flat byte-exact attribute editing (docs lines 22, 81). Walks with bare next_tag() then filters via get_tag()==='A' and continue. All methods documented (next_tag, get_tag, get_attribute, set_attribute, get_updated_html); no _doing_it_wrong/trigger_error. Edge cases handled correctly: get_attribute() !== null treats href=\"\" and bare <a href> as present, skips name-only anchors; set_attribute overwrites existing target. 8/8 pass. Inline comment 'could be \"\", true, or a string value' is accurate per docs lines 89-90. Slightly less idiomatic than passing the tag query directly into next_tag (the docs' primary idiom), but the bare-walk-plus-get_tag pattern is itself documented in the 'Custom queries' section, so this is a stylistic nit, not a deviation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Most idiomatic of the three. Uses next_tag('A') string shorthand (documented lines 57-59), matching reference.php exactly. get_attribute('href') !== null guard correctly captures href=\"\", bare href, and uppercase HREF (tag/attr matching is ASCII case-insensitive per next_tag docs), and skips name-only anchors; set_attribute overwrites existing target. Reads result with get_updated_html(). Explanation accurately restates the null/true/empty-string semantics from the get_attribute docblock. 8/8 pass, no misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses next_tag(array('tag_name'=>'A')) array form (documented line 58). All methods documented; 8/8 pass, no _doing_it_wrong/trigger_error. Code is correct and idiomatic. Deduction is for the explanatory comment/prose, not the code: it claims get_attribute() 'returns \"\" (empty string) if href=\"\" or <a href>'. That conflates valueless boolean attributes (<a href>, which the docs state returns true, lines 89-90 and 1495) with empty-valued attributes (href=\"\", which returns \"\"). The code only tests !== null so the error doesn't surface, but it reflects a real misreading of the boolean-attribute return semantics."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 8 cases (24/24 total), with zero _doing_it_wrong and zero trigger_error records. This is a basic smoke test, and the two markdown files supported it well. Analysis of what the docs did well and the near-misses:\n\nWhat worked: (1) The 'Which processor should I use?' section (tag-processor lines 18-25) plus the 'Supported elements' framing in html-processor (line 81) gave a clear, repeated steer toward the Tag Processor for flat, byte-exact attribute edits. All three subjects chose correctly with high confidence (92-92-92). (2) The get_attribute() return-value contract is documented in two places that reinforce each other: the 'Custom queries' prose (lines 89-90: null when absent, '' when present-but-empty, true for boolean attributes) and the method docblock (lines 1462-1495). Every subject relied on the null-vs-non-null distinction to satisfy the empty-href-counts and valueless-href-counts cases, which is exactly the distinction the task hinges on. (3) The 'Modifying HTML attributes' section (line 156: 'If set_attribute() is called for an existing attribute it will overwrite the existing value... safe to call without knowing if a given attribute exists') directly answered the existing-target-overwritten case. (4) The next_tag() docblock's explicit statements that tag-name matching is ASCII case-insensitive and that tag-like text inside comments is never matched (lines 937-939) covered the uppercase-attribute and inside-comment-ignored cases for free.\n\nNear-miss in an explanation (not in code): Trial 3's comment states get_attribute() returns the empty string for a valueless attribute like <a href>. The docs say a boolean/valueless attribute returns true (lines 90, 1495); only a present-but-empty value (href=\\\"\\\") returns \\\"\\\". The subject's null-only guard made the distinction irrelevant here, so no case failed, but had the task instead required distinguishing href=\\\"\\\" from <a href> (e.g., 'only retarget links whose href is non-empty'), this misconception would have produced a wrong result. The root cause is that the true-vs-'' distinction, though stated, is easy to skim past because the two facts sit in a single dense paragraph (lines 89-90) and the boolean-returns-true fact is the last clause rather than its own emphasized line.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() method docblock",
+      "problem": "The three distinct return values (null = absent, '' = present with empty value, true = present as a boolean/valueless attribute) are correct but spread across two locations and, in the 'Custom queries' prose (lines 89-90), packed into one paragraph where 'returns true for boolean attributes' is the trailing clause. Trial 3 misremembered this and wrote that a valueless attribute like <a href> returns ''. A reader scanning quickly can conflate empty-value with valueless.",
+      "suggestion": "In the get_attribute() docblock add a compact three-row table or three bulleted contrasting examples on the SAME tag shape, e.g. for '<a href> <a href=\"\"> <a>': get_attribute('href') returns true, '', and null respectively. Making the boolean-vs-empty-vs-absent trichotomy a single explicit side-by-side example prevents the common conflation of 'valueless' with 'empty string'."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() Returns line",
+      "problem": "The Returns clause reads 'Value of attribute or null if not available. Boolean attributes return true.' It does not state how to test mere PRESENCE of an attribute regardless of value, which is the single most common need (and exactly this task's core). Subjects had to infer that 'null !== get_attribute(name)' is the presence test.",
+      "suggestion": "Add one sentence to the Returns description: 'To test only whether an attribute is present (with any value, including empty or valueless), check that the return is not null.' This generalizes to any presence-detection task without embedding a specific solution."
+    }
+  ]
+}

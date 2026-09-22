@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Processor::normalize()` fragment serializer to produce normalized HTML for body-context fragments, and returns the required fallback string when normalization is not possible. The function is a thin wrapper around the HTML Processor\u2019s normalization API.",
+  "confidence": 98
+}

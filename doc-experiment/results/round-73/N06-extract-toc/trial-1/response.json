@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with structure awareness, then walked tokens with next_token() and collected only #text tokens that belong inside each heading subtree using get_current_depth(). Headings are detected by get_token_name() / is_tag_closer(), and text is read with get_modifiable_text() so markup is excluded and decoded text is returned as documented.",
+  "confidence": 82
+}

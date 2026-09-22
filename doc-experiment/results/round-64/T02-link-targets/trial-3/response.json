@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only `A` tag openers, checked whether `href` is present with `get_attribute( 'href' )`, and then overwrote `target` with `set_attribute( 'target', '_blank' )`; `get_updated_html()` returns the original document with untouched bytes preserved everywhere else.",
+  "confidence": 93
+}

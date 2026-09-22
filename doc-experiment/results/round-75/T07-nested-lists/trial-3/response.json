@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structure-aware traversal, `next_tag()` to visit only tag openers, `get_tag()` and `get_breadcrumbs()` to detect whether a `UL` or `OL` has any list ancestor, and `add_class()` plus `get_updated_html()` to make a byte-preserving attribute edit on only the matched list openers.",
+  "confidence": 95
+}

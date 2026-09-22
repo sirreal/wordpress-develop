@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then scanned forward with next_tag() to find the first UL or OL opener. From that opener I recorded the current depth, walked tokens with next_token(), counted only LI openers that were direct children at depth + 1, and rejected the result if the scan paused on an incomplete token or the processor reported an error. If the scan completed cleanly, I sought back to the bookmarked opener and used set_attribute() plus get_updated_html() to add data-item-count without disturbing the rest of the HTML.",
+  "confidence": 94
+}

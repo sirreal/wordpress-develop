@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walked tokens with `next_token()` while tracking open `UL`/`OL` elements via `get_token_type()`, `get_tag()`, and `is_tag_closer()`. When an opening list tag was seen while another list was already open, I queued `add_class( 'nested-list' )` on that opener and returned the byte-preserving result with `get_updated_html()`.",
+  "confidence": 94
+}

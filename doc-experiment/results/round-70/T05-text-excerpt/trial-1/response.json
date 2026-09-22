@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and collected only ordinary `#text` tokens plus opener tokens for `TITLE` and `TEXTAREA`, reading their decoded content via `get_modifiable_text()`. I truncated the accumulated UTF-8 text by code points with `mb_strlen()`/`mb_substr()`, with a `preg_split('//u')` fallback if mbstring is unavailable.",
+  "confidence": 91
+}

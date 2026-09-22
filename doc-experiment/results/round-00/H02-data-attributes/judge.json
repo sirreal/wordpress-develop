@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Tag_Processor, the lighter tool fully sufficient here). Uses only documented methods: next_tag('DIV'), get_attribute_names_with_prefix('data-'), get_attribute(). Idiomatic prefix-enumeration loop matching the reference. Correctly handles get_attribute_names_with_prefix's null/empty-array return (explicitly checks both) and relies on get_attribute returning true for boolean attributes, both documented. Passed 6/6. The only edge case it does not explicitly reason about is entity-decoding of attribute values (entities-in-values case), but the docs never guarantee that, so no deduction; it got it right. Self-reported confidence 97 is well-calibrated."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Same correct processor and method set, all documented. Uses next_tag('div') (lowercase query) which works because tag_name is normalized and doc examples themselves pass lowercase like 'img'/'option'. Adds a redundant 'null !== $value' filter before inserting into the result; get_attribute_names_with_prefix only returns names of present attributes, so get_attribute can never return null for them. Harmless and defensive but slightly less idiomatic than the reference, which inserts unconditionally. Correctly handles null/empty return and boolean-true semantics. Passed 6/6."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Essentially identical to the reference implementation. Correct processor, only documented methods (next_tag('DIV'), get_attribute_names_with_prefix, get_attribute). Idiomatic enumeration loop with no redundant filtering. Correctly handles the documented null/empty-array return and the documented string|true|null return of get_attribute including boolean true. Passed 6/6. Explanation accurately describes the documented contracts without overclaiming. Confidence 97 well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three trials passed 6/6 with no _doing_it_wrong or trigger_error records. The documentation was strongly aligned with this task, which explains the uniform success. Specifically: (1) the `get_attribute_names_with_prefix()` section (tag-processor.md line 1450) uses `data-` as its literal worked example and demonstrates exactly the case-insensitive lowercasing behavior the `uppercase-names-lowercased` hidden case probes (`<div data-ENABLED ... DATA-test-id>` => `array('data-enabled','data-test-id')`), plus the `null` return when no tag is matched; (2) the `get_attribute()` section (line 1415) documents the `string|true|null` return signature and shows `get_attribute('enabled') === true` for a boolean attribute, directly supporting the `mixed`/`data-featured` case; (3) the documented null/empty semantics let all three subjects defensively branch correctly for the `no-div` and `no-data-attributes` cases. All three subjects converged on the canonical two-method pattern (enumerate names with prefix, then fetch each value), which is the idiomatic and intended approach.\\n\\nNear-miss worth flagging: the `entities-in-values` case (`data-title=\\\"Fish &amp; Chips\\\"` => `Fish & Chips`) passed, but NOT because the docs guaranteed it. I probed the runtime and confirmed `get_attribute` returns the entity-decoded value. However, the `get_attribute` docblock never states that returned attribute values are entity-decoded; its Returns line only says \\\"Value of attribute or null if not available. Boolean attributes return true.\\\" The only decoding discussion in the docs concerns modifiable TEXT content of TITLE/TEXTAREA/rawtext elements (lines 117-133, 246, 257-259), which is unrelated to attribute values. All three subjects asserted in their explanations that get_attribute returns the \\\"decoded value,\\\" but that claim is inferred from the task description, not grounded in the docs. Had the API not decoded (or had this been a subtler entity), subjects had no documentation basis to predict the result. This is the single weak spot the docs left exposed even though no trial tripped on it.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() (html-tag-processor.md, ### get_attribute())",
+      "problem": "The docblock never states that returned attribute values are HTML-entity-decoded. The Returns line only covers presence/null and boolean true. A reader cannot tell from the docs whether `data-title=\"Fish &amp; Chips\"` yields the raw `Fish &amp; Chips` or the decoded `Fish & Chips`. In this experiment the entities-in-values case passed only because the runtime decodes, not because the docs promised it.",
+      "suggestion": "State explicitly that get_attribute returns the character-reference-decoded value, and add one example line, e.g. `$p->get_attribute('data-title') === 'Fish & Chips'` for input `data-title=\"Fish &amp; Chips\"`. Contrast with set_attribute, which expects/handles encoding, so readers understand the read path decodes while the write path encodes."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() (html-tag-processor.md, next_tag section)",
+      "problem": "Examples pass lowercase tag names ('img', 'option') but the doc never states whether the tag_name query is case-insensitive or whether it must be uppercase, while a sibling note says get_tag() returns the UPPERCASE tag name. Subjects guessed inconsistently: two passed 'DIV', one passed 'div'. Both happen to work, but the docs leave the contract unstated, so a reader could reasonably fear that case matters.",
+      "suggestion": "Add a one-sentence note to the next_tag query documentation that the `tag_name` query is matched case-insensitively (HTML tag names are normalized), so both 'div' and 'DIV' select the same elements. This removes the ambiguity created by get_tag() returning uppercase names."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() (html-tag-processor.md, ### get_attribute_names_with_prefix())",
+      "problem": "The Returns line distinguishes only 'list of attribute names' vs 'null when no tag opener is matched', but does not state what is returned when a tag IS matched yet has no attributes with the prefix. Subjects defensively guarded against both null and empty array, which worked, but the empty-vs-null distinction is left to inference.",
+      "suggestion": "State explicitly that when a tag is matched but no attributes share the prefix, an empty array is returned (reserving null strictly for 'no matched tag'). This lets callers write `foreach ((array) $names as ...)` or a single empty()/null check with confidence rather than guarding two conditions speculatively."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context and `next_token()` to walk tokens in document order. The function appends only ordinary `#text` tokens plus opener-carried text from `TITLE` and `TEXTAREA` via `get_modifiable_text()`, then truncates the decoded UTF-8 result with `mb_substr(..., 'UTF-8')` to preserve code-point boundaries.",
+  "confidence": 93
+}

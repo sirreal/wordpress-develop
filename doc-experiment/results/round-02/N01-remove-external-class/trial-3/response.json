@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through A tags via next_tag(). For each A tag, it iterates through classes using class_list() (which is a documented generator that returns each individual class name), checks for an exact case-sensitive match to \"external\", and if found, removes it using remove_class(). The class_list() method preserves the exact class names from the HTML, enabling case-sensitive comparison. Finally, get_updated_html() returns the modified HTML.",
+  "confidence": 82
+}

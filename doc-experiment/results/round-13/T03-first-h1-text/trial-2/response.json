@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to safely parse the HTML, then WP_HTML_Processor::next_tag('H1') to find the first H1 element. Walks through all tokens inside the H1 using next_token(), collecting text from #text tokens via get_modifiable_text() (which automatically decodes character references like &amp; to &). Returns the accumulated text, or null if no H1 exists. The depth check ensures we stop when exiting the H1 element.",
+  "confidence": 92
+}

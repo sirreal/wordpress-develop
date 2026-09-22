@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal figure template that already contains `src` and `alt` in the required order, then updated those attributes with `set_attribute()` so the API performs the encoding. I filled the figcaption placeholder by scanning to the `#text` token and replacing it with `set_modifiable_text()`, then returned the result with `get_updated_html()`.",
+  "confidence": 96
+}

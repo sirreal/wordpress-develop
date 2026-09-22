@@ -1,0 +1,383 @@
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-76/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  },
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( ! $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_tag = null;\n\twhile ( $processor->next_tag() ) {\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'UL' === $tag_name || 'OL' === $tag_name ) {\n\t\t\t$list_tag = $tag_name;\n\t\t\tbreak;\n\t\t}\n\t}\n\n\tif ( null === $list_tag ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->set_bookmark( 'first-list' ) ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = $processor->get_current_depth();\n\t$item_count = 0;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif (\n\t\t\t'#tag' === $processor->get_token_type() &&\n\t\t\t! $processor->is_tag_closer() &&\n\t\t\t'LI' === $processor->get_tag() &&\n\t\t\t$processor->get_current_depth() === $list_depth + 1\n\t\t) {\n\t\t\t$item_count++;\n\t\t}\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->seek( 'first-list' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then a single token walk with `next_tag()` and `next_token()` plus `get_current_depth()` to locate the first `UL`/`OL`, count only direct `LI` opener children, and reject truncated/unsupported input via `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan I `seek()` back to the bookmarked list opener and apply `set_attribute()` before returning `get_updated_html()`.",
+      "confidence": 91
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = null;\n\t$list_tag   = null;\n\t$count      = 0;\n\t$found_list  = false;\n\t$complete   = false;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( null === $list_depth ) {\n\t\t\tif ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\t$tag_name = $processor->get_tag();\n\t\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\t$list_depth = $processor->get_current_depth();\n\t\t\t$list_tag   = $tag_name;\n\t\t\t$found_list = true;\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( $processor->get_tag() === $list_tag && $processor->get_current_depth() === $list_depth - 1 ) {\n\t\t\t\t$complete = true;\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'LI' === $processor->get_tag() && $processor->get_current_depth() === $list_depth + 1 ) {\n\t\t\t++$count;\n\t\t}\n\t}\n\n\tif ( ! $found_list || ! $complete || $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\t$processor->seek( '1' );\n\tif ( ! $processor->next_tag( array( 'tag_name' => $list_tag, 'match_offset' => 1 ) ) ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->set_attribute( 'data-item-count', (string) $count ) ) {\n\t\treturn $html;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used the HTML Processor’s fragment parser to scan the fragment structurally, record the first UL/OL opener, count only LI opening tags at one depth below that list, and then apply `set_attribute()` on the first list opener before returning `get_updated_html()`. I also reject truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()`, and fall back to the original HTML when the first list is missing or cannot be fully scanned.",
+      "confidence": 83
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag() ) {\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( ! $processor->set_bookmark( 'first-list-opener' ) ) {\n\t\t\treturn $html;\n\t\t}\n\n\t\t$list_depth = $processor->get_current_depth();\n\t\t$count      = 0;\n\t\t$scan_ok    = true;\n\n\t\twhile ( $processor->next_token() ) {\n\t\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( 'LI' === $processor->get_tag() && $processor->get_current_depth() === $list_depth + 1 ) {\n\t\t\t\t$count++;\n\t\t\t}\n\t\t}\n\n\t\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\t\t$scan_ok = false;\n\t\t}\n\n\t\tif ( ! $scan_ok || ! $processor->seek( 'first-list-opener' ) ) {\n\t\t\t$processor->release_bookmark( 'first-list-opener' );\n\t\t\treturn $html;\n\t\t}\n\n\t\t$processor->set_attribute( 'data-item-count', (string) $count );\n\t\t$processor->release_bookmark( 'first-list-opener' );\n\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_tag()` and `next_token()` to find the first `UL` or `OL`, count direct `LI` children by comparing `get_current_depth()`, and guard the edit with `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan, I sought back to a bookmark on the list opener and applied `set_attribute()` before returning `get_updated_html()`.",
+      "confidence": 87
+    },
+    {
+      "id": "N04-normalize-or-placeholder",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction normalize_or_placeholder( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn '<p>Unsupported HTML</p>';\n\t}\n\n\t$normalized = $processor->serialize();\n\tif ( null === $normalized || null !== $processor->get_last_error() ) {\n\t\treturn '<p>Unsupported HTML</p>';\n\t}\n\n\treturn $normalized;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a BODY-context fragment and `serialize()` to obtain the normalized HTML serialization. If the processor cannot be created or later reports unsupported HTML via `get_last_error()`, the function returns the required fallback markup exactly.",
+      "confidence": 98
+    },
+    {
+      "id": "N04-normalize-or-placeholder",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction normalize_or_placeholder( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn '<p>Unsupported HTML</p>';\n\t}\n\n\t$normalized = $processor->serialize();\n\n\tif ( null === $normalized || null !== $processor->get_last_error() ) {\n\t\treturn '<p>Unsupported HTML</p>';\n\t}\n\n\treturn $normalized;\n}\n",
+      "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory for BODY-context fragment parsing and `serialize()` for normalized HTML output. Per the docs, `serialize()` returns `null` on unsupported markup, and I also check `get_last_error()` to fail closed and return the required fallback HTML.",
+      "confidence": 95
+    },
+    {
+      "id": "N04-normalize-or-placeholder",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction normalize_or_placeholder( string $html ): string {\n\t$normalized = WP_HTML_Processor::normalize( $html );\n\n\tif ( null !== $normalized ) {\n\t\treturn $normalized;\n\t}\n\n\treturn '<p>Unsupported HTML</p>';\n}\n",
+      "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize the fragment in BODY context, then returned the exact placeholder when normalization fails and yields `null`.",
+      "confidence": 98
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction extract_toc( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$toc = array();\n\t$current_heading_level = null;\n\t$current_heading_depth  = null;\n\t$current_heading_text   = '';\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\t\t$token_name  = $processor->get_token_name();\n\n\t\tif ( null !== $current_heading_level ) {\n\t\t\tif ( '#text' === $token_type ) {\n\t\t\t\t$current_heading_text .= $processor->get_modifiable_text();\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( '#tag' === $token_type && $processor->is_tag_closer() && $processor->get_current_depth() < $current_heading_depth ) {\n\t\t\t\t$toc[] = array(\n\t\t\t\t\t'level' => $current_heading_level,\n\t\t\t\t\t'text'  => $current_heading_text,\n\t\t\t\t);\n\n\t\t\t\t$current_heading_level = null;\n\t\t\t\t$current_heading_depth = null;\n\t\t\t\t$current_heading_text  = '';\n\t\t\t}\n\t\t}\n\n\t\tif ( '#tag' !== $token_type || $processor->is_tag_closer() || null === $token_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 2 !== preg_match( '/^H([1-6])$/', $token_name, $matches ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$current_heading_level = (int) $matches[1];\n\t\t$current_heading_depth = $processor->get_current_depth();\n\t\t$current_heading_text  = '';\n\t}\n\n\tif ( null !== $current_heading_level ) {\n\t\t$toc[] = array(\n\t\t\t'level' => $current_heading_level,\n\t\t\t'text'  => $current_heading_text,\n\t\t);\n\t}\n\n\treturn $toc;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with HTML-structure awareness, then walked tokens with `next_token()`, collecting ordinary `#text` nodes via `get_modifiable_text()` while tracking heading openers and their depth with `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_current_depth()` so nested markup inside headings contributes text but tags do not.",
+      "confidence": 93
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction extract_toc( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$toc = array();\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag = $processor->get_tag();\n\t\tif ( ! in_array( $tag, array( 'H1', 'H2', 'H3', 'H4', 'H5', 'H6' ), true ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$heading_depth = $processor->get_current_depth();\n\t\t$text          = '';\n\n\t\twhile ( $processor->next_token() && $processor->get_current_depth() >= $heading_depth ) {\n\t\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t}\n\n\t\t$toc[] = array(\n\t\t\t'level' => (int) substr( $tag, 1 ),\n\t\t\t'text'  => $text,\n\t\t);\n\t}\n\n\treturn $toc;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` so heading text is collected from `#text` descendants only. For each `H1` through `H6` opener, I recorded the current depth and accumulated `get_modifiable_text()` until the walk left that subtree, preserving document order and including empty headings.",
+      "confidence": 95
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction extract_toc( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$toc = array();\n\t$current_level = null;\n\t$current_text = '';\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\tif ( null !== $current_level ) {\n\t\t\t\t$current_text .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $token_type ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( null === $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( null !== $current_level && 'H' . $current_level === $tag_name ) {\n\t\t\t\t$toc[] = array(\n\t\t\t\t\t'level' => $current_level,\n\t\t\t\t\t'text'  => $current_text,\n\t\t\t\t);\n\t\t\t\t$current_level = null;\n\t\t\t\t$current_text  = '';\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( preg_match( '/^H([1-6])$/', $tag_name, $matches ) ) {\n\t\t\tif ( null !== $current_level ) {\n\t\t\t\t$toc[] = array(\n\t\t\t\t\t'level' => $current_level,\n\t\t\t\t\t'text'  => $current_text,\n\t\t\t\t);\n\t\t\t}\n\n\t\t\t$current_level = (int) $matches[1];\n\t\t\t$current_text  = '';\n\t\t}\n\t}\n\n\tif ( null !== $current_level ) {\n\t\t$toc[] = array(\n\t\t\t'level' => $current_level,\n\t\t\t'text'  => $current_text,\n\t\t);\n\t}\n\n\treturn $toc;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context and `next_token()` to walk the document in order. I only collected ordinary `#text` tokens via `get_modifiable_text()` while inside an open `H1`-`H6`, and I finalized each entry when the matching heading closer was seen, preserving headings with empty text.",
+      "confidence": 92
+    },
+    {
+      "id": "T01-add-image-class",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\nfunction add_image_class( string $html ): string {\n\t$tags = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $tags->next_tag( 'img' ) ) {\n\t\t$tags->add_class( 'wp-image' );\n\t}\n\n\treturn $tags->get_updated_html();\n}\n",
+      "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan only real `img` tags case-insensitively with `next_tag( 'img' )`, then applied `add_class( 'wp-image' )` to each match. `get_updated_html()` returns the original document with only the queued attribute edits applied, preserving all untouched bytes exactly.",
+      "confidence": 98
+    },
+    {
+      "id": "T01-add-image-class",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_image_class( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'img' ) ) {\n\t\t$processor->add_class( 'wp-image' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan only real tag openers, which preserves the rest of the document byte-for-byte while skipping comments and other non-tags. For each case-insensitive `img` match, I called `add_class( 'wp-image' )`, then returned `get_updated_html()` so existing classes stay in place and the processor emits only the minimal edits.",
+      "confidence": 98
+    },
+    {
+      "id": "T01-add-image-class",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_image_class( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'img' ) ) {\n\t\t$processor->add_class( 'wp-image' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Tag_Processor to scan the document linearly and match only real IMG tag openers with case-insensitive tag-name matching via next_tag( 'img' ); then add_class( 'wp-image' ) appends the class without disturbing existing class order or other bytes, and get_updated_html() returns the minimally edited document exactly as preserved by the documented HTML API.",
+      "confidence": 98
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\ndeclare(strict_types=1);\n\nfunction add_link_targets( string $html ): string {\n\t$tags = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $tags->next_tag( 'a' ) ) {\n\t\tif ( null !== $tags->get_attribute( 'href' ) ) {\n\t\t\t$tags->set_attribute( 'target', '_blank' );\n\t\t}\n\t}\n\n\treturn $tags->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan each `a` tag and `get_attribute( 'href' )` to detect presence, which correctly treats empty-string and boolean `href` values as present. For matching links, `set_attribute( 'target', '_blank' )` overwrites any existing target while preserving all untouched bytes, and `get_updated_html()` returns the modified HTML.",
+      "confidence": 98
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction add_link_targets( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'a' ) ) {\n\t\tif ( null === $processor->get_attribute( 'href' ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$processor->set_attribute( 'target', '_blank' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan only tag openers and preserve all untouched bytes exactly. The function loops over every `a` tag with `next_tag('a')`, checks for `href` with `get_attribute('href')` so empty and boolean hrefs count as present, and then overwrites `target` via `set_attribute('target', '_blank')` before returning `get_updated_html()`.",
+      "confidence": 98
+    },
+    {
+      "id": "T02-link-targets",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_link_targets( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag( 'A' ) ) {\n\t\tif ( null === $processor->get_attribute( 'href' ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$processor->set_attribute( 'target', '_blank' );\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan only `A` tag openers, checked `get_attribute( 'href' )` so empty-string and boolean `href` values count as present, and then applied `set_attribute( 'target', '_blank' )`. `get_updated_html()` returns the original document with only the queued attribute edits applied, preserving all untouched bytes exactly.",
+      "confidence": 98
+    },
+    {
+      "id": "T03-first-h1-text",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction get_first_h1_text( string $html ): ?string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn null;\n\t}\n\n\tif ( ! $processor->next_tag( 'H1' ) ) {\n\t\treturn null;\n\t}\n\n\t$h1_depth = $processor->get_current_depth();\n\t$text     = '';\n\n\twhile ( $processor->next_token() && $processor->get_current_depth() >= $h1_depth ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\treturn $text;\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then next_tag('H1') to find the first heading opener and get_current_depth() plus next_token() to walk only that subtree. I accumulated only #text tokens with get_modifiable_text(), which already returns decoded text, so nested elements contribute text and markup contributes nothing.",
+      "confidence": 98
+    },
+    {
+      "id": "T03-first-h1-text",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction get_first_h1_text( string $html ): ?string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn null;\n\t}\n\n\tif ( ! $processor->next_tag( 'H1' ) ) {\n\t\treturn null;\n\t}\n\n\t$depth = $processor->get_current_depth();\n\t$text  = '';\n\n\twhile ( $processor->next_token() && $processor->get_current_depth() >= $depth ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\treturn $text;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, `next_tag( 'H1' )` to find the first heading, and a depth-bounded `next_token()` walk with `get_token_type()` plus `get_modifiable_text()` to concatenate only ordinary text nodes inside that heading, including text from nested elements and with character references already decoded.",
+      "confidence": 93
+    },
+    {
+      "id": "T03-first-h1-text",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction get_first_h1_text( string $html ): ?string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn null;\n\t}\n\n\tif ( ! $processor->next_tag( 'H1' ) ) {\n\t\treturn null;\n\t}\n\n\t$h1_depth = $processor->get_current_depth();\n\t$text     = '';\n\n\twhile ( $processor->next_token() && $processor->get_current_depth() >= $h1_depth ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\treturn $text;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` to find the first heading and `get_current_depth()` plus `next_token()` to walk only that subtree. While walking, I appended only `#text` tokens via `get_modifiable_text()`, which already returns decoded text for ordinary text nodes, and returned `null` only when no `H1` was found.",
+      "confidence": 96
+    },
+    {
+      "id": "T04-build-figure",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\nfunction build_figure( string $url, string $alt, string $caption ): string {\n\t$processor = new WP_HTML_Tag_Processor( '<figure><img src=\"\" alt=\"\"><figcaption>.</figcaption></figure>' );\n\n\tif ( ! $processor->next_tag( 'img' ) ) {\n\t\treturn '';\n\t}\n\n\t$processor->set_attribute( 'src', $url );\n\t$processor->set_attribute( 'alt', $alt );\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$processor->set_modifiable_text( $caption );\n\t\t\tbreak;\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` with a literal template so the `img` attributes stay in the required `src`, then `alt` order, and the HTML API performs all encoding for both attribute values and the figcaption text via `set_attribute()` and `set_modifiable_text()`. The final fragment is returned with `get_updated_html()`, preserving the exact shape requested.",
+      "confidence": 96
+    },
+    {
+      "id": "T04-build-figure",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction build_figure( string $url, string $alt, string $caption ): string {\n\t$processor = new WP_HTML_Tag_Processor( '<figure><img src=\"\" alt=\"\"><figcaption>.</figcaption></figure>' );\n\n\tif ( ! $processor->next_tag( 'img' ) ) {\n\t\treturn '';\n\t}\n\n\t$processor->set_attribute( 'src', $url );\n\t$processor->set_attribute( 'alt', $alt );\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$processor->set_modifiable_text( $caption );\n\t\t\tbreak;\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I built the fragment from a literal HTML template and used `WP_HTML_Tag_Processor` to set `src` and `alt` in place, preserving that attribute order, then walked to the placeholder text node inside `figcaption` and replaced it with `set_modifiable_text()`. The documented APIs used were `__construct()`, `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()`.",
+      "confidence": 97
+    },
+    {
+      "id": "T04-build-figure",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction build_figure( string $url, string $alt, string $caption ): string {\n\t$processor = new WP_HTML_Tag_Processor( '<figure><img src=\"\" alt=\"\"><figcaption>.</figcaption></figure>' );\n\n\tif ( $processor->next_tag( 'img' ) ) {\n\t\t$processor->set_attribute( 'src', $url );\n\t\t$processor->set_attribute( 'alt', $alt );\n\t}\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$processor->set_modifiable_text( $caption );\n\t\t\tbreak;\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` with a literal fragment template that already includes `src`, `alt`, and placeholder caption text so the output preserves the required attribute order. I then updated the `img` attributes with `set_attribute()` and replaced the figcaption placeholder via `next_token()` plus `set_modifiable_text()`, letting the HTML API handle all encoding.",
+      "confidence": 92
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n\tif ( $max_codepoints <= 0 ) {\n\t\treturn '';\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn '';\n\t}\n\n\t$text = '';\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'TITLE' === $tag_name || 'TEXTAREA' === $tag_name ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\tif ( function_exists( 'mb_substr' ) ) {\n\t\treturn mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t}\n\n\tif ( function_exists( 'iconv_substr' ) ) {\n\t\t$result = iconv_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t\treturn false === $result ? '' : $result;\n\t}\n\n\t$chars = preg_split( '//u', $text, -1, PREG_SPLIT_NO_EMPTY );\n\tif ( false === $chars ) {\n\t\treturn '';\n\t}\n\n\treturn implode( '', array_slice( $chars, 0, $max_codepoints ) );\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`. I collected ordinary `#text` tokens plus opener text from `TITLE` and `TEXTAREA` only via `get_modifiable_text()`, then truncated the decoded UTF-8 text to the requested number of code points with `mb_substr()` when available and safe fallbacks otherwise.",
+      "confidence": 94
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n\tif ( $max_codepoints <= 0 ) {\n\t\treturn '';\n\t}\n\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn '';\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn '';\n\t}\n\n\t$text = '';\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $token_type || $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_token_name();\n\t\tif ( 'TITLE' === $tag_name || 'TEXTAREA' === $tag_name ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\tif ( function_exists( 'mb_strlen' ) ) {\n\t\tif ( mb_strlen( $text, 'UTF-8' ) <= $max_codepoints ) {\n\t\t\treturn $text;\n\t\t}\n\n\t\treturn mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t}\n\n\t$chars = preg_split( '//u', $text, -1, PREG_SPLIT_NO_EMPTY );\n\tif ( false === $chars ) {\n\t\treturn '';\n\t}\n\n\tif ( count( $chars ) <= $max_codepoints ) {\n\t\treturn $text;\n\t}\n\n\treturn implode( '', array_slice( $chars, 0, $max_codepoints ) );\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, appending only ordinary `#text` nodes plus opener text from `TITLE` and `TEXTAREA` tokens via `get_modifiable_text()`. I truncated the accumulated UTF-8 text by code points with `mb_strlen`/`mb_substr`, with a `preg_split('//u', ...)` fallback if mbstring is unavailable.",
+      "confidence": 92
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n\tif ( $max_codepoints <= 0 ) {\n\t\treturn '';\n\t}\n\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn '';\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn '';\n\t}\n\n\t$text = '';\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $token_type || $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'TITLE' === $tag_name || 'TEXTAREA' === $tag_name ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\tif ( function_exists( 'mb_strlen' ) && function_exists( 'mb_substr' ) ) {\n\t\tif ( mb_strlen( $text, 'UTF-8' ) <= $max_codepoints ) {\n\t\t\treturn $text;\n\t\t}\n\n\t\treturn mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t}\n\n\tif ( preg_match_all( '/./us', $text, $matches ) === false ) {\n\t\treturn '';\n\t}\n\n\t$chars = $matches[0];\n\tif ( count( $chars ) <= $max_codepoints ) {\n\t\treturn $text;\n\t}\n\n\treturn implode( '', array_slice( $chars, 0, $max_codepoints ) );\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` and `next_token()` to walk the fragment in document order, appending only ordinary `#text` tokens plus opener text for `TITLE` and `TEXTAREA`, as documented. I then truncated the decoded UTF-8 result by code points with `mb_*` when available, falling back to a UTF-8 regex split.",
+      "confidence": 88
+    },
+    {
+      "id": "T06-collect-links",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction collect_links( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$links = array();\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() || 'A' !== $processor->get_tag() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$href = $processor->get_attribute( 'href' );\n\t\tif ( ! is_string( $href ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$anchor_depth = $processor->get_current_depth();\n\t\t$text         = '';\n\n\t\twhile ( $processor->next_token() && $processor->get_current_depth() >= $anchor_depth ) {\n\t\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t}\n\n\t\t$links[] = array(\n\t\t\t'href' => $href,\n\t\t\t'text' => $text,\n\t\t);\n\t}\n\n\treturn $links;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structure awareness, then walked tokens with `next_token()` and `get_current_depth()` to collect each `<a>` element’s subtree text in document order. For each opening `A` tag, I read `href` with `get_attribute()` and only kept string values, while text was accumulated from `#text` tokens via `get_modifiable_text()` until the anchor’s closing boundary was reached.",
+      "confidence": 92
+    },
+    {
+      "id": "T06-collect-links",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\ndeclare(strict_types=1);\n\nfunction collect_links( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$links = array();\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( 'A' !== $processor->get_token_name() || $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$href = $processor->get_attribute( 'href' );\n\t\tif ( ! is_string( $href ) ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$anchor_depth = $processor->get_current_depth();\n\t\t$text         = '';\n\n\t\twhile ( $processor->next_token() && $processor->get_current_depth() >= $anchor_depth ) {\n\t\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t}\n\n\t\t$links[] = array(\n\t\t\t'href' => $href,\n\t\t\t'text' => $text,\n\t\t);\n\t}\n\n\treturn $links;\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() for fragment parsing, then walked tokens in document order with next_token(). For each opening A tag, I read href with get_attribute(), required it to be a string, and collected only #text tokens inside the anchor subtree using get_current_depth() as the boundary and get_modifiable_text() for decoded text content.",
+      "confidence": 92
+    },
+    {
+      "id": "T06-collect-links",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\ndeclare(strict_types=1);\n\nfunction collect_links( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\t$links = array();\n\t$open_links = array();\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\n\t\tif ( '#tag' === $token_type ) {\n\t\t\t$tag_name = $processor->get_tag();\n\t\t\tif ( null === $tag_name ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( 'A' === $tag_name ) {\n\t\t\t\t$current_depth = $processor->get_current_depth();\n\n\t\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\t\twhile ( ! empty( $open_links ) ) {\n\t\t\t\t\t\t$top_index = count( $open_links ) - 1;\n\t\t\t\t\t\tif ( $open_links[ $top_index ]['depth'] < $current_depth + 1 ) {\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t$entry = array_pop( $open_links );\n\t\t\t\t\t\t$links[] = array(\n\t\t\t\t\t\t\t'href' => $entry['href'],\n\t\t\t\t\t\t\t'text' => $entry['text'],\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t$href = $processor->get_attribute( 'href' );\n\t\t\t\t\tif ( is_string( $href ) ) {\n\t\t\t\t\t\t$open_links[] = array(\n\t\t\t\t\t\t\t'href' => $href,\n\t\t\t\t\t\t\t'text' => '',\n\t\t\t\t\t\t\t'depth' => $current_depth,\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#text' === $token_type && ! empty( $open_links ) ) {\n\t\t\t$text = $processor->get_modifiable_text();\n\t\t\t$last_index = count( $open_links ) - 1;\n\t\t\t$open_links[ $last_index ]['text'] .= $text;\n\t\t}\n\t}\n\n\twhile ( ! empty( $open_links ) ) {\n\t\t$entry = array_pop( $open_links );\n\t\t$links[] = array(\n\t\t\t'href' => $entry['href'],\n\t\t\t'text' => $entry['text'],\n\t\t);\n\t}\n\n\treturn $links;\n}\n",
+      "explanation": "I used the HTML Processor fragment parser to walk the body fragment token-by-token, reading `get_attribute( 'href' )` for `A` openers and `get_modifiable_text()` only from `#text` tokens, which gives decoded text content. The function filters out boolean or missing `href` values by requiring a string, and returns collected links in document order.",
+      "confidence": 87
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_depths = array();\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( ! empty( $list_depths ) ) {\n\t\t\t\tarray_pop( $list_depths );\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( ! empty( $list_depths ) ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\n\t\t$list_depths[] = $processor->get_current_depth();\n\t}\n\n\treturn null === $processor->get_last_error() ? $processor->get_updated_html() : $html;\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() for structural awareness and its next_token(), get_token_type(), get_tag(), is_tag_closer(), and get_current_depth() methods to track nested UL/OL elements in one pass. I then used the inherited add_class() and get_updated_html() APIs so only the targeted list openers are modified while the rest of the fragment is preserved exactly.",
+      "confidence": 91
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag( array( 'tag_name' => null ) ) ) {\n\t\t$tag_name = $processor->get_tag();\n\n\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$breadcrumbs = $processor->get_breadcrumbs();\n\t\t$ancestor_list_found = false;\n\n\t\tforeach ( $breadcrumbs as $index => $breadcrumb ) {\n\t\t\tif ( $index === count( $breadcrumbs ) - 1 ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif ( 'UL' === $breadcrumb || 'OL' === $breadcrumb ) {\n\t\t\t\t$ancestor_list_found = true;\n\t\t\t\tbreak;\n\t\t\t}\n\t\t}\n\n\t\tif ( $ancestor_list_found ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() for structure-aware fragment parsing and get_breadcrumbs() to detect whether each UL or OL has a list ancestor above it. When a nested list opener is found, I add the documented nested-list class with add_class(), then return the byte-preserving result via get_updated_html().",
+      "confidence": 91
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$open_list_ancestors = 0;\n\n\twhile ( $processor->next_token() ) {\n\t\t$tag = $processor->get_tag();\n\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( $open_list_ancestors > 0 ) {\n\t\t\t\t$open_list_ancestors--;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $open_list_ancestors > 0 ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\n\t\t$open_list_ancestors++;\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() ) {\n\t\treturn $html;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to walk the fragment in BODY context, `next_token()` to visit openers and closers in document order, and `add_class()`/`get_updated_html()` to make a byte-preserving attribute edit only on nested `UL`/`OL` openers. A simple open-list depth counter tracks whether the current list has a `UL` or `OL` ancestor above it.",
+      "confidence": 88
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\nfunction table_to_array( string $html ): array {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn array();\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\tif ( ! $processor->next_tag( 'TABLE' ) ) {\n\t\treturn array();\n\t}\n\n\t$table_depth = $processor->get_current_depth();\n\t$rows        = array();\n\t$current_row = null;\n\t$current_cell = null;\n\t$cell_tag    = null;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $table_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( null === $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TR' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t\t$current_row[] = $current_cell;\n\t\t\t\t\t$current_cell   = null;\n\t\t\t\t\t$cell_tag      = null;\n\t\t\t\t}\n\n\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t$rows[] = $current_row;\n\t\t\t\t\t$current_row = null;\n\t\t\t\t}\n\t\t\t} else {\n\t\t\t\t$current_row  = array();\n\t\t\t\t$current_cell = null;\n\t\t\t\t$cell_tag     = null;\n\t\t\t}\n\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TD' === $tag_name || 'TH' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t\tif ( null === $current_row ) {\n\t\t\t\t\t\t$current_row = array();\n\t\t\t\t\t}\n\t\t\t\t\t$current_row[] = $current_cell;\n\t\t\t\t}\n\n\t\t\t\t$current_cell = null;\n\t\t\t\t$cell_tag     = null;\n\t\t\t} else {\n\t\t\t\t$current_cell = '';\n\t\t\t\t$cell_tag     = $tag_name;\n\t\t\t}\n\t\t}\n\t}\n\n\treturn $rows;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect text from each `TD`/`TH` inside the first `TABLE`, flushing cells on their closing tags and rows on `TR` closers.",
+      "confidence": 91
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction table_to_array( string $html ): array {\n\tif ( '' === $html ) {\n\t\treturn array();\n\t}\n\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn array();\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\tif ( ! $processor->next_tag( 'TABLE' ) ) {\n\t\treturn array();\n\t}\n\n\t$table_depth = $processor->get_current_depth();\n\t$rows        = array();\n\t$current_row = null;\n\t$current_cell = null;\n\n\t$flush_cell = static function () use ( &$current_row, &$current_cell ) : void {\n\t\tif ( null !== $current_cell ) {\n\t\t\tif ( null === $current_row ) {\n\t\t\t\t$current_row = array();\n\t\t\t}\n\t\t\t$current_row[] = $current_cell;\n\t\t\t$current_cell  = null;\n\t\t}\n\t};\n\n\t$flush_row = static function () use ( &$rows, &$current_row, &$current_cell, $flush_cell ) : void {\n\t\t$flush_cell();\n\t\tif ( null !== $current_row ) {\n\t\t\t$rows[]      = $current_row;\n\t\t\t$current_row = null;\n\t\t}\n\t};\n\n\twhile ( $processor->next_token() && $processor->get_current_depth() >= $table_depth ) {\n\t\t$token_type = $processor->get_token_type();\n\t\t$tag_name   = $processor->get_token_name();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $token_type || null === $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TR' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\t$flush_row();\n\t\t\t} else {\n\t\t\t\t$current_row = array();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TD' === $tag_name || 'TH' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\t$flush_cell();\n\t\t\t} else {\n\t\t\t\t$flush_cell();\n\t\t\t\t$current_cell = '';\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\t}\n\n\treturn $rows;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full table structure awareness, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()`. The function finds the first `TABLE`, collects only ordinary `#text` content inside `TD`/`TH` cells, and lets the processor’s implied table structure handle omitted `TBODY`/`TR` tags.",
+      "confidence": 93
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction table_to_array( string $html ): array {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn array();\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\twhile ( $processor->next_tag( 'TABLE' ) ) {\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$table_depth = $processor->get_current_depth();\n\t\t$rows        = array();\n\t\t$current_row = null;\n\t\t$current_cell = null;\n\n\t\twhile ( $processor->next_token() ) {\n\t\t\tif ( $processor->get_current_depth() < $table_depth ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t\t}\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\t$tag_name = $processor->get_token_name();\n\t\t\tif ( null === $tag_name ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( 'TR' === $tag_name ) {\n\t\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t\t\t$current_row[] = $current_cell;\n\t\t\t\t\t\t$current_cell   = null;\n\t\t\t\t\t}\n\t\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t\t$rows[] = $current_row;\n\t\t\t\t\t}\n\t\t\t\t\t$current_row  = null;\n\t\t\t\t\t$current_cell  = null;\n\t\t\t\t}\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( 'TD' === $tag_name || 'TH' === $tag_name ) {\n\t\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t\t\t$current_row[] = $current_cell;\n\t\t\t\t\t\t$current_cell   = null;\n\t\t\t\t\t}\n\t\t\t\t\tcontinue;\n\t\t\t\t}\n\n\t\t\t\tif ( null === $current_row ) {\n\t\t\t\t\t$current_row = array();\n\t\t\t\t}\n\t\t\t\t$current_cell = '';\n\t\t\t}\n\t\t}\n\n\t\treturn $rows;\n\t}\n\n\treturn array();\n}\n",
+      "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to parse the fragment in BODY context, then `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` to walk the first table structurally and collect decoded text from `TD`/`TH` cells in row order. The loop stops when the walk leaves the table’s depth, which handles implied table structure the way the HTML Processor documents it.",
+      "confidence": 91
+    },
+    {
+      "id": "T09-mark-keyword",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_keyword( string $html, string $keyword ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\t$output = '';\n\n\twhile ( $processor->next_token() ) {\n\t\tif (\n\t\t\t'#text' === $processor->get_token_type() &&\n\t\t\t'' !== $keyword &&\n\t\t\tfalse !== strpos( $processor->get_modifiable_text(), $keyword )\n\t\t) {\n\t\t\t$output .= '<mark>' . $processor->serialize_token() . '</mark>';\n\t\t\tcontinue;\n\t\t}\n\n\t\t$output .= $processor->serialize_token();\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $output !== '' ? $output : ( WP_HTML_Processor::normalize( $html ) ?? $html );\n\t}\n\n\treturn $output;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded text from `get_modifiable_text()` for the case-sensitive keyword and wrapped the normalized token output from `serialize_token()` in `<mark>`, which preserves normalized serialization and leaves special-element text untouched because it is not reported as a `#text` token.",
+      "confidence": 92
+    },
+    {
+      "id": "T09-mark-keyword",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nif ( ! function_exists( 'mark_keyword' ) ) {\n\tfunction mark_keyword( string $html, string $keyword ): string {\n\t\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\t\tif ( null === $processor ) {\n\t\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t\t}\n\n\t\t$output = '';\n\n\t\twhile ( $processor->next_token() ) {\n\t\t\tif ( '#text' === $processor->get_token_type() && '' !== $keyword && str_contains( $processor->get_modifiable_text(), $keyword ) ) {\n\t\t\t\t$output .= '<mark>' . $processor->serialize_token() . '</mark>';\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\t$output .= $processor->serialize_token();\n\t\t}\n\n\t\tif ( null !== $processor->get_last_error() ) {\n\t\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t\t}\n\n\t\treturn $output;\n\t}\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, checking only ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()`. Matching text nodes are emitted as `<mark>` plus `serialize_token()` so the result stays normalized while preserving the processor’s HTML serialization rules.",
+      "confidence": 91
+    },
+    {
+      "id": "T09-mark-keyword",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_keyword( string $html, string $keyword ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\t$output        = '';\n\t$special_tags  = array( 'SCRIPT', 'STYLE', 'TITLE', 'TEXTAREA' );\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\t\t$token_name = $processor->get_token_name();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\t$text = $processor->get_modifiable_text();\n\t\t\tif ( '' !== $keyword && false !== strpos( $text, $keyword ) ) {\n\t\t\t\t$output .= '<mark>' . $processor->serialize_token() . '</mark>';\n\t\t\t\tcontinue;\n\t\t\t}\n\t\t} elseif ( '#tag' === $token_type && ! $processor->is_tag_closer() && in_array( $token_name, $special_tags, true ) ) {\n\t\t\t// Special text-bearing elements expose their contents on the opener token.\n\t\t\t// We intentionally do not wrap them for this task.\n\t\t\t$processor->get_modifiable_text();\n\t\t}\n\n\t\t$output .= $processor->serialize_token();\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $output;\n\t}\n\n\treturn $output;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and emitted normalized output via `serialize_token()`. Ordinary `#text` tokens are compared using `get_modifiable_text()` and wrapped in `<mark>` when they contain the case-sensitive keyword; special text-bearing elements (`SCRIPT`, `STYLE`, `TITLE`, `TEXTAREA`) are left untouched because their content is carried on the opener token rather than as ordinary text nodes.",
+      "confidence": 88
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_last_h2( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\t$found     = false;\n\n\twhile ( $processor->next_tag( 'h2' ) ) {\n\t\t$processor->set_bookmark( 'last-h2' );\n\t\t$found = true;\n\t}\n\n\tif ( ! $found ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->seek( 'last-h2' ) ) {\n\t\t$processor->add_class( 'final-section' );\n\t\t$processor->release_bookmark( 'last-h2' );\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan for `h2` openers in a single pass, updating the same bookmark each time so it always points to the last match, then `seek()` back to that bookmark and `add_class()` the requested class before returning `get_updated_html()`. If no `h2` is found, the function returns the original HTML unchanged.",
+      "confidence": 97
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_last_h2( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\t$found     = false;\n\n\twhile ( $processor->next_tag( array( 'tag_name' => 'h2' ) ) ) {\n\t\t$processor->set_bookmark( 'last-h2' );\n\t\t$found = true;\n\t}\n\n\tif ( ! $found ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->seek( 'last-h2' ) ) {\n\t\t$processor->add_class( 'final-section' );\n\t\t$processor->release_bookmark( 'last-h2' );\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, remember the last `H2` opener with a bookmark, then `seek()` back to that bookmark and call `add_class( 'final-section' )` before վերադարձing `get_updated_html()`. If no `H2` is found, the function returns the original HTML unchanged.",
+      "confidence": 96
+    },
+    {
+      "id": "T10-last-h2",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\nfunction mark_last_h2( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\t$found     = false;\n\n\twhile ( $processor->next_tag( array( 'tag_name' => 'h2' ) ) ) {\n\t\t$processor->set_bookmark( 'last-h2' );\n\t\t$found = true;\n\t}\n\n\tif ( ! $found ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->seek( 'last-h2' ) ) {\n\t\t$processor->add_class( 'final-section' );\n\t\t$processor->release_bookmark( 'last-h2' );\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly for `h2` openers, remembered the last match with a bookmark, then sought back to that bookmark and added the `final-section` class with `add_class()`. If no `H2` was found, the function returns the original HTML unchanged; the final output comes from `get_updated_html()`.",
+      "confidence": 96
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan every tag in document order, `get_attribute_names_with_prefix( 'data-track-' )` to find only attributes whose names start with the required prefix, and `remove_attribute()` to delete them while preserving all other markup byte-for-byte except for the targeted edits.",
+      "confidence": 98
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\tif ( ! class_exists( 'WP_HTML_Tag_Processor' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan each tag opener and `get_attribute_names_with_prefix( 'data-track-' )` to identify only attributes whose names start with that exact prefix, then removed each one with `remove_attribute()` and returned the result via `get_updated_html()`. This preserves similar attributes like `data-track` and `data-tracker` because they do not match the documented prefix query.",
+      "confidence": 97
+    },
+    {
+      "id": "T11-strip-tracking-attributes",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction strip_tracking_attributes( string $html ): string {\n\t$processor = new WP_HTML_Tag_Processor( $html );\n\n\twhile ( $processor->next_tag() ) {\n\t\t$attribute_names = $processor->get_attribute_names_with_prefix( 'data-track-' );\n\n\t\tif ( null === $attribute_names ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tforeach ( $attribute_names as $attribute_name ) {\n\t\t\t$processor->remove_attribute( $attribute_name );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Tag_Processor` to scan each tag opener in document order, `get_attribute_names_with_prefix( 'data-track-' )` to find only attributes whose names start with that prefix in a case-insensitive way, and `remove_attribute()` to delete each match before returning `get_updated_html()`.",
+      "confidence": 97
+    },
+    {
+      "id": "T12-unwrap-spans",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction unwrap_spans( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\t$output = '';\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' === $processor->get_token_type() && 'SPAN' === $processor->get_tag() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$output .= $processor->serialize_token();\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\treturn $output;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked every token with `next_token()` and concatenated `serialize_token()` for everything except `SPAN` tags, which removes both openers and closers while preserving their contents and normalized serialization. I also fall back to `WP_HTML_Processor::normalize()` if the processor cannot be created or aborts on unsupported markup.",
+      "confidence": 89
+    },
+    {
+      "id": "T12-unwrap-spans",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\ndeclare(strict_types=1);\n\nfunction unwrap_spans( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\t$output = '';\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( 'SPAN' === $processor->get_tag() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$output .= $processor->serialize_token();\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\treturn $output;\n}\n",
+      "explanation": "I used the HTML Processor fragment parser to walk the fragment token by token, skipping every `SPAN` opener and closer while serializing all other tokens with `serialize_token()` so the result stays normalized. This relies on the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `get_tag()`, `serialize_token()`, `get_last_error()`, and `normalize()` APIs.",
+      "confidence": 93
+    },
+    {
+      "id": "T12-unwrap-spans",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction unwrap_spans( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn WP_HTML_Processor::normalize( $html ) ?? $html;\n\t}\n\n\t$output = '';\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' === $processor->get_token_type() && 'SPAN' === $processor->get_tag() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$output .= $processor->serialize_token();\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $output;\n\t}\n\n\treturn $output;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-fragment HTML, then walked tokens with `next_token()` and appended each token’s normalized serialization via `serialize_token()`, skipping any `SPAN` tag tokens so both openers and closers are removed while inner content remains. The result is normalized HTML with optional tags filled in, quoting canonicalized, and text re-encoded by the documented serializer.",
+      "confidence": 92
+    }
+  ]
+}

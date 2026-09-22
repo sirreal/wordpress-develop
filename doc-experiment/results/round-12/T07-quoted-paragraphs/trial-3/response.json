@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor to parse the HTML fragment and identify all P elements. For each P element, I check if BLOCKQUOTE appears anywhere in the breadcrumbs (which represents the entire ancestor path from root to the current element), and if so, add the \"quoted\" class using add_class(). The solution preserves all original HTML bytes except for the class additions.",
+  "confidence": 85
+}

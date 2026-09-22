@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()`, appending only ordinary `#text` tokens plus the opener-carried text from `TITLE` and `TEXTAREA` tokens via `get_modifiable_text()`. I ignored `SCRIPT` and `STYLE`, and truncated the final UTF-8 text by code points with `mb_substr()` (falling back to a Unicode-safe `preg_split()` path).",
+  "confidence": 93
+}

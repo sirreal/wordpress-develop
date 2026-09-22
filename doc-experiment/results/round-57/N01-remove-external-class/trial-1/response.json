@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan only `A` tags that match the `external` class query, then called `remove_class( 'external' )` on each match and \u057e\u0565\u0580\u0561\u0564\u0561\u0580\u0571ed the result with `get_updated_html()`. This preserves all untouched bytes and uses only documented Tag Processor APIs.",
+  "confidence": 97
+}

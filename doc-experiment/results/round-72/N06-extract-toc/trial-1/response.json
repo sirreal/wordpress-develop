@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walked tokens with `next_token()` and collected only `#text` tokens while inside an open `H1`-`H6` subtree. The implementation relies on documented `get_token_type()`, `get_token_name()`, `is_tag_closer()`, `get_modifiable_text()`, and `get_current_depth()` to preserve document order and extract heading text without tags.",
+  "confidence": 87
+}

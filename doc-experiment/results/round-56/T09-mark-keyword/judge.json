@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path for BODY fragments, walked tokens with `next_token()`, guarded ordinary text with `get_token_type() === '#text'`, compared decoded `get_modifiable_text()`, and emitted normalized wrappers with `serialize_token()`. All API methods are documented and execution recorded no `_doing_it_wrong`. Minor edge-policy concern: the `normalize($html) ?? $html` fallback can return raw, non-normalized input if normalization fails and discards emitted rewrites after an abort."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same strong documented pattern as the reference: HTML Processor, single token walk, ordinary `#text` guard before `get_modifiable_text()`, and token serialization for normalized output. No undocumented HTML API calls and no `_doing_it_wrong`. Minor deduction for the shared fallback policy: raw input is not a normalized string fallback, and `normalize($html)` after a partial rewrite intentionally drops any emitted changes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and idiomatic rewrite-while-serializing loop. It relies only on documented methods: `create_fragment`, `normalize`, `next_token`, `get_token_type`, `get_modifiable_text`, `serialize_token`, and `get_last_error`. No `_doing_it_wrong` records. Minor edge-policy concern remains around unsupported/failure fallback returning normalized original or raw input rather than a clearly task-specific normalized rewrite failure value."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, so there are no failed hidden cases to attribute to a misconception. The docs did well in the exact areas this task needed: the processor-choice guidance says to use the HTML Processor for structure, implied/missing closers, and normalized output; the `next_token()` and DOM-style text sections explain that ordinary text is only `#text` tokens and that SCRIPT/STYLE/TITLE/TEXTAREA text lives on opener tokens; `get_modifiable_text()` states that `#text` is already decoded; and `serialize_token()` explicitly documents the rewrite pattern of checking decoded text and wrapping the serialized token. The only near-miss across all candidates is their shared fallback policy. The docs mention caller-chosen fallbacks, but the candidates all used `normalize($html) ?? $html`, which is acceptable for the tested inputs yet could violate a normalized-output contract if processor creation or unsupported markup made normalization return null.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::create_fragment()` and the `serialize_token()` rewrite fallback guidance",
+      "problem": "The docs say to choose a fallback when processor creation fails or `get_last_error()` is non-null, but the distinction between normalized fallbacks and raw-input fallbacks is easy to blur. All candidates used `normalize($html) ?? $html`, which can return non-normalized raw input.",
+      "suggestion": "Add a concise warning for string-returning normalized rewrites: raw input is not a normalized fallback; if `normalize()` returns null, choose an explicit fail-closed value or documented best-effort policy rather than silently returning source bytes."
+    },
+    {
+      "location": "`WP_HTML_Processor::serialize_token()`",
+      "problem": "The method explains token-by-token normalized serialization, but the fragment behavior that matters for malformed fragments is spread across several sections.",
+      "suggestion": "Add one small general example showing that concatenating `serialize_token()` from a fragment omits implicit `HTML`/`BODY` wrappers while emitting implied or virtual closing tokens for unclosed elements."
+    }
+  ]
+}

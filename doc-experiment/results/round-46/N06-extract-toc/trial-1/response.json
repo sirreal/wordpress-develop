@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction depends on document structure, then walks the fragment once with `next_token()`. When an `H1` through `H6` opener is found via `get_tag()` and `is_tag_closer()`, it records that heading\u2019s depth with `get_current_depth()`, accumulates descendant `#text` tokens with `get_modifiable_text()`, and closes the heading when the walk leaves that subtree.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a single linear scan, since the task is position-based rather than tree-structured. It finds every `H2` with `next_tag( 'H2' )`, reuses one bookmark via `set_bookmark()` to remember the last match, then `seek()`s back to that bookmarked tag, adds the `final-section` class with `add_class()`, and returns the result with `get_updated_html()`.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because direct-child counting is tree-aware. It finds the first `UL` or `OL` with `next_tag()`, bookmarks its opener, walks forward with `next_token()` while comparing `get_current_depth()` to count only direct `LI` child openers, rejects the change if the list scan does not finish cleanly (`paused_at_incomplete_token()` or `get_last_error()`), then seeks back to the bookmarked list opener, sets `data-item-count` with `set_attribute()`, and returns the edited fragment via `get_updated_html()`.",
+  "confidence": 89
+}

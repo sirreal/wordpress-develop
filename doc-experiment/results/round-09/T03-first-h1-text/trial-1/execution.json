@@ -1,0 +1,80 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-09/T03-first-h1-text/trial-1/candidate.php",
+    "function": "get_first_h1_text",
+    "passed": 8,
+    "total": 8,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "pass",
+            "expected": "Hello",
+            "actual": "Hello",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "nested-markup",
+            "status": "pass",
+            "expected": "A B C",
+            "actual": "A B C",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-decoded",
+            "status": "pass",
+            "expected": "Fish & Chips — daily",
+            "actual": "Fish & Chips — daily",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-h1-null",
+            "status": "pass",
+            "expected": null,
+            "actual": null,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "image-only-empty-string",
+            "status": "pass",
+            "expected": "",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "first-of-two",
+            "status": "pass",
+            "expected": "First",
+            "actual": "First",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "nested-in-div",
+            "status": "pass",
+            "expected": "Deep title",
+            "actual": "Deep title",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "unclosed-h1",
+            "status": "pass",
+            "expected": "Runs to the end",
+            "actual": "Runs to the end",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

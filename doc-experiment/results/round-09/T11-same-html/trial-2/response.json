@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::normalize() to normalize both HTML fragments. The normalize method handles all the parsing requirements: it adds implied closing tags, treats tag names case-insensitively (outputting lowercase), normalizes attribute quoting to double-quotes, removes duplicate attributes, and handles equivalent character references. If either input cannot be fully normalized, it returns null, which causes is_same_html to return false (indicating incomparable inputs). Otherwise, it compares the normalized outputs for exact equality.",
+  "confidence": 92
+}

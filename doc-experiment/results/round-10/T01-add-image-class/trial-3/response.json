@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses the WP_HTML_Tag_Processor, which is specifically designed for flat, position-based attribute modifications while preserving byte-exactness. The function creates a processor instance with the input HTML, then iterates through all IMG tags using next_tag() with case-insensitive tag matching. For each matched IMG tag, add_class() safely appends 'wp-image' to the class attribute without removing or reordering existing classes. Finally, get_updated_html() returns the modified document. Images inside HTML comments are naturally skipped because they aren't recognized as real tags by the processor.",
+  "confidence": 95
+}

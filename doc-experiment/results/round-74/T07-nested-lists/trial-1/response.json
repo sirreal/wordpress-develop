@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` because the input is a BODY fragment and the task depends on nested structure. I then walked tags with `next_tag()`, inspected ancestry with `get_breadcrumbs()`, added the class via `add_class()` only when a `UL` or `OL` had an earlier `UL`/`OL` in its breadcrumb path, and returned the byte-preserving result with `get_updated_html()`.",
+  "confidence": 97
+}

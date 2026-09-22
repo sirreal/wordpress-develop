@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "30/30 processor choice: correctly used WP_HTML_Processor::create_fragment() for browser-style table structure. 30/30 API usage: every called HTML API method is documented and execution recorded no _doing_it_wrong. 24/25 idiom: single next_token() state-machine walk, depth-bounded to the table, closer-driven row/cell flushing, #text-only extraction with get_modifiable_text(), and get_last_error() check. 14/15 edges: handles decoded text, omitted closers, empty cells, and unsupported-parser aborts; it does not explicitly check paused_at_incomplete_token(), but that is not required by the task cases."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 92,
+      "hallucinated_methods": [],
+      "notes": "30/30 processor choice and 30/30 documented API usage. 21/25 idiom: good single-pass depth-bounded state machine, including opener-side flushes for omitted cell closers and get_last_error() handling. Main penalty: it deliberately appends opener-carried text from SCRIPT/STYLE/TEXTAREA/TITLE and similar special elements, despite the subtree-text recipe saying ordinary text extraction should append only #text tokens unless special element content is explicitly requested. 11/15 edges: handles frozen decoded text and omitted/empty structures, but mixes raw and decoded special-element text into cell output."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 90,
+      "hallucinated_methods": [],
+      "notes": "30/30 processor choice and 30/30 documented API usage. 20/25 idiom: uses the right single next_token() walk and depth bound, but does not check get_last_error() after a parser abort and also opts into special-element opener text. 10/15 edges: handles the frozen omitted-closer, entity, markup, and empty-cell cases, but raw-vs-decoded special text is over-included and incomplete/unsupported input policy is weaker than the documented guidance."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The docs did well on the important success path: HTML Processor vs Tag Processor selection is explicit under HTML Support; next_token() documents implied TBODY insertion, virtual closers, one-cursor/single-loop traversal, and depth-bounded walks; get_current_depth() explains why the guard must be >=; get_modifiable_text() states that #text text is decoded. Those passages directly match the successful implementations. Near-misses: trials 2 and 3 over-applied the documented special-element behavior by adding SCRIPT/STYLE/TEXTAREA/TITLE opener-carried text inside cells. The relevant warning exists under 'Recipe: collect DOM-style text from a subtree' and get_modifiable_text(), so this is more a task/API terminology ambiguity than a missing method contract. Trial 3 also omitted get_last_error() handling; the guidance exists under next_token(), get_current_depth(), and get_last_error(), but it is easy to treat it as mutation-only guidance for a read-only extraction function.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, Recipe: collect DOM-style text from a subtree / get_modifiable_text()",
+      "problem": "Special-element text is documented, but candidates may still infer that any opener with modifiable text belongs in generic text extraction.",
+      "suggestion": "Add a compact contrast example showing ordinary subtree extraction output versus opt-in special-element extraction, including SCRIPT/STYLE raw text and TEXTAREA/TITLE decoded text, and state that generic visible/ordinary text extractors should not include these opener-carried strings by default."
+    },
+    {
+      "location": "html-processor.md, next_token() table/implied-structure discussion",
+      "problem": "The docs mention synthesized TBODY and virtual closers generally, but not the common table-specific optional end-tag pattern for TD/TH/TR.",
+      "suggestion": "Add a general optional-end-tag example showing that omitted TD/TR closers are still visited as closing tokens and that closer-driven state machines preserve empty cells and malformed-but-browser-parseable rows."
+    },
+    {
+      "location": "html-processor.md, next_token() and get_current_depth() scan-completion guidance",
+      "problem": "The get_last_error()/paused_at_incomplete_token policy is present but scattered and framed mostly around mutations or rewrites, so read-only extraction code may skip it or inconsistently reject partial results.",
+      "suggestion": "Add a short 'after a read-only subtree scan' note: choose whether partial results are acceptable, always inspect get_last_error() for unsupported-parser aborts when partial results are not acceptable, and inspect paused_at_incomplete_token() when the caller requires proof of complete input."
+    }
+  ]
+}

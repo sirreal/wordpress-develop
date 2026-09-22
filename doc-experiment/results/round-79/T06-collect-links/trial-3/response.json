@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked the document with `next_token()`. I collected only `#text` tokens via `get_modifiable_text()` and tracked active `A` elements with string-valued `href` attributes from `get_attribute()`, emitting each link in document order when its closing `A` token was reached.",
+  "confidence": 91
+}

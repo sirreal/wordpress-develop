@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment, walks it token-by-token with `next_token()`, and builds a normalized rewrite with `serialize_token()`. Each `P` opener is delayed until the next token reveals whether it is immediately followed by its own closer, in which case both tokens are skipped as an empty paragraph; otherwise the stored opener is emitted and the subtree is preserved. Per the task contract, the function returns the original HTML unchanged if the fragment cannot be fully processed, detected via `create_fragment()`, `paused_at_incomplete_token()`, and `get_last_error()`.",
+  "confidence": 89
+}

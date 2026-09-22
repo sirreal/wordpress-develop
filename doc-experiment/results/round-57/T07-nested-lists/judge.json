@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Correctly chose WP_HTML_Processor::create_fragment() for ancestor-aware fragment parsing. Every HTML API method used is documented in the rendered files: create_fragment, next_token, get_token_type, is_tag_closer, get_tag, get_breadcrumbs, add_class, and get_updated_html. The single next_token() loop with '#tag' and !is_tag_closer() guards is documented and safe, though next_tag() would have been the tighter tag-only traversal. Handles null processor creation, but does not check get_last_error() or paused_at_incomplete_token() after scanning."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. Same core shape as trial-1: correct HTML Processor choice, documented API calls only, one cursor walk, breadcrumbs used as tree context, and get_updated_html() used after add_class(). The implementation is idiomatic enough, with minor overuse of next_token() for a tag-only task. It handles create_fragment() failure but leaves unsupported-markup and incomplete-token policy implicit."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 7/7. This is closest to the canonical documented pattern: create_fragment(), next_tag() for opener-only tag traversal, get_breadcrumbs() to inspect ancestors, add_class(), and get_updated_html(). get_last_error() is also documented and gives an explicit fallback for unsupported markup. The only small edge gap is that it does not check paused_at_incomplete_token() if the caller required complete source bytes."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there were no functional failures to attribute to a misconception. The docs supported the task well in the relevant places: the Tag Processor overview's 'Which processor should I use?' says the Tag Processor has no tree awareness and points ancestor/depth work to WP_HTML_Processor; the HTML Processor overview says it is useful for querying nested structure; the create_fragment() docs match the body-fragment input; the Breadcrumbs section shows get_breadcrumbs() returns the root-to-current path including implicit HTML and BODY; next_tag() documents opener-only default behavior and how to scan for one of several tag names; and get_updated_html() documents byte preservation after add_class(). Near-misses were small: trials 1 and 2 used next_token() where next_tag() was simpler, likely because the docs emphasize token-walking recipes more than a compact 'tag-only ancestor scan' recipe. Only trial 3 checked get_last_error(), and none checked paused_at_incomplete_token(); the task did not require rejecting truncated syntax, but the docs' completion-policy guidance is spread across next_token(), get_current_depth(), and serialization sections, so models may not consistently apply it to get_updated_html()-based mutation filters.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_breadcrumbs() docblock / Breadcrumbs section",
+      "problem": "The docs show that breadcrumbs include the current matched node, but they do not explicitly state the common contract for ancestor-only tests: the final breadcrumb is the current element/token and should be excluded when asking whether an ancestor matches.",
+      "suggestion": "Add a short sentence and generic example showing that ancestor checks should inspect get_breadcrumbs() without the last entry, while remembering that create_fragment() includes implicit HTML and BODY ancestors."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() parameter docs for breadcrumbs",
+      "problem": "The breadcrumbs query is documented with examples, but its matching semantics are easy to confuse with 'has this ancestor anywhere' or with a list of alternative paths.",
+      "suggestion": "State that the breadcrumbs query matches a contiguous DOM sub-path ending at the matched element, not an arbitrary ancestor predicate, and point users to scan-and-branch with get_breadcrumbs() for ancestor-anywhere conditions."
+    },
+    {
+      "location": "WP_HTML_Processor::add_class() inherited method section",
+      "problem": "On the HTML Processor page, add_class() is much terser than the Tag Processor version, so readers can miss the class-preservation, append, and no-duplicate guarantees that matter for byte-preserving mutation tasks.",
+      "suggestion": "Mirror or directly summarize the inherited add_class() contract on the HTML Processor page: creates class when absent, appends without removing/reordering existing classes, avoids duplicates, and read results with get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() / get_updated_html() mutation workflow docs",
+      "problem": "Post-scan failure policy for mutation filters is scattered. The docs mention get_last_error() and paused_at_incomplete_token(), but do not provide one compact get_updated_html()-based mutation checklist.",
+      "suggestion": "Add a small generic checklist for mutation loops: handle null from create_fragment(); scan and enqueue edits; if unsupported markup matters, check get_last_error(); if complete source bytes matter, check paused_at_incomplete_token(); otherwise return get_updated_html() to preserve untouched bytes."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to find the first `H1`, recorded its depth, then walked tokens until leaving that subtree and concatenated only `#text` tokens with `get_modifiable_text()`, which returns decoded text for ordinary text nodes. This matches the documented guidance for subtree text extraction and preserves nested text while ignoring markup.",
+  "confidence": 95
+}

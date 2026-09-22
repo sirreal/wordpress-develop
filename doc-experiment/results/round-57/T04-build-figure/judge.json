@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Tag_Processor for a known flat fragment. Every called method is documented: next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html. It follows the documented template-building pattern: predeclared attributes preserve order, placeholder text creates a replaceable #text token, and get_updated_html returns the edited fragment. Execution passed 7/7 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. It uses only documented Tag Processor APIs, avoids manual escaping, walks tokens to reach the figcaption text node, and relies on set_attribute/set_modifiable_text for encoding. Attribute order is preserved by placing src and alt in the template. Execution passed 7/7 with no _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Processor choice and API usage are fully aligned with the rendered docs, especially the Building markup from a template, set_attribute, set_modifiable_text, and get_updated_html sections. It handles special characters by passing plain strings to the API. Execution passed 7/7 with no _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The rendered docs did well on the exact concepts this task needed: the Tag Processor overview says to use it for flat, byte-preserving attribute work; Building markup from a template explains filling a literal template with untrusted values, including the two crucial rules that existing attributes preserve order and text-bearing elements need placeholder text; set_attribute documents that callers pass unescaped values and that true/false have boolean/remove semantics; set_modifiable_text documents plaintext input, encoding, and the inability to insert text into an empty element; get_updated_html is clearly identified as the way to retrieve queued mutations. The main near-miss is consistency: set_modifiable_text says to always check the return value, but the template examples omit that check. These candidates copied the example and it was safe here because they first matched a normal #text token in a known template, but future readers could generalize the unchecked call to comments, special elements, or ordinary container tags where it may fail.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text docblock and Building markup from a template example",
+      "problem": "The prose says to always check the return value, while nearby examples call set_modifiable_text without checking it. That mixed signal can teach readers to ignore failures in contexts where the method may return false.",
+      "suggestion": "Align the examples with the contract: either check the boolean return or add an explicit note that a guarded normal #text token in a known template is the narrow case where failure is not expected."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_attribute docblock",
+      "problem": "The write-time value semantics are spread through prose and examples. Empty string, true, false, and invalid/null values are easy to confuse, especially because get_attribute has its own null/true/empty-string read semantics.",
+      "suggestion": "Add a compact table for set_attribute inputs: plain string is encoded, empty string writes an empty value, true writes a boolean attribute, false removes the attribute, null is not accepted, and invalid names return false and trigger _doing_it_wrong."
+    },
+    {
+      "location": "Rendered cross-references in the HTML API markdown",
+      "problem": "Several important references appear as literal {@see ...} text rather than navigable method links. This did not hurt these trials, but it weakens discoverability when guidance depends on another method's contract.",
+      "suggestion": "Make generated markdown expand method references into anchor links, or duplicate the one-sentence contract locally when a passage relies on another method for a critical behavior."
+    }
+  ]
+}

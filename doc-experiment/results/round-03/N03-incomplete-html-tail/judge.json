@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the canonical reference. Correct processor: WP_HTML_Tag_Processor is the only class exposing paused_at_incomplete_token(); HTML Processor would have been the wrong tool (it bails/serializes rather than reporting lexical incompleteness). Idiomatic token-walk: `while ($processor->next_token()) {}` then read paused_at_incomplete_token(). Both methods verified public in html-tag-processor.md (next_token line 326/920, paused_at_incomplete_token line 328/973). No hallucinated or undocumented API. Edge cases (lone `<`, unclosed element, empty string) handled implicitly by the loop pattern. Explanation is accurate, including the subtle point that a paused state is distinct from simply running out of complete tokens. 9/9 cases pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical logic to trial-1 and the reference (only comment wording differs). Same correct processor choice, same two documented public methods, no hallucinated API. Explanation correctly cites the unclosed-SCRIPT-as-incomplete-token behavior, which the Tag Processor docs describe under 'When matching fails' (the STYLE example, line 106) and 'Special self-contained elements'. 9/9 pass."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical approach (spaces vs tabs indentation aside). Correct processor, correct documented methods, no fabrication. Explanation accurately distinguishes 'ends mid-token' (true) from 'all tokens lexically complete' (false), matching the task's structural-vs-lexical distinction. 9/9 pass."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three are the canonical solution and pass 9/9. I confirmed the behavior independently by probing the harness against all nine cases — every result matched expected.\n\nWhy the docs succeeded here: the discoverability path is short and unambiguous. The `paused_at_incomplete_token()` method exists with a clear one-line summary in the Method Index (line 328) and a worked example in its docblock (lines 983-987) showing exactly `next_tag()` returning false then `paused_at_incomplete_token()` returning true for a cut-off attribute (`'<input type=\"text\" value=\"Th'`). The 'When matching fails' section (lines 84-111) explicitly explains the pause-on-incomplete-syntax concept and, crucially, extends it to unclosed special elements (the STYLE example, lines 105-110) — which is exactly what test case `unterminated-script` exercises. The 'Tokens and finer-grained processing' section (lines 214-239) supplies the `while ($processor->next_token())` walking idiom the subjects used to drain the document before checking the paused flag. Subjects combined these two passages correctly.\n\nNear-misses / what could have tripped a weaker subject: the docblock example for `paused_at_incomplete_token()` pairs it with `next_tag()`, not `next_token()`. A subject could have written a `next_tag()` loop instead. That would still pass all nine cases here (next_tag also pauses and sets the flag), but it is a subtly different contract — next_tag only stops on tags, so a document whose only incompleteness is, say, a truncated comment after some text would still be caught because the pause happens regardless of token type. The subjects' choice of `next_token()` (matching the reference) is marginally more correct in intent because it walks every token type, and none of them justified the choice over next_tag — they relied on the token-walking section's example. No subject mishandled the two 'false' boundary cases the task warns about (lone trailing `<` is text; `<div>unclosed element` is structurally-unclosed-but-lexically-complete); the paused flag correctly returns false for both, but note that none of the docs the subjects saw explicitly document these two negative boundaries — the subjects got them right by trusting the flag rather than by reading a doc passage covering them.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token()",
+      "problem": "The docblock example demonstrates only one positive case (a tag cut inside an attribute value) and pairs the method with next_tag(). It does not show any case where the method returns false, nor the important negative boundaries: a lone trailing `<` is complete text, and a structurally-unclosed-but-lexically-complete element (e.g. `<div>text`) is NOT a paused/incomplete state. A reader cannot tell from the docblock alone where the true/false line falls.",
+      "suggestion": "Add one or two false-returning examples alongside the true one, e.g. show that `'<p>ok</p>'` and `'ends with <'` (lone `<` treated as text) and `'<div>unclosed'` (open element, but every token complete) all yield paused_at_incomplete_token() === false, contrasted with the truncated-attribute case yielding true. State explicitly that the flag reports *lexical* incompleteness of the final token, not structural unclosedness of elements."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and the 'Tokens and finer-grained processing' section",
+      "problem": "The only worked example of the pause flag uses next_tag(). The token-walking idiom (`while ($processor->next_token())`) is documented in a separate section with no cross-reference to the pause flag, so the natural pattern 'drain all tokens, then check if it paused mid-token' is left for the reader to assemble. The relationship between draining the document and the flag being meaningful only after the loop ends is implicit.",
+      "suggestion": "In the paused_at_incomplete_token() docblock, add a short note and example showing the full drain-then-check pattern with next_token() (loop until it returns false, then read the flag), and cross-link it from the token-walking section. Clarify that the flag is only meaningful after iteration has reached the end of input."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor 'When matching fails' / 'Special self-contained elements' sections",
+      "problem": "The text explains that an unclosed special element (STYLE example) counts as an incomplete token and pauses the parser, but this fact is split across two sections and tied to next_tag()'s false return rather than stated as a general property observable via paused_at_incomplete_token(). A reader looking only at the pause-flag method would not learn that `'<script>...'` with no `</script>` triggers it.",
+      "suggestion": "Add a one-line note in the paused_at_incomplete_token() docblock that unclosed special/rawtext elements (SCRIPT, STYLE, TITLE, TEXTAREA, etc.) whose closing tag never arrives also leave the parser paused at an incomplete token, with a pointer to the special-elements list."
+    }
+  ]
+}

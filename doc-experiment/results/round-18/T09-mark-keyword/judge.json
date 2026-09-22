@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment(), next_token(), get_token_type(), get_modifiable_text(), and serialize_token(). The token-by-token serialization pattern is exactly the right fit for normalized output plus wrappers. Minor edge caveat: returning raw $html if create_fragment() returns null would not be normalized, though that path is not reachable for normal string input with the default context/encoding used here."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API surface. The explanation correctly identifies that special text-bearing elements are not visited as #text child tokens, so filtering to #text excludes them. Same minor caveat as trial-1: the create_fragment() null fallback returns raw input rather than a normalized failure value."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical documented pattern: create a body fragment processor, walk all tokens, inspect only #text tokens via decoded get_modifiable_text(), and rebuild normalized output using serialize_token(). The create_fragment() null fallback is conservative and does not return unnormalized input."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial; all three passed 8/8. The docs worked well because the HTML Processor overview explicitly distinguishes it from the Tag Processor for structure and normalized output, next_token() explains that text/non-tag content requires token walking, get_modifiable_text() states that #text values are already decoded, and serialize_token() explicitly describes concatenating token serializations while inserting wrappers. The task's traps were also covered: attributes/comments are avoided by checking get_token_type() === '#text'; split text is naturally per-token; unclosed input is handled because the HTML Processor emits implicit closers; and SCRIPT/STYLE/TITLE/TEXTAREA are excluded because next_token() says their text is carried on the element token rather than as #text children. Near-misses: trial-1 and trial-2 chose a raw-input fallback for create_fragment() failure, which would violate normalized-output expectations if that path occurred. Also, the next_token() section is strong, but its Since note still says 'Added for internal support; do not use,' which could have discouraged the correct solution in other trials.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock / rendered 'Since' notes",
+      "problem": "The method body text presents next_token() as the right public tool for text-aware walks, but the Since note says 'Added for internal support; do not use.'",
+      "suggestion": "Remove or revise the stale 'do not use' note so the stability guidance matches the public examples and current documented contract."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment() Returns section",
+      "problem": "The docs say it returns static|null but do not clearly distinguish creation failure from later parse aborts, nor what null usually means when using the default body context and UTF-8 encoding.",
+      "suggestion": "Document the concrete null causes for fragment creation and state that malformed fragment contents are handled during tokenization/serialization rather than by returning null from creation."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() examples",
+      "problem": "The section explains token-by-token rewriting, but the example emphasizes removal more than insertion/wrapping, leaving fallback/output-shape choices implicit.",
+      "suggestion": "Add a general example that emits trusted wrapper markup around selected serialized tokens, and note that any manually emitted wrapper markup is outside the processor's escaping/validation."
+    }
+  ]
+}

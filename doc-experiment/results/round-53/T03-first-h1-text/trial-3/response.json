@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, then located the first H1 with next_tag('H1') and walked its subtree with next_token() while the current depth stayed within that element. I only concatenated #text tokens via get_modifiable_text(), which gives decoded text content, and returned null only when no H1 was found.",
+  "confidence": 97
+}

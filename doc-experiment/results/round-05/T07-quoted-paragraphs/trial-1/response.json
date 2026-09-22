@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to parse the HTML fragment, iterate through all P elements using next_tag(), check if BLOCKQUOTE appears anywhere in the breadcrumbs (the stack of ancestor elements), and add the \"quoted\" class to matching P tags. The breadcrumbs array contains all open elements from root to the current node, so checking if BLOCKQUOTE is in the array determines if P has a BLOCKQUOTE ancestor at any level.",
+  "confidence": 85
+}

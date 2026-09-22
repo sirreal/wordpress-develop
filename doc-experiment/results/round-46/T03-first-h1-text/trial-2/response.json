@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction depends on document structure. It finds the first `H1` with `next_tag()`, records that opener's depth with `get_current_depth()`, then walks the subtree with `next_token()` while the depth stays within the heading, appending only ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()`, which already returns decoded text.",
+  "confidence": 92
+}

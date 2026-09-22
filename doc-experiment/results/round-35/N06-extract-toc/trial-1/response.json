@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then performs a single `next_token()` walk so the shared cursor is handled correctly. It records each `H1` through `H6` opener in document order with `get_tag()` and `get_current_depth()`, appends descendant `#text` token content via `get_modifiable_text()`, and stops collecting when the walk leaves that heading\u2019s subtree.",
+  "confidence": 84
+}

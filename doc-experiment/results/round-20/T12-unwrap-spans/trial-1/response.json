@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with full HTML structure awareness, then walks the normalized token stream via `next_token()`. It skips both opening and closing `SPAN` tokens by checking `get_tag()`, and appends every other token using `serialize_token()`, which produces the normalized HTML serialization required by the task.",
+  "confidence": 90
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then `next_tag( 'H1' )` to find the first heading opener and `next_token()` with `get_current_depth()` to walk its subtree. Only `#text` tokens are concatenated via `get_modifiable_text()`, which returns decoded text content, so nested markup contributes text while tags themselves contribute nothing.",
+  "confidence": 94
+}

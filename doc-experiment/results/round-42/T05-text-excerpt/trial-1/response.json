@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment with structure awareness, then walks tokens with `next_token()`, appending decoded text from ordinary `#text` tokens and, per the documented special-case rule, from `TITLE` and `TEXTAREA` opening tags via `get_modifiable_text()`. It intentionally excludes other modifiable-text tokens such as `SCRIPT`, `STYLE`, comments, and processing instructions, and truncates the final UTF-8 string to the requested number of Unicode code points with a Unicode-aware regex.",
+  "confidence": 90
+}

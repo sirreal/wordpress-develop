@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment, walked tokens with next_token(), and wrapped only ordinary #text tokens whose decoded text from get_modifiable_text() contains the keyword. I emitted normalized markup with serialize_token() and preserved the processor\u2019s own serialization rules for omitted tags, quoted attributes, and text re-encoding; special element contents are naturally excluded because they are not exposed as ordinary #text tokens.",
+  "confidence": 91
+}

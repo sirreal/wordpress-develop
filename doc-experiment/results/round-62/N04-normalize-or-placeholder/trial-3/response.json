@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` fragment-normalization API, which returns `null` when the fragment cannot be normalized, and then returned the exact placeholder HTML required by the task as the fallback.",
+  "confidence": 98
+}

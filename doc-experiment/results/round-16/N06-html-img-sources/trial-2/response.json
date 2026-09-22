@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to properly parse the HTML fragment as a browser would. It iterates through all IMG tags, filters to only those in the HTML namespace (excluding SVG image elements), retrieves the decoded src attribute value using get_attribute(), and collects non-empty values in document order. The processor's proper HTML5 parsing ensures that tag-like content in comments, CDATA sections, and raw-text elements (SCRIPT, STYLE, TITLE) is correctly handled and not mistaken for actual IMG tags.",
+  "confidence": 92
+}

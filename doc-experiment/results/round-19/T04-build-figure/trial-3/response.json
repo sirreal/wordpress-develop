@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a fixed HTML template using `WP_HTML_Tag_Processor`, which the docs explicitly recommend for safely filling untrusted values into known markup. The function preserves the required `img` attribute order by starting with `src` and `alt` already present in the template, then uses `set_attribute()` for the attribute values and `next_token()` plus `set_modifiable_text()` to replace the `figcaption` placeholder text with properly encoded caption text.",
+  "confidence": 95
+}

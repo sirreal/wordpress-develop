@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, finds each A tag opener with next_tag(), retrieves the decoded href attribute via get_attribute(), and collects text content by iterating tokens with next_token() while remaining inside the element (depth > opening tag's depth), concatenating all #text tokens encountered.",
+  "confidence": 62
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment parser for the input HTML, then iterates through all tokens using next_token(). When a SPAN tag (opening or closing) is encountered, it skips it; for all other tokens, it serializes and concatenates them. This approach preserves the contents of SPAN elements while removing the tags themselves, and the serialization automatically produces normalized output with proper tag closure, attribute quoting, and text encoding.",
+  "confidence": 75
+}

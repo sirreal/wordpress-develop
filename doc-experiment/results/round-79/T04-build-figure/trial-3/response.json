@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already includes `src` and `alt` in the required order, then updated those attributes in place so their positions were preserved. I also replaced the placeholder text node inside `figcaption` with `set_modifiable_text()`, which handles the necessary HTML encoding for unescaped input values.",
+  "confidence": 95
+}

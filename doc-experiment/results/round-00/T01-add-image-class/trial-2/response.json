@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a `WP_HTML_Tag_Processor` instance with the input HTML, then iterates over every `IMG` tag using `next_tag('img')` in a while loop. For each matched tag, `add_class('wp-image')` is called, which appends the class to existing classes if present or creates a new `class` attribute if absent. The processor automatically skips HTML comments and other non-tag tokens, so `<img>` references inside comments are never matched. Finally, `get_updated_html()` returns the modified HTML string.",
+  "confidence": 97
+}

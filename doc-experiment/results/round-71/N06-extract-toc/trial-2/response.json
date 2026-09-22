@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment in document order, then walked tokens with next_token(), collecting only #text nodes inside each H1-H6 opener and finalizing a heading when its closing token is reached by depth comparison. This follows the documented HTML Processor guidance for subtree text extraction and uses get_modifiable_text() only for ordinary text tokens.",
+  "confidence": 92
+}

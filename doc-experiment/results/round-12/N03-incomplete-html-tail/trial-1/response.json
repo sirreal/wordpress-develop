@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to tokenize the input HTML. The processor's next_token() method scans through all lexical tokens (tags, text, comments, etc.) in the document. According to the documentation, when the processor encounters incomplete tokens at the end of the input, it pauses. By calling next_token() in a loop until it returns false (draining all tokens), the processor reaches the end of input. The paused_at_incomplete_token() method then reports whether the input ended mid-token. This handles all cases mentioned: incomplete tag attributes, unterminated comments, unclosed SCRIPT contents, while correctly returning false for complete tokens like lone \"<\" or structurally unclosed elements.",
+  "confidence": 92
+}

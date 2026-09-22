@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor::create_fragment() to parse the HTML as a body fragment, then iterates through all tags with next_tag() to find heading elements (H1-H6). For each heading, it uses next_token() combined with get_current_depth() to collect all text tokens inside the heading until the depth decreases. Text nodes are extracted with get_modifiable_text() which automatically decodes character references and returns plain text content.",
+  "confidence": 82
+}

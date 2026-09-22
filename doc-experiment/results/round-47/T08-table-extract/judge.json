@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Uses WP_HTML_Processor::create_fragment(), finds TABLE with next_tag(), then performs a depth-bounded next_token() walk. All called methods are documented in the rendered files and no _doing_it_wrong records appeared. Text extraction is idiomatic: it appends get_modifiable_text() only for #text tokens, so markup is ignored and entities are decoded. Minor edge caveat: it checks get_last_error() but not paused_at_incomplete_token(); for read-only extraction the docs leave that policy open."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Best adherence of the three. Correctly chooses WP_HTML_Processor, uses documented token/depth APIs, accumulates text only from #text tokens, and explicitly checks paused_at_incomplete_token() plus get_last_error(). The only small caveat is policy, not API use: fail-closing to [] on incomplete syntax is stricter than the reference's best-effort behavior, but the docs allow callers to choose this policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API usage, with no _doing_it_wrong records. The implementation follows the intended single-pass token walk and relies on HTML Processor virtual/implied closers for omitted TR/TD end tags, which is appropriate. It is slightly less explicit on incomplete input than trial-2 because it only checks get_last_error(), not paused_at_incomplete_token()."
+    }
+  ],
+  "failure_analysis": "All three trials passed all frozen cases: simple, thead-tbody, omitted-closers, markup-in-cells, entities-in-cells, no-table, first-table-only, and empty-cells. The docs did well at steering subjects to the HTML Processor: html-tag-processor.md, 'Which processor should I use?' and html-processor.md, 'Supported elements' clearly distinguish structural parsing from flat tag scanning. The strongest successful passage was html-processor.md, 'Recipe: collect DOM-style text from a subtree', reinforced by next_token(), get_current_depth(), get_token_type(), and get_modifiable_text() docs: all trials walked the table subtree, ignored markup, and used decoded #text content. The next_token() discussion of implied TBODY and relative depth also appears to have prevented failures on THEAD/TBODY and omitted closing tags. Near-misses were around policy rather than failed behavior: trial-2 treated paused_at_incomplete_token() as a reason to discard partial extraction, while trials 1 and 3 ignored it. The docs state this is caller policy for read-only extraction, but they do not give much guidance for browser-style best-effort extraction versus complete-source validation. Attribute null/true/empty-string semantics were not relevant because this task used no attribute reads or writes.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: Method Index / inherited methods used by recipes",
+      "problem": "paused_at_incomplete_token() is recommended in HTML Processor recipes but is inherited from WP_HTML_Tag_Processor and does not appear in the HTML Processor method index. That makes incomplete-input handling less discoverable for users focused on the HTML Processor page.",
+      "suggestion": "Add a short inherited-public-methods note or explicit cross-link near get_last_error() and the text-extraction recipes: HTML Processor inherits paused_at_incomplete_token(), and callers should check it separately from get_last_error() when complete source bytes matter."
+    },
+    {
+      "location": "html-processor.md: next_token() and is_tag_closer()",
+      "problem": "The docs mention implied structure and virtual closers, but they could more directly state that extraction code should treat virtual openers/closers the same as source tokens when maintaining state for repeated child elements.",
+      "suggestion": "Add a general example of collecting data from repeated child elements in one next_token() loop, finalizing accumulators on closer tokens, including closers synthesized by the parser for omitted end tags. Keep it generic, not table-specific."
+    },
+    {
+      "location": "html-processor.md: Recipe: collect DOM-style text from a subtree",
+      "problem": "The recipe explains single-element subtree text, but users must infer the pattern for multiple nested containers whose text should be grouped separately.",
+      "suggestion": "Extend the recipe with a brief contract note: for grouped extraction, keep one cursor, open/reset state on selected opener tokens, append only #text while inside the group, and close/finalize state on matching closer tokens; avoid nested scans that consume sibling boundaries."
+    },
+    {
+      "location": "html-processor.md: incomplete input guidance near text extraction and get_current_depth()",
+      "problem": "The docs correctly say read-only extraction may return accumulated data or fail closed, but the practical difference is underspecified. This can lead equivalent-looking implementations to disagree on truncated markup.",
+      "suggestion": "Document the decision point explicitly: best-effort browser-style extraction may keep tokens already visited, including text before an incomplete trailing token; complete-source extraction should reject when paused_at_incomplete_token() is true. Mention that this policy should be chosen from the caller contract."
+    }
+  ]
+}

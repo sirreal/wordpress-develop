@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment. It iterates through A tags using next_tag( array( 'tag_name' => 'a' ) ), checks for the href attribute with get_attribute(), and collects text content by advancing through tokens while monitoring the nesting depth with get_current_depth(). Text nodes are identified by get_token_type() === '#text', and their decoded content is retrieved via get_modifiable_text(). The function returns a numeric array of associative arrays with 'href' and 'text' keys.",
+  "confidence": 75
+}

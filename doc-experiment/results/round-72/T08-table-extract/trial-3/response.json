@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get browser-like table structure, then walked tokens with `next_token()` and `get_current_depth()` so implied rows/cells are handled correctly. Cell text comes from `#text` tokens via `get_modifiable_text()`, and `TR`/`TD`/`TH` opener and closer tokens are used to delimit rows and cells.",
+  "confidence": 92
+}

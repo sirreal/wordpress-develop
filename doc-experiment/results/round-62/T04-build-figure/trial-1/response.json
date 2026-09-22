@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Tag Processor with a literal figure template so the `src` and `alt` attributes stay in the required order, then filled the `img` attributes with `set_attribute()` and replaced the figcaption placeholder text with `set_modifiable_text()`, relying on the documented encoding behavior of both APIs.",
+  "confidence": 96
+}

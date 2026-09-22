@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Tag_Processor for a flat, byte-preserving attribute edit. All called methods are documented: __construct, next_tag, get_attribute, set_attribute, and get_updated_html. The strict null check handles missing versus empty-string and valueless attributes, and next_tag('a') is documented as ASCII case-insensitive."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API surface throughout. The loop, strict href presence check, set_attribute overwrite/add behavior, and get_updated_html output path match the documented pattern for modifying tag attributes while preserving untouched bytes."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same idiomatic Tag Processor solution as the reference. No undocumented calls. Handles the edge cases covered by the docs: tag-name case-insensitive matching, null versus empty/valueless attributes, comments ignored by tag matching, existing target overwritten, and byte preservation through get_updated_html."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases, with no _doing_it_wrong records. The docs worked well for this task because the Tag Processor overview explicitly recommends it for flat attribute/class edits and byte-precise preservation; next_tag() documents ASCII case-insensitive tag matching and ignoring tag-like text in comments/raw-text contexts; get_attribute() documents null for absence, empty string for empty values, and true for valueless attributes; set_attribute() documents overwriting existing attributes and inserting new attributes after the tag name; and get_updated_html() is clearly described as the way to retrieve queued edits while preserving untouched bytes. Near-miss: the get_attribute() wording frames valueless attributes as “boolean attributes,” which could mislead readers when a non-boolean attribute like href appears without a value, even though the API returns true for any syntactically valueless attribute.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docs",
+      "problem": "The docs say boolean attributes return true, but the API returns true for any attribute written without a value, including attributes that are not spec-defined boolean attributes.",
+      "suggestion": "Clarify that true means the attribute was syntactically present without a value, regardless of whether the attribute name is a standard HTML boolean attribute. Recommend strict null checks for attribute presence."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() parameter/description",
+      "problem": "Attribute-name case-insensitive lookup is not stated in the get_attribute() contract itself, even though uppercase attributes are common and relevant to presence checks.",
+      "suggestion": "State that attribute-name matching is ASCII case-insensitive in HTML, and that untouched attribute spelling/casing is preserved in get_updated_html()."
+    },
+    {
+      "location": "Tag Processor overview / Modifying HTML attributes",
+      "problem": "The correct byte-preserving attribute-edit pattern is present but spread across multiple sections: choose Tag Processor, next_tag loop, strict presence check, set_attribute, then get_updated_html.",
+      "suggestion": "Add a short generic recipe for conditional attribute edits: walk matching tags, use get_attribute($name) !== null for presence, call set_attribute(), and return get_updated_html()."
+    }
+  ]
+}

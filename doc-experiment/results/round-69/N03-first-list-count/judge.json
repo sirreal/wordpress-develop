@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), depth-aware token walking, bookmark/seek, set_attribute(), and get_updated_html() correctly. All API methods are present in the rendered docs and execution recorded no _doing_it_wrong entries. Minor idiom issue: set_bookmark() return was not checked immediately, though later seek failure would still fail closed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented methods throughout. The direct-child LI count uses #tag, !is_tag_closer(), and depth == list_depth + 1, then fails closed on paused_at_incomplete_token() or get_last_error(). Minor near-miss: the is_tag_closer() check after plain next_tag() is redundant because default next_tag() skips closers."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose the HTML Processor for tree-aware direct-child counting, used create_fragment(), next_token(), get_current_depth(), set_bookmark()/seek(), set_attribute(), and get_updated_html(). All methods are documented and no misuse was reported. Minor cleanup issue: the bookmark is not explicitly released before returning, but the processor is short-lived and behavior is correct."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 11 hidden cases, so there were no failed hidden cases to attribute to documentation gaps. The docs did well on the exact conceptual risks this task exercises: the WP_HTML_Processor overview recommends scanning a region before editing its opener with a bookmark, next_token(), seek(), and a clean-scan check; the direct-children recipe states the #tag + non-closer + depth == container_depth + 1 pattern; next_tag() explains scanning for multiple possible tag names by walking any tag and branching on get_tag(); get_current_depth() explains why subtree guards must use >= and why closers report parent depth; create_fragment() explains null creation and later unsupported-markup detection via get_last_error(); paused_at_incomplete_token() explains checking truncation after draining the relevant scan; get_updated_html() is clearly documented as the right output API after queued edits. Near-misses were small and did not cause failures: some trials added redundant opener checks after plain next_tag(), one ignored set_bookmark()'s boolean until seek(), and one did not release a bookmark explicitly.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_tag() parameter docs",
+      "problem": "The docs state that plain next_tag() skips closers by default, but this is buried inside the query parameter table. Two trials still guarded against closers after a plain next_tag() call.",
+      "suggestion": "Surface the default opener-only behavior in the method summary or first example, and reserve is_tag_closer() examples for calls that opt into tag_closers => 'visit'."
+    },
+    {
+      "location": "WP_HTML_Processor::set_bookmark() / release_bookmark()",
+      "problem": "Candidates varied on bookmark cleanup and one did not check set_bookmark() immediately. The docs say to release bookmarks, but the fail-closed early-return pattern is not made explicit at the method level.",
+      "suggestion": "Add a short general pattern showing set_bookmark() checked before a forward scan, seek() checked before mutation, and release_bookmark() in cleanup when the processor continues to be used."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and next_token()",
+      "problem": "The rendered overview has an excellent direct-child checklist, but users who land directly on method docs may not see the compact child-opener predicate.",
+      "suggestion": "Cross-link the direct-child opener checklist from both get_current_depth() and next_token(), emphasizing that depth alone is insufficient without token type and non-closer checks."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_tag( 'A' )` to visit anchor openers in document order. For each anchor I read `href` with `get_attribute()` and only kept it when the documented return type was a string, then walked forward with `next_token()` while the current depth stayed inside the anchor and concatenated only `#text` tokens via `get_modifiable_text()` so markup was ignored and character references were already decoded.",
+  "confidence": 95
+}

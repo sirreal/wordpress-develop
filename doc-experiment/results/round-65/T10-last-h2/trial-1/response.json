@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor` because the task depends on document structure and needs the last `H2` in source order. The function scans tokens with `next_token()`, remembers the last opening `H2` via `set_bookmark()`, then returns to it with `seek()` and adds the `final-section` class with `add_class()`, finishing with `get_updated_html()`; it falls back to the original HTML if parsing fails.",
+  "confidence": 88
+}

@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-identical to the reference solution: construct WP_HTML_Tag_Processor, drain with `while ($processor->next_token()) continue;`, return `paused_at_incomplete_token()`. Correct processor choice (Tag Processor is the right tool; the job is purely lexical truncation detection, no structure needed). Both methods exist and are documented (tag-processor.md lines 962, 1015). This is exactly the recipe in the `paused_at_incomplete_token()` docblock (lines 1033-1039). All 9 hidden cases pass, including the conceptual traps: lone trailing `<` returns false, unclosed `<div>text` returns false (lexically complete), unterminated SCRIPT returns true. No doing_it_wrong records. Self-reported confidence 92 was if anything slightly low."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and the reference (only comment wording differs). Same correct idiom, same two documented methods, no hallucinated API. All 9 cases pass, no doing_it_wrong. Explanation correctly articulates that `next_token()` returns false at an incomplete token and that structurally-unclosed-but-lexically-complete elements yield false. Clean."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same reference idiom plus a docblock comment on the function. Correct processor, no undocumented calls, all 9 cases pass with no doing_it_wrong. Explanation explicitly names the SCRIPT/STYLE special-element case and the `<div>text` false case, showing the subject understood the lexical-vs-structural distinction the task warned about. Clean."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three produced the canonical solution and passed all 9 hidden cases (27/27 case-results pass, zero _doing_it_wrong records). This task is a documentation success story, and the success traces to one specific, well-engineered passage.\n\nWhat the docs did well: The `paused_at_incomplete_token()` method docblock (html-tag-processor.md lines 1015-1047) contains the exact production recipe the task required, including the second example (lines 1033-1039) that drains the whole document with `while ($processor->next_token()) { continue; }` before reading the flag, prefaced by the crucial sentence \"In a longer document, drain all tokens first; this method reports the state at the point scanning stopped.\" This pre-empts the single most likely bug — calling `paused_at_incomplete_token()` after a single `next_tag()`/`next_token()` and getting a premature answer. All three subjects lifted this idiom verbatim. The method also appears in the Method Index (line 362) and is cross-referenced from `next_tag()` (line 941), so it was highly discoverable.\n\nThe conceptual trap in this task is distinguishing lexically-incomplete input (true: `<div class=\"x`, `<!-- unfinished`, `<script>var x=1;`) from structurally-unclosed-but-lexically-complete input (false: `<div>unclosed element`, lone trailing `<`). The docs cover the non-obvious half of this — that an unterminated SCRIPT/STYLE counts as incomplete because the special element's start..end is treated as one token — in the \"When matching fails\" section (lines 109-119) and the special-elements list (lines 121-141, 277-294). Subjects in trials 2 and 3 explicitly cited the SCRIPT case in their explanations, indicating the docs successfully transmitted that rule.\n\nNear-misses in the explanations: none material. The lone-`<`-is-text and `<div>text`-is-complete behaviors were supplied by the task description itself rather than derived from the docs; the docs never state outright that a trailing bare `<` is a complete text token (it is — `paused_at_incomplete_token()` returns false). Had the task not spelled that out, a subject could plausibly have guessed wrong, since nothing in the two markdown files addresses the lone-`<` boundary case. This is a latent gap that this particular task masked.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() (html-tag-processor.md, method docblock ~lines 1015-1047)",
+      "problem": "The docblock explains what makes the processor pause (input ends mid-tag) but never enumerates which trailing constructs are NOT incomplete. A trailing bare `<` is a complete `#text` token (returns false), and an element left open like `<div>text` is structurally unclosed yet lexically complete (also false). Subjects only got these right because the task description happened to spell them out; the docs alone leave the boundary ambiguous, and a reader could reasonably assume a dangling `<` or an unclosed element 'pauses' the processor.",
+      "suggestion": "Add one or two contrast lines distinguishing lexical incompleteness from structural incompleteness, e.g.: 'This reports only LEXICAL truncation — input that ends partway through a single token. It returns false for a document whose tokens are all whole even if elements are left open: `<div>text` is complete (the DIV opener is a finished token; the missing `</div>` does not count), and a lone trailing `<` is a complete text node, not an unfinished tag.' This generalizes beyond the task and inoculates against the most natural misreading."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — 'When matching fails' / special self-contained elements (html-tag-processor.md ~lines 109-141)",
+      "problem": "The text states an unclosed special element (STYLE/SCRIPT with no closing tag) 'counts as an incomplete tag' and 'pauses the processor', but this fact is only reachable via `next_tag()` returning false; it is not cross-linked from `paused_at_incomplete_token()`. A reader who lands on `paused_at_incomplete_token()` first will not learn that `<script>var x=1;` (no `</script>`) reports true even though the `<script>` opener itself was syntactically complete.",
+      "suggestion": "From the `paused_at_incomplete_token()` docblock, add a one-line note and {@see} cross-reference: 'An unterminated special element (SCRIPT, STYLE, TITLE, TEXTAREA, etc.) whose content runs to end-of-input also pauses the processor, because such an element is scanned as a single token from opener through closer.' This ties the two scattered facts together for anyone reaching for truncation detection."
+    }
+  ]
+}

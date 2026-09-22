@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for structural scanning, then a depth-bounded `next_token()` walk to count only direct `LI` children of the first `UL` or `OL`. I reject truncated or unsupported input by checking `paused_at_incomplete_token()` and `get_last_error()` before applying the bookmarked edit with `set_bookmark()`, `seek()`, `set_attribute()`, and `get_updated_html()`.",
+  "confidence": 92
+}

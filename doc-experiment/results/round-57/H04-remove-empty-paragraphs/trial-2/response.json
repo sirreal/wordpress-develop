@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_token()`, `serialize_token()`, `get_token_name()`, `is_tag_closer()`, `get_current_depth()`, `get_last_error()`, and `paused_at_incomplete_token()` APIs. The function streams the fragment into normalized token serialization while buffering each `P` subtree so it can drop only paragraphs that contain no intervening tokens at all, and it falls back to the original HTML if parsing does not complete cleanly.",
+  "confidence": 86
+}

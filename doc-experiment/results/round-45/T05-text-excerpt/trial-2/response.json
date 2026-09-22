@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then walks tokens with `next_token()`, appending only ordinary `#text` tokens plus opener-carried text from `TITLE` and `TEXTAREA` via `get_modifiable_text()`. That follows the documented text-extraction rules, automatically gets decoded character references where HTML defines them, excludes `SCRIPT` and `STYLE`, and truncates safely by Unicode code points with `mb_strlen()` and `mb_substr()` in UTF-8.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to scan through the HTML document and find all H2 tags. It maintains a bookmark at each H2 tag encountered, releasing the previous bookmark as a new one is set. Once all tags are scanned, it seeks back to the last H2 bookmark, adds the 'final-section' class using add_class(), and returns the updated HTML via get_updated_html(). H2 tags inside comments are automatically ignored by the Tag Processor since they are not parsed as real tags.",
+  "confidence": 75
+}

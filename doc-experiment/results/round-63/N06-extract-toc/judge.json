@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 82,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor, WP_HTML_Processor::create_fragment(), and only documented methods. The main API-pattern failure is control flow: it skips every non-#tag token before the #text append branch, making text collection unreachable. It otherwise uses a plausible single-cursor state machine with depth and handles empty headings/no matches structurally."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used documented APIs correctly: create_fragment(), next_token(), get_token_type(), is_tag_closer(), get_tag(), get_current_depth(), and get_modifiable_text(). It follows the subtree text recipe and handles decoded entities, empty headings, uppercase source tags, and implied heading closes. Minor idiom demerit: outer next_token() plus inner next_token() is close to the shared-cursor nested-loop pattern the docs warn about, though it is safe for these boundaries."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and only documented APIs. The outer next_tag() scan plus depth-bounded next_token() subtree walk matches the documented pattern closely, and get_modifiable_text() is used only on #text tokens. Minor demerit only for redundant next_tag(array('tag_name'=>null)) and is_tag_closer() guard, since plain next_tag() already finds any opener and skips closers by default."
+    }
+  ],
+  "failure_analysis": "Trial 1 failed basic-h1-h3, all-heading-levels, nested-text-and-entities, case-insensitive-source, and implied-heading-close for the same reason: it treated text extraction as if it could happen inside a tag-only branch. After `if ( '#tag' !== $processor->get_token_type() ) continue;`, the later `'#text' === $processor->get_token_type()` check can never be true. This is a misconception about `next_token()` and `get_token_type()`: a matched token is either a tag, text node, comment, etc., not both a tag and text. The relevant docs were present under `WP_HTML_Processor` > `Recipe: collect DOM-style text from a subtree`, `next_token()`, and `get_token_type()`, which explicitly show appending only `#text` tokens reached by the walk. The nested-text-and-entities case did not expose a decoding misconception: trial 1 selected `get_modifiable_text()`, but never reached it. The implied-heading-close case also shows the docs worked for structure: all trials found both headings, and the passing trials relied on the virtual closer/depth behavior documented under `Supported markup`, `next_token()`, and `get_current_depth()`. No trial used undocumented methods, and no `_doing_it_wrong` records appeared.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock and the Overview `collect DOM-style text from a subtree` recipe",
+      "problem": "The docs warn against nested loops and recommend explicit state for repeated regions, but they do not give a complete single-loop state-machine example for collecting text from multiple matched subtrees. Trial 1 attempted that pattern but placed text handling under a tag-only guard.",
+      "suggestion": "Add a general repeated-subtree text extraction example that handles `#text` tokens at top level while a collection state is active, then separately handles `#tag` openers/closers or depth exits. Explicitly show that text handling must not be nested beneath a `#tag` filter."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_token_type() / inherited WP_HTML_Processor method docs",
+      "problem": "The method lists token type values, but the mutual exclusivity and control-flow implication are easy to miss in token loops.",
+      "suggestion": "Add a short note: each matched token has one token type; code that continues unless the type is `#tag` will skip all `#text` tokens. Pair it with a tiny positive/negative snippet for ordering token-type branches."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() query docs",
+      "problem": "Passing `array( 'tag_name' => null )` and then checking `is_tag_closer()` is documented and works, but it suggests some ambiguity about the simplest way to scan all openers and when closers are visited.",
+      "suggestion": "Clarify that `next_tag()` with no argument is the idiomatic scan for any opening tag, that `tag_name => null` is equivalent for matching any tag name, and that closer checks are only needed when `tag_closers => 'visit'` is requested."
+    }
+  ]
+}

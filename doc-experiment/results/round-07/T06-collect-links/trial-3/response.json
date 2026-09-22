@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find all A tags with href attributes. For each matching tag, it records the depth before iterating through tokens, then accumulates all #text tokens at the same or deeper level (which handles nested markup). The text is automatically decoded by get_modifiable_text(). Each href attribute value is returned as reported by get_attribute() (decoded string or true for valueless attributes).",
+  "confidence": 88
+}

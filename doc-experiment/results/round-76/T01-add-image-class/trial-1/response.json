@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` to scan only real `img` tags case-insensitively with `next_tag( 'img' )`, then applied `add_class( 'wp-image' )` to each match. `get_updated_html()` returns the original document with only the queued attribute edits applied, preserving all untouched bytes exactly.",
+  "confidence": 98
+}

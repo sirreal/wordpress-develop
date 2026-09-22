@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly chose WP_HTML_Processor::create_fragment() and walked tokens with next_token(), get_token_type(), get_modifiable_text(), and serialize_token(). The extra WP_HTML_Tag_Processor template for '<mark>' is documented and safe, but less direct than serializing the matched token inside fixed wrapper markup. Small edge-policy penalty for returning raw input on create_fragment()/get_last_error() failure, which would not be normalized."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Uses the documented, idiomatic pattern almost exactly: BODY fragment processor, #text-only token walk, decoded get_modifiable_text() matching, and accumulated serialize_token() output. WP_HTML_Processor::normalize() is documented; its use is confined to the error fallback. Minor penalty only for redundant get_modifiable_text() calls and a slightly muddy error fallback policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor choice and clean token-by-token serialization with only ordinary #text nodes checked, which handles decoded entities, comments, attributes, split text, and special text-bearing elements appropriately. Small penalty for returning raw input on parser creation/error fallback, which conflicts with a normalized-output contract if unsupported input is encountered."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there are no failed cases to attribute to a misconception. The docs did well on the core decision points: html-processor.md explains under processor choice/create_fragment() that BODY fragments and normalized output call for WP_HTML_Processor; next_token(), get_token_type(), and get_modifiable_text() distinguish ordinary #text from comments and special element text; get_modifiable_text() states that #text is already decoded; and serialize_token() explicitly says concatenating walked tokens reconstructs normalized serialization and can be used for rewrite loops. Those passages directly supported the entity-encoded keyword, comment, attribute, split-across-elements, unclosed-tag, and normalization cases. Near-misses were in fallback behavior: the three candidates chose different parser-error policies, and two returned raw input, suggesting the docs still leave room for confusion about normalized-output fallbacks after get_last_error() or create_fragment() returning null.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md: serialize_token() and the token-by-token rewrite overview",
+      "problem": "The docs say callers may emit extra markup around selected tokens, but the examples do not show a minimal normalized rewrite that inserts fixed literal markup while using serialize_token() for the original token.",
+      "suggestion": "Add a general rewrite example showing fixed markup inserted before/after a selected token and state that the accumulated string is the normalized output; get_updated_html() is for queued edits, not for reading a token-walk rewrite."
+    },
+    {
+      "location": "html-processor.md: get_last_error(), serialize_token(), and paused_at_incomplete_token guidance",
+      "problem": "Candidates used inconsistent fallback policies after parser errors, including returning raw input, which is not normalized.",
+      "suggestion": "Add a short policy note: for normalized-output functions, raw input is not a normalized fallback; unsupported parser aborts should return an explicit failure/default value or a separately defined fallback, while incomplete trailing syntax can be accepted or rejected according to caller policy."
+    },
+    {
+      "location": "html-processor.md: create_fragment() return value",
+      "problem": "The static|null return type is documented, but the docs do not clearly enumerate when null is expected for the default BODY context or what transformation functions should return when construction fails.",
+      "suggestion": "Document the likely null cases and recommend a consistent handling pattern for BODY-fragment transformations that need normalized output."
+    },
+    {
+      "location": "html-tag-processor.md: Building markup from a template / get_updated_html()",
+      "problem": "The template-building pattern is useful, but when combined with HTML Processor rewrites it can obscure that get_updated_html() preserves untouched bytes and does not normalize an arbitrary input document.",
+      "suggestion": "Cross-link this section to HTML Processor serialization guidance and explicitly distinguish standalone generated templates from normalized whole-fragment serialization."
+    }
+  ]
+}

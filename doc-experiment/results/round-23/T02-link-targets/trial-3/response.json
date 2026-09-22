@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat attribute edit that must preserve all untouched bytes exactly. It scans each `A` opener with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so `href=\"\"` returns an empty string and bare `href` returns `true` while missing `href` returns `null`, then overwrites or creates `target` via `set_attribute( 'target', '_blank' )` and returns the result with `get_updated_html()`.",
+  "confidence": 97
+}

@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor choice with WP_HTML_Processor::create_fragment(). All API calls are documented. Uses a solid one-pass next_token() state machine, get_attribute() with is_string() for href, and #text plus get_modifiable_text() for decoded link text. Minor reservation: it manually tracks anchor scope instead of using the depth/breadcrumb subtree recipe, but this is still consistent with documented closer-driven token walking."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor choice and no undocumented API usage. This is closest to the reference: next_tag('A'), depth-bounded next_token() walk, #text filtering, get_modifiable_text(), and string-only href handling. Main penalty: it returns an empty array whenever paused_at_incomplete_token() is true after the scan, which over-applies a complete-input policy to a read-only extraction. A probe with a valid link followed by an incomplete trailing tag returns [] here while the reference returns the collected link."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly uses WP_HTML_Processor::create_fragment() and only documented methods. The #tag guard, get_tag(), is_tag_closer(), get_attribute(), #text filtering, and get_modifiable_text() are all appropriate. Minor reservation: it appends text to every active link in a manual stack, which is a less precise mental model than using the processor's parsed subtree boundary or current-region state; it works for these cases because the HTML Processor emits structural/virtual closers."
+    }
+  ],
+  "failure_analysis": "No hidden case failed across the three trials: simple, no-href-excluded, entity-in-href-decoded, valueless-href, image-link-empty-text, entities-in-text, no-links, and unclosed-link all passed in every execution.json. The docs did well on the important concepts: WP_HTML_Processor::create_fragment() is clearly recommended for BODY fragments and structural text extraction; the DOM-style text recipe shows next_tag()/next_token(), get_current_depth(), #text filtering, and get_modifiable_text(); get_attribute() documents string|true|null and decoded attribute values; get_modifiable_text() documents decoded #text values; next_token() documents virtual/end-of-input closers, which explains why the unclosed-link case works. The main near-miss was trial-2's global fail-closed policy for paused_at_incomplete_token(): the docs say read-only extraction policy is caller-defined and visited tokens remain usable, but the examples still make it easy to treat truncation as a reason to erase all accumulated data.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and the read-only text extraction recipe",
+      "problem": "The docs state that paused_at_incomplete_token() is a caller policy for read-only extraction, but there is no compact example showing a successful extraction before a later incomplete trailing token. Trial-2 therefore treated any incomplete trailing syntax as a reason to return an empty result.",
+      "suggestion": "Add a short read-only extraction example where tokens are collected before a trailing incomplete token, and explicitly say that preserving accumulated data is valid when the function contract is best-effort or fragment-oriented; reject only when the contract requires complete source bytes."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() and WP_HTML_Processor::get_attribute() return docs",
+      "problem": "The return description says boolean attributes return true, but the practical contract is broader: an attribute present without a syntactic value returns true even when the attribute name is not a known boolean attribute, such as href.",
+      "suggestion": "Define true as 'attribute present with no value in source', null as absent/unavailable, and '' as an explicitly empty value. Include one non-boolean valueless example alongside the boolean-style example."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region guidance",
+      "problem": "The docs contain a first-element subtree example and a DT state-machine example, but not a concise general recipe for collecting many repeated element subtrees in document order. Candidates split between depth-bounded nested walks and manual active stacks.",
+      "suggestion": "Add a general repeated-region extraction recipe: detect an opener, initialize current state, append only #text tokens while inside, and finalize on the processor-reported closer, noting that virtual closers cover implied and end-of-input closes."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() docblock",
+      "problem": "The docs say get_tag() returns null if no tag is matched, but do not directly spell out behavior on non-tag tokens during next_token() scans. This encourages unguarded get_tag() calls in token loops.",
+      "suggestion": "Add a note that text, comment, doctype, and other non-tag tokens return null from get_tag(); for tag-only logic, either use next_tag() or guard next_token() code with get_token_type() === '#tag'."
+    }
+  ]
+}

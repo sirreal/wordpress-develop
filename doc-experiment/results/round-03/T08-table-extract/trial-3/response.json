@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then next_tag() to find the first TABLE element. It then iterates through tokens using next_token(), tracking depth to stay within the table. For each TR element, it collects cells, and for each TD/TH cell, it accumulates all text nodes (get_modifiable_text()) until the cell closes, using get_current_depth() to determine nesting levels. This handles optional closing tags and tbody/thead elements naturally since the processor treats them as part of the HTML structure.",
+  "confidence": 75
+}

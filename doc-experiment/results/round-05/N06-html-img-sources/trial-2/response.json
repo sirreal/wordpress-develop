@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Processor::create_fragment() to parse HTML according to HTML5 rules (ensuring browser-compatible parsing of malformed markup), iterates through all IMG tags using next_tag(), filters for HTML namespace only (excluding SVG IMAGE elements), and returns the decoded src values from get_attribute() which automatically decodes character references. The condition checks that src is not null, not true (boolean attribute), and not an empty string.",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, `get_attribute_names_with_prefix( 'data-track-' )` to identify only matching tracking attributes, and `remove_attribute()` to delete them while leaving similar names like `data-track` and `data-tracker` untouched. The modified document is returned with `get_updated_html()`.",
+  "confidence": 98
+}

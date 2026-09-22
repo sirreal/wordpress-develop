@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor; task is tag-level, no structural/breadcrumb need). Every method verified present in html-tag-processor.md: next_tag, set_bookmark, has_bookmark, seek, add_class, release_bookmark, get_updated_html. Used the exact documented single-pass 'last matching tag' bookmark idiom (set_bookmark re-set on each match, seek once after scan) from the set_bookmark() section, lines 1124/1161. Guarded the no-H2 case with has_bookmark() instead of the reference's $found flag — equivalent and fully documented. add_class on existing-class tag handled correctly (docs note whitespace/order preservation). Comment-h2 excluded because next_tag matches only real tags. 6/6 passed, no _doing_it_wrong. Trailing release_bookmark before return is harmless/unnecessary but documented. Minor: lowercase 'h2' in tag_name relies on documented ASCII case-insensitive matching (line 937) — correct."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Identical structure to trial-1, using the bare-string next_tag('h2') form (documented at line 59). All methods documented and verified. Same correct single-pass bookmark idiom, has_bookmark guard, add_class, get_updated_html. Explanation correctly states re-setting a bookmark name moves it and that comment H2s are ignored — both backed by the docs. 6/6 passed, no misuse. Same trivial unnecessary release_bookmark at end."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same correct implementation, array tag_name form. Explanation explicitly cites the documented bookmark idiom ('documented in the WP_HTML_Tag_Processor bookmark section'), showing the doc passage was found and applied as intended. All methods verified in docs; no hallucination; 6/6 passed; no _doing_it_wrong. Equivalent quality to the other two trials."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 6 hidden cases (two-headings, single-heading, no-headings-unchanged, many-headings, comment-h2-not-counted, existing-class) with no _doing_it_wrong or trigger_error records, and all called only documented methods.\n\nThis is a documentation success case. The decisive doc passage is the set_bookmark() section of html-tag-processor.md, which at line 1124 spells out the exact pattern the task requires: \\\"A common use: to remember 'the last matching tag' in a single pass, re-set the same bookmark name on every match, then seek to it once after the scan completes (re-setting a name moves the bookmark...).\\\" Line 1161 reinforces it: \\\"Setting a bookmark with a name that is already in use MOVES that bookmark... Re-setting the same name on every match is the supported idiom for remembering 'the last X seen so far'... This is how to track the last occurrence of something in a single pass without hitting the bookmark limit.\\\" All three subjects discovered and applied this idiom verbatim; trial-3's explanation explicitly cites it.\n\nSupporting passages that prevented other near-misses:\n- The no-H2 path was handled with has_bookmark() (documented, line 1368), correctly returning input unchanged; the bookmark-was-never-set state was understood.\n- Tag-name case-insensitivity (line 937: \\\"a query of img matches <IMG>...\\\") let lowercase 'h2' queries match the lowercase test input without any subject second-guessing casing — no failures here, though see doc_gaps for a latent risk.\n- The comment-h2 case passed for free because next_tag only matches real tags; subjects correctly reasoned that comment contents are skipped (the docs frame next_tag as finding HTML tags, and the document-structure discussion implies comment content is not tag content).\n- add_class preserved existing classes and whitespace/ordering (line 328 documents this), so the existing-class case (outro -> 'outro final-section') passed.\n\nNear-miss in the explanations only: all three append release_bookmark() right before returning, which is pointless (the processor is discarded immediately). Not wrong, but it slightly misapplies the docs' \\\"Release bookmarks when they are no longer needed\\\" guidance, which targets long-lived loops, not end-of-function cleanup. No functional impact.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — query / tag_name semantics (html-tag-processor.md ~lines 927-952)",
+      "problem": "The docs confirm tag-name matching is ASCII case-insensitive, but do not state that get_tag() always returns the UPPERCASE name and that this is the canonical form to compare against. Subjects here wrote tag_name => 'h2' (lowercase) and it worked, but a subject who instead compares get_tag() === 'h2' (lowercase) in a token-walking loop would silently never match, since get_tag() returns 'H2'. The asymmetry (query is case-insensitive, get_tag() output is uppercased) is documented in two separate places (line 937 and line 1572) but never connected.",
+      "suggestion": "In the next_tag() query description, add a one-line cross-reference: 'Queries are case-insensitive, but get_tag() returns the uppercased name — compare against uppercase literals (e.g. get_tag() === \\'H2\\').' This generalizes beyond this task to any token-walking + get_tag comparison."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::release_bookmark() (html-tag-processor.md ~lines 1180-1189) and set_bookmark() guidance (line 1110)",
+      "problem": "The docs say 'Release bookmarks when they are no longer needed' and 'Releasing a bookmark frees up the small performance overhead it requires,' which all three subjects over-applied by calling release_bookmark() immediately before returning get_updated_html() — pointless work since the processor is then discarded. The docs do not clarify when releasing actually matters (inside long-running loops or before the bookmark limit is hit) versus when it is superfluous (just before the processor goes out of scope).",
+      "suggestion": "Add a sentence scoping the advice: 'Releasing matters when a processor continues to be used after the bookmark is done with, or when approaching the bookmark limit in a loop; it is unnecessary right before the processor is discarded.' Prevents cargo-cult cleanup calls."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() — handling of comments / non-tag content (html-tag-processor.md ~lines 47-63, 927-952)",
+      "problem": "The task hinges on H2 inside an HTML comment NOT counting, and all subjects got it right, but only by inference: the docs say next_tag 'finds the next HTML tag' without ever explicitly stating that tag-like text inside comments, CDATA, or script/style RAWTEXT is not matched. A weaker subject could doubt this and add fragile manual comment-skipping logic.",
+      "suggestion": "Add one explicit sentence to next_tag(): 'Only real parsed tags are matched; tag-like text inside comments, CDATA, or raw-text elements (script/style) is never returned as a tag.' This is a general guarantee that recurs across many tasks."
+    }
+  ]
+}

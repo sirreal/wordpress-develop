@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to properly parse the HTML and extract text. It creates a fragment processor, finds the first H1 tag using next_tag(), records its depth, then iterates through tokens with next_token() while tracking depth. It collects all #text tokens (whose content is automatically decoded by get_modifiable_text(), converting character references like &amp; to &) and concatenates them. It stops when the depth decreases below the H1 depth, indicating the H1 element has closed. Returns null if no H1 is found, or the accumulated text otherwise.",
+  "confidence": 92
+}

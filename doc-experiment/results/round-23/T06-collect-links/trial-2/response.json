@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction depends on document structure. It finds each `A` opener with `next_tag( 'A' )`, filters to links whose `href` is a string via `get_attribute()`, then walks that anchor\u2019s subtree with `next_token()` and `get_current_depth()`, concatenating only `#text` tokens with `get_modifiable_text()` so character references are already decoded and markup contributes nothing.",
+  "confidence": 91
+}

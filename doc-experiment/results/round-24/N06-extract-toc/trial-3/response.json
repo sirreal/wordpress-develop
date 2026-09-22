@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks the document once with `next_token()`. It starts a TOC entry on each heading opener, appends heading text from `#text` tokens via `get_modifiable_text()`, also includes text carried on special element openers inside headings by calling `get_modifiable_text()` on opening `#tag` tokens, and finalizes each entry when the matching heading closer is visited with `is_tag_closer()` and `get_token_name()`.",
+  "confidence": 86
+}

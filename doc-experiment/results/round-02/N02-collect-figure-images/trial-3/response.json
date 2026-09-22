@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all IMG tags using next_tag(). For each IMG found, it retrieves the breadcrumbs (the path from root to current element) using get_breadcrumbs() and checks if FIGURE appears anywhere in that path, indicating the IMG is nested at any depth inside a FIGURE. The get_attribute() method returns decoded src values. Only non-empty string src values are collected, maintaining document order since the processor scans linearly.",
+  "confidence": 78
+}

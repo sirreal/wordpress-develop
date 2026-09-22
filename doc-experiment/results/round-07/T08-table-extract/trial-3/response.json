@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor's create_fragment() method to parse the HTML with proper browser-like handling of missing closing tags. It finds the first TABLE element, then iterates through all tokens within the table using next_token(). When a TD or TH tag opens, it begins collecting text from consecutive #text tokens using get_modifiable_text() (which returns already-decoded text). When cells and rows close (either explicitly or implicitly), they're added to the result. The processor's get_current_depth() ensures we stop when exiting the table, and breadcrumbs help identify table structure.",
+  "confidence": 45
+}

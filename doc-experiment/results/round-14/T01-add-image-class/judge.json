@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical reference exactly: WP_HTML_Tag_Processor, while-loop over next_tag(array('tag_name'=>'img')), add_class('wp-image'), get_updated_html(). Correct processor choice (flat class edit, byte-exact preservation -> Tag Processor, per the 'Which processor should I use?' section). Every method is verbatim-documented; no _doing_it_wrong records. Idiomatic token-walking via next_tag loop + get_updated_html. 8/8 cases pass. Explanation correctly cites case-insensitive next_tag matching and that comments are skipped because next_tag only matches real tags. Minor near-miss: explanation does not name the truncated-input/pausing behavior that makes the incomplete-tag case work, though the code handles it correctly by virtue of next_tag returning false."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-1 (canonical reference). Correct processor, no hallucinated or undocumented API, idiomatic loop + get_updated_html, 8/8 pass. Explanation is accurate: case-insensitive matching, comments naturally skipped, byte-for-byte preservation, queued updates applied by get_updated_html. Same minor near-miss: incomplete-tag handling is correct but not explicitly explained."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation (canonical reference) plus a docblock on the function. Correct processor, fully documented API, idiomatic, 8/8 pass. Strongest explanation of the three: directly quotes the docs ('only real HTML tags can match') for comment handling and notes add_class preserves existing class order without reordering. No near-misses of substance; the incomplete-tag case works via next_tag returning false, which the explanation implies through 'byte-exact preservation' but does not name explicitly."
+    }
+  ],
+  "failure_analysis": "No failures. All three trials are byte-identical to reference.php and pass all 8 hidden cases. This is a basic smoke test, and the two markdown files supported it cleanly. What the docs did well, mapped to the specific edge cases:\n\n- existing-classes / class ordering: The 'Modifying CSS classes for a found tag' section and the worked add_class examples (html-tag-processor.md lines 184-217) show add_class appending to existing classes and preserving order; the Design-and-limitations note (line 328) restates that add_class 'preserve[s] whitespace and the class ordering'. All three explanations referenced this correctly.\n\n- uppercase-tag: The next_tag() method heading 'What this matches' bullet (line 937) states tag-name matching is ASCII case-insensitive and 'the source document's original casing is preserved in the output.' This directly produced the correct '<IMG class=... SRC=...>' output and was cited by the explanations.\n\n- inside-comment-ignored: The next_tag() 'Only real HTML tags can match' bullet (line 939) explicitly says tag-like text inside comments is text, never matched. Trial-3 quoted it.\n\n- incomplete-tag-at-end: The next_tag() truncated-input bullet (line 941) plus the 'When matching fails' section (lines 92-119) and paused_at_incomplete_token explain that a document ending mid-tag pauses the processor and the incomplete tag is never matched/modified. The code handles this implicitly (next_tag returns false), so no subject needed paused_at_incomplete_token. Near-miss: none of the three explanations explicitly named this mechanism; they leaned on the generic 'byte-for-byte preservation' claim. Correct outcome, slightly under-explained reasoning.\n\n- unquoted-attributes: Expected output keeps src=a.jpg and width=10 unquoted while the added class is double-quoted. The Design note (line 328) covers this: 'all attribute updates store their values as double-quoted strings' — meaning only the touched/added attribute is requoted, untouched ones pass through verbatim. No subject explicitly reasoned about this, but the API does the right thing by default, so it did not need to.\n\n- Processor selection: The 'Which processor should I use?' section (lines 18-25) cleanly steered all subjects to the Tag Processor for 'flat, position-based work ... byte-precise edits that preserve the rest of the document exactly.' No subject over-reached for the HTML Processor / breadcrumbs.\n\nNet: a well-documented happy path. The only documentation observation worth generalizing is that the incomplete-tag-at-end safety is somewhat implicit — it is the absence of a match rather than something the writer must do — and none of the explanations articulated why it is safe, suggesting the connection between 'next_tag returns false on truncated input' and 'therefore the trailing bytes are preserved untouched' could be surfaced more prominently at the add_class/get_updated_html usage level.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() / 'Modifying CSS classes for a found tag' section",
+      "problem": "The add_class examples show appending to an existing class attribute and the no-op case, but never show the most common starting point: a tag with NO class attribute at all. A reader cannot tell from the section alone where a freshly-created class attribute is placed in the tag (sorted after the tag name) or how it is quoted. Subjects got this right only because the behavior is benign, not because it is documented.",
+      "suggestion": "Add one example covering 'tag with no existing class' -> 'class=\"x\" added', and cross-reference the set_attribute note that ADDED attributes are placed after the tag name sorted by name and always double-quoted. This generalizes the class-creation case rather than just the class-append case."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor 'Design and limitations' -> Text Encoding / attribute quoting note (line 328)",
+      "problem": "The fact that UNTOUCHED attributes are preserved byte-for-byte (e.g. unquoted src=a.jpg and width=10 survive a class edit) is only inferable from the inverse statement that 'all attribute updates store their values as double-quoted strings.' A reader optimizing for 'preserve everything byte-for-byte' has to reason by negation.",
+      "suggestion": "State affirmatively that attributes which are not modified are emitted exactly as written (including unquoted or single-quoted values), and only added or updated attributes are re-serialized as double-quoted. This is a general, reusable guarantee that underpins the byte-exact-preservation promise."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag() 'What this matches' (truncated-input bullet) and get_updated_html()",
+      "problem": "The docs explain that truncated input pauses the processor and the incomplete tag is never matched, but they do not close the loop to the practical consequence relevant to a simple add-class-and-return flow: because the incomplete tag is never matched, its bytes pass through get_updated_html() unchanged. Subjects produced the correct output but none of the explanations articulated this chain, indicating the cause-and-effect is not obvious from the current wording.",
+      "suggestion": "In the next_tag() truncated-input bullet (or a short note on get_updated_html()), add a sentence: an unmatched tag (including a truncated trailing tag) is never modified, so its original bytes are returned verbatim by get_updated_html(). This generalizes to all 'walk-and-edit then return' patterns."
+    }
+  ]
+}

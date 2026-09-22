@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then scanned for the first `UL` or `OL` opener, bookmarked it, walked tokens with `next_token()` to count direct `LI` child openers at one depth deeper than the list, and finally sought back to the bookmarked opener and set `data-item-count` with `set_attribute()` before reading the result via `get_updated_html()`. I return the original HTML if no list is found, or if scanning stops incomplete or with an HTML processor error.",
+  "confidence": 92
+}

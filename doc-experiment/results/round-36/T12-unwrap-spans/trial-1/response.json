@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, skips every `SPAN` opener and closer by checking `get_tag()`, and concatenates `serialize_token()` for all other tokens. That produces normalized HTML for the rewritten fragment while preserving span contents in place. It also checks `get_last_error()` and falls back to the input if the HTML Processor aborts on unsupported markup.",
+  "confidence": 82
+}

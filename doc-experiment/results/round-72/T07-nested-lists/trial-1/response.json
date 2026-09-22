@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to get structural awareness of the fragment, then walked open tags with `next_tag()` and inspected `get_breadcrumbs()` to detect whether each `UL` or `OL` had an ancestor list. Matching tags get `add_class('nested-list')`, and `get_updated_html()` preserves all untouched bytes exactly.",
+  "confidence": 95
+}

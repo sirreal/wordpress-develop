@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` with a literal template that already includes `src`, `alt`, and a placeholder text node, so the API preserves the required attribute order and safely encodes all untrusted values. The function sets the image attributes with `set_attribute()`, replaces the figcaption placeholder via `next_token()` plus `set_modifiable_text()`, and returns the final fragment with `get_updated_html()`.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_full_parser()` because the input is a complete HTML document, then scans forward with `next_tag( 'TITLE' )` and returns the `<title>` element\u2019s decoded text via `get_modifiable_text()`. If no `<title>` tag is found, it returns `null`; an empty title correctly returns an empty string.",
+  "confidence": 95
+}

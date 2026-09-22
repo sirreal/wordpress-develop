@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction is structure-aware. It walks the fragment once with `next_token()`, starts collecting when it sees an `H1` through `H6` opener, appends text from `#text` tokens via `get_modifiable_text()`, also includes text carried on special textual element openers (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`), and finalizes each entry when the matching heading closer is visited. It also checks `paused_at_incomplete_token()` and `get_last_error()` to avoid returning a partial TOC from truncated or unsupported input.",
+  "confidence": 79
+}

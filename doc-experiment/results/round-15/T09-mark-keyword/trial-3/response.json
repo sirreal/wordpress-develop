@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to parse the HTML fragment and walk through all tokens with next_token(). For each text token (#text), it retrieves the decoded text using get_modifiable_text() and checks if the keyword is a substring using strpos() with case-sensitive comparison. Text nodes containing the keyword are wrapped by emitting literal <mark> tags around the serialized token. All tokens are serialized using serialize_token(), which produces normalized HTML output with proper encoding and tag closure.",
+  "confidence": 45
+}

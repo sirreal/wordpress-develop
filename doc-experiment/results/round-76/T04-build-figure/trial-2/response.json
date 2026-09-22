@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I built the fragment from a literal HTML template and used `WP_HTML_Tag_Processor` to set `src` and `alt` in place, preserving that attribute order, then walked to the placeholder text node inside `figcaption` and replaced it with `set_modifiable_text()`. The documented APIs used were `__construct()`, `next_tag()`, `set_attribute()`, `next_token()`, `get_token_type()`, `set_modifiable_text()`, and `get_updated_html()`.",
+  "confidence": 97
+}

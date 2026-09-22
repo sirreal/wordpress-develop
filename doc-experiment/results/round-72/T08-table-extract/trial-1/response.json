@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with browser-like table structure, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect only text inside the first table\u2019s rows and cells. The function returns an empty array when no table is found or the fragment cannot be created.",
+  "confidence": 88
+}

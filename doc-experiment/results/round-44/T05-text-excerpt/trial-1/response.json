@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` plus `next_token()`, `get_token_type()`, `get_token_name()`, `is_tag_closer()`, and `get_modifiable_text()` to collect ordinary `#text` tokens and the decoded opener text for `TITLE` and `TEXTAREA`, then truncates by Unicode code points with UTF-8-aware slicing. If the HTML Processor aborts on unsupported markup, it falls back to a best-effort lexical scan with `WP_HTML_Tag_Processor` using the same token rules.",
+  "confidence": 86
+}

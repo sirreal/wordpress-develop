@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness, then walks through every token with next_token(). When a SPAN tag is encountered (either opener or closer), it's skipped via continue, which prevents serialize_token() from including it in the output. All other tokens (text, other tags, closers of non-SPAN elements) are serialized via serialize_token(), which automatically produces normalized output with double-quoted attributes, canonical text encoding, and closed optional tags. This matches the documented pattern for removing elements while keeping contents.",
+  "confidence": 92
+}

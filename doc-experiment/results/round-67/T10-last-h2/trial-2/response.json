@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task is flat, source-order work: scan for each `H2`, remember the last one with a bookmark, then `seek()` back and `add_class()` on that opener. The modified HTML is returned via `get_updated_html()`, and unchanged input is returned if no `H2` is found or the bookmark cannot be revisited.",
+  "confidence": 96
+}

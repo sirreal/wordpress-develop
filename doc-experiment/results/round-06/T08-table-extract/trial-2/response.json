@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML with proper semantic awareness of table structure, including handling of missing closing tags as a browser would. The processor's breadcrumb and depth tracking allow reliable detection of when we exit cells and rows. I iterate through tokens, collecting text from #text nodes within each TD/TH cell, and accumulate rows in order. The get_modifiable_text() method automatically decodes character references. The function returns an empty array if no table is found.",
+  "confidence": 42
+}

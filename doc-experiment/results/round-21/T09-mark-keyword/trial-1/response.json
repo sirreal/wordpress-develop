@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment structurally, then walks every token with `next_token()`. For ordinary `#text` tokens only, it checks the decoded text via `get_modifiable_text()`, and when the keyword is present it emits `<mark>` around that token\u2019s normalized serialization from `serialize_token()`. All other tokens are copied with `serialize_token()`, which preserves the processor\u2019s normalized HTML output and naturally skips special text-bearing element contents because they are not exposed as child `#text` tokens.",
+  "confidence": 87
+}

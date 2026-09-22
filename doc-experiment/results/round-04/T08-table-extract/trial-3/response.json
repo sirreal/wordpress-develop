@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML as a fragment within body context. It searches for the first TABLE element, then iterates through all tokens within the table using next_token(). For each cell (TD or TH), it accumulates text content from all #text tokens within that cell, then adds it to the current row array when the cell closes. Rows are added to the result array when new rows start or at the end. This approach correctly handles HTML5 semantics including implicit table elements and omitted closing tags that a browser would handle.",
+  "confidence": 42
+}

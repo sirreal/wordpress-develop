@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor for structural traversal. All called methods are documented, no _doing_it_wrong records. Uses the documented bookmark, depth-bounded next_token walk, paused_at_incomplete_token/get_last_error clean-scan check, seek, set_attribute, release_bookmark, and get_updated_html pattern."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same strong API adherence as trial-1. It uses the tree-aware processor, documented methods only, and the clean subtree-scan pattern before seeking back to mutate the list opener."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 87,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented API use. It follows the bookmark/depth/seek/get_updated_html pattern, but substitutes a depth-drop/completed flag plus get_last_error for the documented clean-scan test. Missing paused_at_incomplete_token causes edits after truncated input inside the scanned list."
+    }
+  ],
+  "failure_analysis": "The failed hidden cases were incomplete-token-inside-list and incomplete-comment-inside-list, both only in trial-3. The misconception was that reaching the list's virtual closing boundary proves the list was fully scanned, and that get_last_error covers all abnormal parse endings. Actual behavior: for '<ul><li><img src=\"x' and '<ul><li><!-- cut', WP_HTML_Processor still visits virtual LI and UL closers, so depth drops below the UL depth, while paused_at_incomplete_token() is true and get_last_error() remains null. The responsible docs are present but easy to underweight: html-processor.md > Usage > Recipe: scan a region before editing its opener says to check paused_at_incomplete_token() and get_last_error() before applying the edit; html-processor.md > next_token() says virtual closers are structurally reliable but do not prove source bytes were complete; html-processor.md > get_current_depth() repeats that depth boundaries are not completeness checks. The absence is in get_last_error() itself: its docblock does not explicitly say truncated/incomplete input is not reported there and must be checked separately with paused_at_incomplete_token().",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error() docblock",
+      "problem": "The wording can be read as a general parse-failure signal. Trial-3 treated null get_last_error() as proof that a bounded scan completed cleanly.",
+      "suggestion": "State explicitly that incomplete or truncated trailing syntax is not a last error; callers must check paused_at_incomplete_token() separately when completeness matters."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docblock",
+      "problem": "The doc explains virtual closers, but the surprising state where virtual closers are emitted after truncated input is not shown concretely.",
+      "suggestion": "Add a small generic example showing truncated markup producing virtual closing tokens, a depth drop, paused_at_incomplete_token() true, and get_last_error() null."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth() docblock",
+      "problem": "Depth-bounded walks are documented well, but the phrase 'visit every token inside an element' can still encourage treating the boundary as completion.",
+      "suggestion": "Make the clean-scan invariant more prominent: depth drop identifies tree exit only; before mutating from scan results, require ! paused_at_incomplete_token() and null === get_last_error()."
+    }
+  ]
+}

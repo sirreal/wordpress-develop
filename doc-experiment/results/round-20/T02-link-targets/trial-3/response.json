@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for byte-preserving attribute edits: `next_tag( 'A' )` finds each anchor opener, `get_attribute( 'href' )` distinguishes missing `href` from present empty or boolean forms, and `set_attribute( 'target', '_blank' )` overwrites or creates `target` only on matching links before returning `get_updated_html()`.",
+  "confidence": 97
+}

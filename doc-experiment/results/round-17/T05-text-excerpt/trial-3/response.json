@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all tokens with next_token(). For each token with type '#text', it collects the decoded text content via get_modifiable_text(). SCRIPT and STYLE elements are automatically excluded because their contents are not exposed as text nodes according to the HTML API specification. The result is truncated to the specified number of Unicode code points using mb_substr() with UTF-8 encoding to avoid cutting multi-byte characters.",
+  "confidence": 85
+}

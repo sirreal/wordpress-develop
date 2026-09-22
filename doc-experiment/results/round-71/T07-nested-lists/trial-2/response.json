@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so the scan is structure-aware, then walked tags with `next_tag()` and checked `get_breadcrumbs()` to detect whether the current `UL` or `OL` had any `UL`/`OL` ancestor. Matching tags get `add_class( 'nested-list' )`, and `get_updated_html()` returns the fragment with untouched bytes preserved exactly.",
+  "confidence": 89
+}

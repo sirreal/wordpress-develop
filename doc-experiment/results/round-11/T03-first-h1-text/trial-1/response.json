@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find the first H1 element. Once matched on the H1 opener, it records the nesting depth and iterates through tokens while the depth remains at or above the H1's level. For each #text token encountered, it appends the modifiable text (which includes decoded character references). The loop naturally ends when the H1 closes, returning the accumulated text or null if no H1 was found. This approach follows the documented pattern for collecting element text content and handles nested elements, multiple text nodes, and character reference decoding automatically.",
+  "confidence": 92
+}

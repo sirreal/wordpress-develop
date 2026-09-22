@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and find all A tags with href attributes. For each matching A tag, it extracts the href attribute value (which is already decoded by the API) and collects all text node content inside the element using get_modifiable_text(), which returns pre-decoded text. The depth-based loop ensures we only collect text nodes while inside the A element.",
+  "confidence": 60
+}

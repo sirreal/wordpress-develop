@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with proper structural awareness. It iterates through tokens with next_token(), identifies heading openers (H1-H6), and for each heading, walks through child tokens at greater depth to collect all #text nodes, concatenating their decoded text via get_modifiable_text(). The depth tracking ensures text collection stops when exiting the heading element, handling nested markup correctly.",
+  "confidence": 80
+}

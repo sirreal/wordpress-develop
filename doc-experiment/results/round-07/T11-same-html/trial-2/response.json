@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse each HTML fragment, then serialize() to normalize both to a canonical form. The HTML Processor properly handles omitted closing tags, normalizes attribute quoting and casing, and validates complete parsing. Comparing the normalized forms reveals whether the two fragments represent the same DOM structure. The function returns false if either fragment fails to parse/serialize or if their normalized forms differ.",
+  "confidence": 75
+}

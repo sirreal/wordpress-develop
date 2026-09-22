@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This refactored version uses a single loop through all tokens as recommended in the documentation to avoid nested loop issues. It tracks state with $current_cell (null when not in a cell, string when collecting text). When a TD/TH opens, it initializes the cell text collector. Text nodes are appended to the current cell. When a TD/TH closes, the collected text is added to the current row. When a TR closes, the row is added to results. The processor automatically handles implied closing tags per HTML5 rules, so omitted tags are properly closed.",
+  "confidence": 72
+}

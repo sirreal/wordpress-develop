@@ -1,0 +1,71 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-03/N05-document-title/trial-1/candidate.php",
+    "function": "get_document_title",
+    "passed": 2,
+    "total": 7,
+    "cases": [
+        {
+            "id": "standard-document",
+            "status": "fail",
+            "expected": "My Site — Home",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "entities-decoded",
+            "status": "fail",
+            "expected": "Fish & Chips",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-title-null",
+            "status": "pass",
+            "expected": null,
+            "actual": null,
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "empty-title",
+            "status": "pass",
+            "expected": "",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "no-doctype",
+            "status": "fail",
+            "expected": "Bare",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "attributes-on-elements",
+            "status": "fail",
+            "expected": "With Attrs",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        },
+        {
+            "id": "minimal-document",
+            "status": "fail",
+            "expected": "Implied structure",
+            "actual": "",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": []
+        }
+    ]
+}

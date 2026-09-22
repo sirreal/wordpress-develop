@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to preserve fragment byte fidelity while giving structure-aware access via get_breadcrumbs(); then I scanned only opening UL/OL tags with next_tag(), checked whether any ancestor breadcrumb was UL or OL, and applied add_class('nested-list') before returning get_updated_html().",
+  "confidence": 96
+}

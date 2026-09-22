@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then walks opening tags with `next_tag()`. For each `UL` or `OL`, it inspects `get_breadcrumbs()` and adds `nested-list` via `add_class()` only when an ancestor breadcrumb is also `UL` or `OL`, finally returning the byte-preserving edited result with `get_updated_html()`; if the processor cannot be created or aborts on unsupported HTML, it returns the original input unchanged.",
+  "confidence": 88
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() so I could use get_current_depth() to count only direct LI children of the first UL or OL. I guarded the edit with paused_at_incomplete_token() and get_last_error(), and used set_bookmark(), seek(), set_attribute(), and get_updated_html() to update only the found list opener.",
+  "confidence": 91
+}

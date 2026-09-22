@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan tags linearly and preserve untouched bytes exactly. For each matched `A` tag, I checked `get_attribute( 'href' )` for presence, which covers empty-string and boolean `href` forms, then overwrote `target` with `set_attribute( 'target', '_blank' )` and returned the result via `get_updated_html()`.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor`, which is the documented API for byte-preserving attribute edits on matched tags. It scans forward with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so links with `href=\"\"` or boolean `href` still count as present, overwrites or adds `target` via `set_attribute( 'target', '_blank' )`, and returns the result with `get_updated_html()`.",
+  "confidence": 98
+}

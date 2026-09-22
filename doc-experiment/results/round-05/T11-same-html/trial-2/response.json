@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::normalize() to canonicalize both HTML fragments. This method handles all specified differences (optional tags, quoting style, tag name case, character references) by serializing the parsed HTML according to HTML5 specification semantics. If either fragment cannot be fully parsed/represented (returns null), we return false. Otherwise, we compare the normalized strings for equality, which determines if they represent the same parsed structure.",
+  "confidence": 92
+}

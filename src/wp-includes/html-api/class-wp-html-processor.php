@@ -44,6 +44,215 @@
  *         $processor->add_class( 'responsive-image' );
  *     }
  *
+ * #### Recipe: scan a region before editing its opener
+ *
+ * Some edits depend on facts discovered later in an element's contents:
+ * "does this section contain a heading?", "how many direct children did this
+ * element have?", "what text appears before this element closes?" Use a
+ * bookmark on the opener, walk forward with {@see WP_HTML_Processor::next_token},
+ * then seek back and edit only if the scan finished cleanly.
+ *
+ * Do not use plain {@see WP_HTML_Processor::next_tag} to detect the end of
+ * a region: by default it skips closers, including the closer that reports
+ * the first depth below the region. A tag-only region scan must visit closers
+ * with `tag_closers => 'visit'`; otherwise use `next_token()`.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( $processor->next_tag( 'SECTION' ) && $processor->set_bookmark( 'section-opener' ) ) {
+ *         $section_depth = $processor->get_current_depth();
+ *         $saw_heading   = false;
+ *
+ *         while ( $processor->next_token() && $processor->get_current_depth() >= $section_depth ) {
+ *             if ( 'H2' === $processor->get_tag() && ! $processor->is_tag_closer() ) {
+ *                 $saw_heading = true;
+ *             }
+ *         }
+ *
+ *         $scan_finished_cleanly =
+ *             ! $processor->paused_at_incomplete_token() &&
+ *             null === $processor->get_last_error();
+ *
+ *         if ( $scan_finished_cleanly && $saw_heading && $processor->seek( 'section-opener' ) ) {
+ *             $processor->add_class( 'has-heading' );
+ *         }
+ *
+ *         $processor->release_bookmark( 'section-opener' );
+ *     }
+ *
+ * A depth drop or virtual closer tells you that the parser has left the
+ * element in the parsed tree. It does not prove the input bytes for that
+ * region were complete. If a mutation depends on a complete scan, check
+ * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} for truncation
+ * and {@see WP_HTML_Processor::get_last_error} for unsupported markup before
+ * applying the edit. Interpret those checks at the boundary required by the
+ * caller's contract: a completed depth-bounded region can be edited without
+ * proving that unrelated later markup in the same fragment is also supported
+ * or complete, unless the function promises whole-input validation.
+ *
+ * #### Recipe: test subtree membership and direct children
+ *
+ * When a container opener is matched, record its current depth before
+ * advancing. Later tokens belong to that container while their depth is
+ * greater than or equal to the recorded depth. The first token reported at a
+ * shallower depth means the walk has moved past the container.
+ *
+ * In break-condition form, test that shallower-depth boundary immediately
+ * after `next_token()` and before any `continue` filters for closers, token
+ * type, or child predicates:
+ *
+ *     while ( $processor->next_token() ) {
+ *         if ( $processor->get_current_depth() < $container_depth ) {
+ *             break;
+ *         }
+ *
+ *         if ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {
+ *             continue;
+ *         }
+ *
+ *         // The current token is an opener inside the container.
+ *     }
+ *
+ * To recognize a direct child element opener inside that subtree, require all
+ * three checks:
+ *
+ *     $is_direct_child_opener =
+ *         '#tag' === $processor->get_token_type() &&
+ *         ! $processor->is_tag_closer() &&
+ *         $processor->get_current_depth() === $container_depth + 1;
+ *
+ * Do not count closing tags as child elements. A child closer reports the
+ * parent depth, not the child depth, so a depth comparison alone is not
+ * enough.
+ *
+ * For repeated regions, prefer one {@see WP_HTML_Processor::next_token} loop
+ * with explicit state over nested `next_token()` loops. An inner loop consumes
+ * tokens from the same cursor and can skip the next sibling or region boundary
+ * that the outer loop expected to see.
+ *
+ * #### Recipe: collect DOM-style text from a subtree
+ *
+ * Text extraction is usually a tree-aware operation, so use the HTML
+ * Processor and walk the subtree. Append only ordinary `#text` tokens unless
+ * you intentionally want some other token type. Do not call
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text} on every token: comments,
+ * processing instructions, and special element tokens can also carry
+ * modifiable text, but they are not ordinary DOM text descendants.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( $processor->next_tag( 'ARTICLE' ) ) {
+ *         $article_depth = $processor->get_current_depth();
+ *         $text          = '';
+ *
+ *         while ( $processor->next_token() && $processor->get_current_depth() >= $article_depth ) {
+ *             if ( '#text' === $processor->get_token_type() ) {
+ *                 $text .= $processor->get_modifiable_text();
+ *             }
+ *         }
+ *     }
+ *
+ * Default policy: ordinary subtree text is not "every token with modifiable
+ * text." It is only the `#text` tokens reached by the walk. For example, in
+ * `<section>A<em>B</em><script>C</script><textarea>D</textarea></section>`,
+ * ordinary subtree text is `AB`: inline markup may split text across multiple
+ * `#text` tokens, but SCRIPT and TEXTAREA do not add ordinary `#text`
+ * descendants.
+ *
+ * Do not use {@see WP_HTML_Tag_Processor::get_modifiable_text} as the test
+ * for ordinary text. This is too broad:
+ *
+ *     $text .= $processor->get_modifiable_text();
+ *
+ * That unguarded form can append comments, processing instructions, and
+ * special-element opener text. First decide which token types belong in the
+ * caller's result, then read modifiable text only from those tokens.
+ *
+ * Opt-in policy: when the caller's contract explicitly asks for a special
+ * element's content, whitelist those opening element tokens and read their
+ * {@see WP_HTML_Tag_Processor::get_modifiable_text}. TITLE and TEXTAREA
+ * provide decoded text on their opener tokens; SCRIPT and STYLE provide raw
+ * script or stylesheet text. Do not include special-element opener text merely
+ * because it is available.
+ *
+ * Quick policy table:
+ *
+ * | Caller wants | Tokens to read | Completion policy |
+ * | --- | --- | --- |
+ * | Ordinary DOM-style text inside an element, heading, cell, or link | Only `#text` tokens reached by the subtree walk. Ignore comments, processing instructions, and SCRIPT/STYLE/TEXTAREA/TITLE opener text. | Read-only callers choose whether partial results are acceptable; a complete-source caller should also check `paused_at_incomplete_token()` and `get_last_error()`. |
+ * | A named special element's own contents, such as a TITLE or TEXTAREA value | Match that opening tag explicitly, require `! $processor->is_tag_closer()`, then call `get_modifiable_text()`. TITLE/TEXTAREA are decoded; SCRIPT/STYLE are raw. | This is opt-in data, not ordinary ancestor text. Do not add it to unrelated heading, table, link, or article text. |
+ * | A mutation, normalization, or token-rewrite result | Use the mutation or serialization APIs for the matched tokens; do not treat every modifiable-text token as DOM text. | Fail closed or use an explicit fallback when `get_last_error()` is non-null; reject `paused_at_incomplete_token()` when complete source bytes matter. |
+ *
+ * For read-only extraction, `get_last_error()` and
+ * `paused_at_incomplete_token()` do not erase tokens already visited. They
+ * tell you the scan did not cover the rest of the input. Returning
+ * accumulated data, returning an empty result, or returning a sentinel are
+ * caller policies; choose the one promised by the function contract.
+ *
+ * #### Recipe: rewrite while serializing tokens
+ *
+ * Use {@see WP_HTML_Processor::serialize_token} when output is built while
+ * walking tokens: append the current token's normalized serialization, skip
+ * tokens to remove them, or emit extra markup around selected tokens. The
+ * accumulated string is the rewrite; do not later call `normalize()` on the
+ * original HTML or return the raw input unless the intention is to discard
+ * every change emitted by the loop.
+ *
+ * String-returning rewrite checklist:
+ *
+ *  - Build one `$output` string in the token loop; return that string when
+ *    the rewrite succeeds.
+ *  - Use {@see WP_HTML_Tag_Processor::get_modifiable_text} for decoded
+ *    comparisons and measurements. Do not rebuild the current token from
+ *    that plaintext with `htmlspecialchars()` when normalized token output is
+ *    needed.
+ *  - To wrap a token, emit trusted wrapper markup around
+ *    `$processor->serialize_token()`, for example
+ *    `'<mark>' . $processor->serialize_token() . '</mark>'`.
+ *  - If processor creation fails or {@see WP_HTML_Processor::get_last_error}
+ *    becomes non-null, choose a clear fallback for the function contract.
+ *    Returning `null`, an empty string, the accumulated best-effort `$output`,
+ *    `normalize( $html )`, or the raw input are different policies.
+ *  - `normalize( $html )` and the raw input both start over from the
+ *    original bytes. They do not contain wrappers, skipped tokens,
+ *    replacements, or other changes already emitted into `$output`.
+ *
+ * Example:
+ *
+ *     $processor = WP_HTML_Processor::create_fragment( $html );
+ *     if ( null === $processor ) {
+ *         return null;
+ *     }
+ *
+ *     $output = '';
+ *
+ *     while ( $processor->next_token() ) {
+ *         if ( '#comment' === $processor->get_token_type() ) {
+ *             continue;
+ *         }
+ *
+ *         $output .= $processor->serialize_token();
+ *     }
+ *
+ *     if ( null !== $processor->get_last_error() ) {
+ *         return null;
+ *     }
+ *
+ *     return $output;
+ *
+ * Decide separately whether incomplete trailing syntax is acceptable. A
+ * token-by-token rewrite omits an incomplete token that was never visited,
+ * which is the right best-effort policy for some normalizing filters. If the
+ * caller needs proof that the source ended cleanly, also reject when
+ * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} is true. Always
+ * reject or fall back when {@see WP_HTML_Processor::get_last_error} is
+ * non-null, because the parser stopped at unsupported markup. The fallback is
+ * the caller's contract: returning `null`, an empty string, or the original
+ * input are different policies. The original input preserves source bytes but
+ * is neither normalized nor the rewritten output.
+ *
  * #### Breadcrumbs
  *
  * Breadcrumbs represent the stack of open elements from the root
@@ -93,22 +302,44 @@
  *
  * ### Supported elements
  *
- * If any unsupported element appears in the HTML input the HTML Processor
+ * The HTML Processor builds on {@see WP_HTML_Tag_Processor} and adds full
+ * structural awareness. Construction differs between the two classes:
+ * this class is created through its static factories — create_fragment()
+ * for markup that lives inside a BODY, create_full_parser() for complete
+ * documents — while the Tag Processor is created directly with
+ * `new WP_HTML_Tag_Processor( $html )` and has no factory methods.
+ * It adds, beyond the Tag Processor: nesting depth, ancestor breadcrumbs, implied and
+ * virtual closing tags, and normalized serialization. Choose it whenever
+ * document STRUCTURE matters — containment checks, collecting an
+ * element's text, walking subtrees, normalizing markup. For flat
+ * attribute and class edits where byte-exact preservation of the input
+ * is the goal, the lighter Tag Processor suffices.
+ *
+ * If any unsupported markup appears in the HTML input the HTML Processor
  * will abort early and stop all processing. This draconian measure ensures
  * that the HTML Processor won't break any HTML it doesn't fully understand.
+ * When this happens, {@see WP_HTML_Processor::get_last_error} returns a
+ * non-null value and {@see WP_HTML_Processor::get_unsupported_exception}
+ * describes what was encountered; methods which produce output (such as
+ * `serialize()` and `normalize()`) return `null`.
  *
- * The HTML Processor supports all elements other than a specific set:
+ * The HTML Processor parses the broad majority of real-world HTML,
+ * including well-formed tables (TABLE, THEAD, TBODY, TR, TD, TH and
+ * markup inside cells), foreign content (SVG and MathML), TEMPLATE
+ * elements, and — with {@see WP_HTML_Processor::create_full_parser} —
+ * complete documents with doctype and HEAD content. Only specific
+ * constructs cause it to abort:
  *
- *  - Any element inside a TABLE.
- *  - Any element inside foreign content, including SVG and MATH.
- *  - Any element outside the IN BODY insertion mode, e.g. doctype declarations, meta, links.
+ *  - Content the HTML specification relocates in the DOM ("foster
+ *    parenting"), e.g. a DIV placed directly inside a TABLE rather
+ *    than inside a cell — such a DIV belongs _before_ the table in
+ *    the DOM, and the HTML Processor stops rather than relocate it.
+ *  - Mis-nested formatting elements whose reconstruction would require
+ *    advancing and rewinding through the document, e.g.
+ *    `<b>one<i>two</b>three</i>`. Simple mis-nesting which can be
+ *    handled in a single pass, e.g. `<b><i>x</b></i>`, is supported.
  *
  * ### Supported markup
- *
- * Some kinds of non-normative HTML involve reconstruction of formatting elements and
- * re-parenting of mis-nested elements. For example, a DIV tag found inside a TABLE
- * may in fact belong _before_ the table in the DOM. If the HTML Processor encounters
- * such a case it will stop processing.
  *
  * The following list illustrates some common examples of unexpected HTML inputs that
  * the HTML Processor properly parses and represents:
@@ -288,6 +519,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 *  - The only supported context is `<body>`, which is the default value.
 	 *  - The only supported document encoding is `UTF-8`, which is the default value.
+	 *
+	 * A `null` return means no processor was created. Check this before walking
+	 * tokens or building serialized output. If a processor is created, it may
+	 * still stop later when unsupported markup is encountered; detect that after
+	 * scanning with {@see WP_HTML_Processor::get_last_error}.
 	 *
 	 * @since 6.4.0
 	 * @since 6.6.0 Returns `static` instead of `self` so it can create subclass instances.
@@ -666,6 +902,24 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next tag matching the $query.
 	 *
+	 * Searches start at the current cursor position and move forward. If
+	 * `next_tag()` returns false, it did not find a later matching tag; it does
+	 * not rewind the processor, and a later call with a different query will
+	 * not rescan tags already passed. To intentionally revisit earlier tags,
+	 * set a bookmark before scanning and seek back to it, or create a new
+	 * processor for the same HTML.
+	 *
+	 * The `tag_name` query accepts one tag name string, or `null` for any tag.
+	 * It is not a list of alternatives. To find the first of several tag names
+	 * in document order, scan for any tag and branch on {@see self::get_tag()}:
+	 *
+	 *     $wanted = array( 'UL', 'OL' );
+	 *     while ( $processor->next_tag() ) {
+	 *         if ( in_array( $processor->get_tag(), $wanted, true ) ) {
+	 *             break;
+	 *         }
+	 *     }
+	 *
 	 * @todo Support matching the class name and tag name.
 	 *
 	 * @since 6.4.0
@@ -678,6 +932,8 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *
 	 *     @type string|null $tag_name     Which tag to find, or `null` for "any tag."
 	 *     @type string      $tag_closers  'visit' to pause at tag closers, 'skip' or unset to only visit openers.
+	 *                                     Because 'skip' is the default, code following a plain next_tag() match
+	 *                                     needs no is_tag_closer() guard: only openers are visited.
 	 *     @type int|null    $match_offset Find the Nth tag matching all search criteria.
 	 *                                     1 for "first" tag, 3 for "third," etc.
 	 *                                     Defaults to first tag.
@@ -770,9 +1026,124 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Finds the next token in the HTML document.
 	 *
-	 * This doesn't currently have a way to represent non-tags and doesn't process
-	 * semantic rules for text nodes. For access to the raw tokens consider using
-	 * WP_HTML_Tag_Processor instead.
+	 * A token is a span of the document with its own meaning: a tag opener
+	 * or closer, a text node, a comment, a doctype declaration. Use this
+	 * method instead of {@see WP_HTML_Processor::next_tag} when text and
+	 * other non-tag content matters, while keeping the HTML Processor's
+	 * full awareness of document structure: at every visited token,
+	 * {@see WP_HTML_Processor::get_breadcrumbs} and
+	 * {@see WP_HTML_Processor::get_current_depth} describe where in the
+	 * document tree that token lives.
+	 *
+	 * Unlike the Tag Processor's purely lexical scan, the HTML Processor
+	 * visits a closing token for every element it opens, including
+	 * elements the HTML specification closes implicitly and elements left
+	 * unclosed at the end of the input. Walking code can rely on seeing a
+	 * closer for every opener even in malformed input.
+	 *
+	 * The reverse also holds: a walk visits elements the parser INSERTED
+	 * that never appear in the source text, because HTML defines implied
+	 * structure. For example, the rows of `<table><tr>…` are visited
+	 * inside a synthesized TBODY (TABLE > TBODY > TR), and these implied
+	 * elements add a level to get_current_depth() and appear in
+	 * get_breadcrumbs(). Anchor depth-bounded walks on the depth recorded
+	 * at a matched element rather than on absolute depth numbers, and
+	 * they remain correct regardless of implied structure.
+	 *
+	 * An element's text content may be split across several consecutive
+	 * `#text` tokens: accumulate text while walking rather than assuming
+	 * one token carries all of an element's text.
+	 *
+	 * One important opt-in exception to the collect-`#text`-tokens recipe:
+	 * elements whose contents cannot contain markup (SCRIPT, STYLE,
+	 * TITLE, TEXTAREA) produce NO `#text` child tokens at all. Their text
+	 * is carried on the element's own token — walking inside them finds
+	 * nothing, so the recipe silently returns an empty string. Read their
+	 * text with {@see WP_HTML_Tag_Processor::get_modifiable_text} while
+	 * matched on the element's opening tag only when the caller's contract
+	 * asks for that element's own contents. Do not add this opener-carried
+	 * text to ordinary heading, table cell, link, or article text merely
+	 * because it is available.
+	 *
+	 * Note also that `next_token()` does not stop when the element
+	 * matched by an earlier `next_tag()` call ends: left unguarded, it
+	 * walks to the end of the document. Bound a walk with a depth or
+	 * breadcrumb condition as shown below.
+	 *
+	 * There is only ONE cursor. Every call to `next_token()` advances the
+	 * same shared position, so nested walk loops interfere with each
+	 * other: when an inner "collect until this element closes" loop
+	 * exits, the processor is already matched on the token that ended
+	 * that loop — an outer loop calling `next_token()` again skips past
+	 * it, silently dropping whatever it was (often the opener of the next
+	 * region of interest). To extract repeated regions (the items of a
+	 * list, the cells of each row), do not nest walk loops; use a single
+	 * loop that dispatches on the current token and tracks where it is
+	 * with a couple of state variables:
+	 *
+	 *     // Collect each DT term's text from a definition list, one
+	 *     // pass, no nested loops.
+	 *     $terms   = array();
+	 *     $current = null;
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'DT' === $processor->get_token_name() ) {
+	 *             if ( $processor->is_tag_closer() ) {
+	 *                 $terms[] = $current;
+	 *                 $current = null;
+	 *             } else {
+	 *                 $current = '';
+	 *             }
+	 *         } elseif ( null !== $current && '#text' === $processor->get_token_type() ) {
+	 *             $current .= $processor->get_modifiable_text();
+	 *         }
+	 *     }
+	 *
+	 * Because a closing token is visited for every opener (implicit and
+	 * end-of-input closes included), the closer-driven flush in this
+	 * shape is reliable even for malformed input. It also handles empty
+	 * regions naturally: an empty element (`<dt></dt>`) produces its
+	 * opener and closer back-to-back with no `#text` between, so the
+	 * flush records an empty string rather than skipping the region.
+	 *
+	 * This reliability is structural: it means the parser reports when
+	 * it leaves each element, including virtual closers. It does not
+	 * prove that the source bytes for that region were complete. If a
+	 * scan will drive a mutation or another result that must reject
+	 * truncated input, check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the
+	 * scan, and check {@see WP_HTML_Processor::get_last_error} for an
+	 * unsupported-parser abort.
+	 *
+	 * Example:
+	 *
+	 *     // Collect the text content of the first LI element.
+	 *     $processor = WP_HTML_Processor::create_fragment( '<ul><li>Buy <strong>milk</strong> today.</ul>' );
+	 *     if ( $processor->next_tag( 'LI' ) ) {
+	 *         $depth_inside_li = $processor->get_current_depth();
+	 *         $text            = '';
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_li ) {
+	 *             if ( '#text' === $processor->get_token_type() ) {
+	 *                 $text .= $processor->get_modifiable_text();
+	 *             }
+	 *         }
+	 *         // $text === 'Buy milk today.'
+	 *         // The closers of nested elements (`</strong>`) report a depth no
+	 *         // lower than the LI's contents, so the loop continues through
+	 *         // them; it ends on the LI's own closer. The unclosed LI and UL
+	 *         // still produce closing tokens at the end of the input.
+	 *         //
+	 *         // The accumulated string is decoded UTF-8: measure or
+	 *         // truncate it by code points with the mb_* functions and an
+	 *         // explicit encoding, e.g. mb_substr( $text, 0, 100, 'UTF-8' ).
+	 *         //
+	 *         // The `>=` comparison is required: `>` would end this walk at
+	 *         // the first nested closer (`</strong>` reports the same depth
+	 *         // as the LI's contents) and silently drop the trailing text.
+	 *     }
+	 *
+	 *     // The same walk can be guarded with breadcrumbs, which read the
+	 *     // same on openers, text nodes, and closers alike:
+	 *     while ( $processor->next_token() && in_array( 'LI', $processor->get_breadcrumbs(), true ) ) { ... }
 	 *
 	 * @since 6.5.0 Added for internal support; do not use.
 	 * @since 6.7.2 Refactored so subclasses may extend.
@@ -867,6 +1238,14 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 
 	/**
 	 * Indicates if the current tag token is a tag closer.
+	 *
+	 * When matched on a tag closer, the closed element has already been
+	 * popped from the stack of open elements. This means that
+	 * {@see WP_HTML_Processor::get_breadcrumbs} and
+	 * {@see WP_HTML_Processor::get_current_depth} report the parent
+	 * context at that point, not the element being closed: the closer of
+	 * an element reports a depth one less than its opener did, and its
+	 * tag name no longer appears in the breadcrumbs.
 	 *
 	 * Example:
 	 *
@@ -1206,6 +1585,36 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	/**
 	 * Returns the nesting depth of the current location in the document.
 	 *
+	 * The depth counts every node from the root down to and including the
+	 * currently-matched token, so it matches the length of the array that
+	 * {@see WP_HTML_Processor::get_breadcrumbs} returns. Non-element tokens
+	 * count themselves: when matched on a text node directly inside BODY the
+	 * depth is 3 (HTML > BODY > #text).
+	 *
+	 * Important: when the processor is matched on a CLOSING tag token, the
+	 * closed element has already been removed from the stack of open
+	 * elements. The reported depth is that of the remaining parent context:
+	 * one less than the depth reported at the matching opening tag. For an
+	 * element whose opener reported depth N, every token inside it reports
+	 * a depth of at least N, the closers of its child elements included.
+	 * The first token to report a depth less than N is the element's own
+	 * closing token, at depth N - 1. Note the equality case: a child
+	 * element's closing token reports a depth EQUAL to the matched
+	 * ancestor's opening-token depth (`</em>` below reports the same
+	 * depth as `<h1>` did). That equality is precisely why a subtree
+	 * walk's guard must be `>=` — a `>` guard exits at the first child
+	 * closer and drops everything after it.
+	 *
+	 * This gives a reliable way to visit every token inside an element:
+	 * record the depth when matched on its opening tag and continue while
+	 * the depth remains at or above that value. This boundary is about
+	 * the tree location, not about source completeness: virtual closers
+	 * can appear after trailing incomplete syntax. If the scan's result
+	 * will drive an edit or must reject truncated input, check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token} after the
+	 * bounded walk, and separately check
+	 * {@see WP_HTML_Processor::get_last_error} for unsupported markup.
+	 *
 	 * Example:
 	 *
 	 *     $processor = WP_HTML_Processor::create_fragment( '<div><p></p></div>' );
@@ -1220,9 +1629,44 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *     $processor->next_token();
 	 *     4 === $processor->get_current_depth();
 	 *
-	 *     // The P element is closed during `next_token()` so the depth is decreased to reflect that.
+	 *     // The processor is now matched on the `</p>` closing token. The P
+	 *     // element has already been popped from the stack of open elements,
+	 *     // so the depth reflects its parent context: one less than at `<p>`.
 	 *     $processor->next_token();
 	 *     3 === $processor->get_current_depth();
+	 *
+	 *     // Likewise on the `</div>` closing token the depth has returned
+	 *     // to that of the BODY context.
+	 *     $processor->next_token();
+	 *     2 === $processor->get_current_depth();
+	 *
+	 * Example:
+	 *
+	 *     // Visit every token inside the first UL element.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     if ( $processor->next_tag( 'UL' ) ) {
+	 *         $depth_inside_ul = $processor->get_current_depth();
+	 *         while ( $processor->next_token() && $processor->get_current_depth() >= $depth_inside_ul ) { // >= and not >.
+	 *             // Matched on each token inside the UL, including the
+	 *             // openers and closers of nested elements (a nested
+	 *             // closer reports the same depth as its surrounding
+	 *             // sibling text — both stay in the loop). The loop ends
+	 *             // at the UL's own closing token, whose depth is lower.
+	 *         }
+	 *         $scan_finished_cleanly =
+	 *             ! $processor->paused_at_incomplete_token() &&
+	 *             null === $processor->get_last_error();
+	 *     }
+	 *
+	 * The `>=` comparison is what makes this loop correct at any nesting
+	 * depth. Tokens many levels down (a link inside an LI inside this UL,
+	 * or a TD inside a TR inside a TBODY) always report a depth greater
+	 * than the container's, and the closers of nested elements report a
+	 * depth no less than it; only the container's own closer reports
+	 * less. Writing `>` instead would end the walk early, at the first
+	 * closer of a direct child. The same rule in break-condition form:
+	 * inside the loop, `break` when the depth drops BELOW the depth
+	 * recorded at the opener (`< $depth`), never at `<= $depth`.
 	 *
 	 * @since 6.6.0
 	 *
@@ -1253,6 +1697,11 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 *  - Any incomplete syntax trailing at the end will be omitted,
 	 *    for example, an unclosed comment opener will be removed.
 	 *
+	 * `normalize( $html )` normalizes the original input fragment. It is not a
+	 * way to finish or recover a token-by-token rewrite that has already emitted
+	 * changes with {@see WP_HTML_Processor::serialize_token}; calling it after
+	 * such a loop intentionally discards the accumulated output.
+	 *
 	 * Example:
 	 *
 	 *     echo WP_HTML_Processor::normalize( '<a href=#anchor v=5 href="/" enabled>One</a another v=5><!--' );
@@ -1279,7 +1728,16 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * This differs from {@see WP_HTML_Processor::normalize} in that it starts with
 	 * a specific HTML Processor, which _must_ not have already started scanning;
 	 * it must be in the initial ready state and will be in the completed state once
-	 * serialization is complete.
+	 * serialization is complete. Once `next_token()` or `next_tag()` has been
+	 * called, this method returns `null`.
+	 *
+	 * This method is for producing a normalized copy of a document, not for
+	 * retrieving modifications. After changing a document with
+	 * {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class}, or
+	 * {@see WP_HTML_Tag_Processor::set_modifiable_text}, read the result
+	 * with {@see WP_HTML_Tag_Processor::get_updated_html}, which this
+	 * class inherits — not with `serialize()`.
 	 *
 	 * Many aspects of an input HTML fragment may be changed during normalization.
 	 *
@@ -1345,6 +1803,89 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * This method produces a fully-normative HTML string for the currently-matched token,
 	 * if able. If not matched at any token or if the token doesn't correspond to any HTML
 	 * it will return an empty string (for example, presumptuous end tags are ignored).
+	 *
+	 * Walking every token with {@see WP_HTML_Processor::next_token} and
+	 * concatenating `serialize_token()` for each one reconstructs the
+	 * normalized serialization of the input — the same output that
+	 * {@see WP_HTML_Processor::serialize} produces in a single call. The
+	 * token-by-token form exists so that a rewriting loop can transform
+	 * the document while serializing: skip tokens to remove them, or emit
+	 * extra markup around them to insert wrappers. Closing tokens of
+	 * skipped elements must be skipped too.
+	 *
+	 * Use text APIs and serialization APIs for different jobs:
+	 * {@see WP_HTML_Tag_Processor::get_modifiable_text} gives decoded
+	 * plaintext for inspecting or changing the current token, while
+	 * `serialize_token()` emits the current token as normalized HTML. For a
+	 * wrapper rewrite, check decoded text with `get_modifiable_text()`, then
+	 * wrap `serialize_token()`; do not replace the token with hand-escaped
+	 * plaintext unless the caller explicitly wants to rewrite the text
+	 * contents.
+	 *
+	 * Example:
+	 *
+	 *     // Remove every SUP element but keep its contents.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     $output    = '';
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'SUP' === $processor->get_tag() ) {
+	 *             continue; // Skips both the opener and the closer.
+	 *         }
+	 *         $output .= $processor->serialize_token();
+	 *     }
+	 *
+	 * Example:
+	 *
+	 *     // Wrap text tokens that match a caller-defined condition.
+	 *     $processor = WP_HTML_Processor::create_fragment( $html );
+	 *     $output    = '';
+	 *     while ( $processor->next_token() ) {
+	 *         if (
+	 *             '#text' === $processor->get_token_type() &&
+	 *             false !== strpos( $processor->get_modifiable_text(), $needle )
+	 *         ) {
+	 *             $output .= '<mark>' . $processor->serialize_token() . '</mark>';
+	 *             continue;
+	 *         }
+	 *
+	 *         $output .= $processor->serialize_token();
+	 *     }
+	 *
+	 * Prefer `serialize()` when the whole document is wanted unchanged,
+	 * and `serialize_token()` inside a loop when tokens are dropped,
+	 * altered, or wrapped along the way.
+	 *
+	 * After a rewriting loop, return the accumulated output or reject it
+	 * according to the caller's policy. An incomplete trailing token was
+	 * never visited and is omitted from the accumulated serialization; this
+	 * may be acceptable for best-effort normalized output, but callers that
+	 * require complete input should also check
+	 * {@see WP_HTML_Tag_Processor::paused_at_incomplete_token}. Always reject
+	 * or fall back if {@see WP_HTML_Processor::get_last_error} is non-null,
+	 * because the parser stopped at unsupported markup. Do not call
+	 * `normalize()` on the original HTML after emitting changes unless the
+	 * intention is to discard those changes. Returning the original input also
+	 * discards the accumulated rewrite; it preserves source bytes, but is not
+	 * normalized output and does not contain emitted wrapper, skip, or
+	 * replacement changes.
+	 *
+	 * Common anti-pattern:
+	 *
+	 *     // This throws away every token skipped, wrapped, or replaced
+	 *     // in the loop.
+	 *     return WP_HTML_Processor::normalize( $html ) ?? $html;
+	 *
+	 * Serialization is NOT the way to retrieve a document after modifying
+	 * it with {@see WP_HTML_Tag_Processor::set_attribute},
+	 * {@see WP_HTML_Tag_Processor::add_class}, and friends: those queued
+	 * updates are returned by
+	 * {@see WP_HTML_Tag_Processor::get_updated_html}, which this class
+	 * inherits and which is the normal way to read output after edits.
+	 * `serialize()` also requires a processor on which scanning has not
+	 * yet begun — once `next_token()` or `next_tag()` has been called it
+	 * returns `null`. Use serialization for normalizing or rewriting a
+	 * document token-by-token; use `get_updated_html()` after making
+	 * attribute, class, or text modifications.
 	 *
 	 * @see static::serialize()
 	 *
@@ -5466,6 +6007,33 @@ class WP_HTML_Processor extends WP_HTML_Tag_Processor {
 	 * avoid needless crashing or type errors. An empty string does not mean
 	 * that a token has modifiable text, and a token with modifiable text may
 	 * have an empty string (e.g. a comment with no contents).
+	 *
+	 * This method is not a predicate for ordinary text nodes. For ordinary
+	 * DOM-style text extraction, first require
+	 * `get_token_type() === '#text'`, then read this method. Use
+	 * special-element opener text only when the caller explicitly asks for
+	 * that element's own contents.
+	 *
+	 * For `#text` nodes and for elements whose contents allow character
+	 * references (TEXTAREA, TITLE), the returned text is DECODED: character
+	 * references have been replaced by the characters they represent. Do
+	 * not decode it again. The returned string is UTF-8; when measuring
+	 * or slicing by code points pass an explicit encoding, e.g.
+	 * `mb_substr( $text, 0, $limit, 'UTF-8' )`. Raw text contents
+	 * (SCRIPT, STYLE) and comment interiors are returned verbatim.
+	 *
+	 * Note that for elements which cannot contain markup (SCRIPT, STYLE,
+	 * TEXTAREA, TITLE), the text is carried by the ELEMENT's own token —
+	 * there is no separate `#text` child to visit. Read it while matched
+	 * on the element's opening tag:
+	 *
+	 *     $processor = WP_HTML_Processor::create_full_parser( $html );
+	 *     while ( $processor->next_token() ) {
+	 *         if ( 'TITLE' === $processor->get_token_name() && ! $processor->is_tag_closer() ) {
+	 *             $title = $processor->get_modifiable_text();
+	 *             break;
+	 *         }
+	 *     }
 	 *
 	 * @since 6.6.0 Subclassed for the HTML Processor.
 	 *

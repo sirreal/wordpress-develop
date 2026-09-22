@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor to parse and rewrite an HTML fragment. It walks through every token using next_token(), identifies text nodes by checking get_token_type() === '#text', retrieves the decoded text with get_modifiable_text(), and checks for the keyword substring match. Text nodes containing the keyword are wrapped in <mark> tags by emitting '<mark>' before and '</mark>' after the serialized token. Non-text tokens and non-matching text nodes are serialized unchanged. The entire output is accumulated and returned as normalized HTML.",
+  "confidence": 65
+}

@@ -1,0 +1,95 @@
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-28/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  },
+  "result": [
+    {
+      "id": "T03-first-h1-text",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction get_first_h1_text( string $html ): ?string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return null;\n    }\n\n    if ( ! $processor->next_tag( 'H1' ) ) {\n        return null;\n    }\n\n    $depth = $processor->get_current_depth();\n    $text  = '';\n\n    while ( $processor->next_token() && $processor->get_current_depth() >= $depth ) {\n        if ( '#text' === $processor->get_token_type() ) {\n            $text .= $processor->get_modifiable_text();\n        }\n    }\n\n    return $text;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction is a tree-aware operation, finds the first `H1` with `next_tag()`, then walks that element’s subtree with `next_token()` while the current depth stays within the `H1`. It appends only `#text` tokens via `get_modifiable_text()`, which the docs say already returns decoded text, so nested markup contributes no text of its own while nested text is included.",
+      "confidence": 95
+    },
+    {
+      "id": "T03-first-h1-text",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction get_first_h1_text( string $html ): ?string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return null;\n    }\n\n    if ( ! $processor->next_tag( 'H1' ) ) {\n        return null;\n    }\n\n    $h1_depth = $processor->get_current_depth();\n    $text     = '';\n\n    while ( $processor->next_token() && $processor->get_current_depth() >= $h1_depth ) {\n        if ( '#text' === $processor->get_token_type() ) {\n            $text .= $processor->get_modifiable_text();\n        }\n    }\n\n    return $text;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction is a tree-aware operation, then finds the first `H1` with `next_tag()`. From that opener it records `get_current_depth()` and walks the subtree with `next_token()`, appending only `#text` tokens via `get_modifiable_text()`, which the docs say already returns decoded text content.",
+      "confidence": 92
+    },
+    {
+      "id": "T03-first-h1-text",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction get_first_h1_text( string $html ): ?string {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return null;\n    }\n\n    if ( ! $processor->next_tag( 'H1' ) ) {\n        return null;\n    }\n\n    $depth = $processor->get_current_depth();\n    $text  = '';\n\n    while ( $processor->next_token() && $processor->get_current_depth() >= $depth ) {\n        if ( '#text' === $processor->get_token_type() ) {\n            $text .= $processor->get_modifiable_text();\n        }\n    }\n\n    return $text;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction is a tree-aware operation. It finds the first `H1` with `next_tag()`, records that opener’s depth with `get_current_depth()`, then walks its subtree with `next_token()`, concatenating only `#text` tokens via `get_token_type()` and `get_modifiable_text()`. That yields decoded text content from nested elements while ignoring markup and non-text tokens.",
+      "confidence": 92
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction extract_toc( string $html ): array {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return array();\n    }\n\n    $toc           = array();\n    $current_level = null;\n    $current_text  = '';\n\n    while ( $processor->next_token() ) {\n        $token_name = $processor->get_token_name();\n\n        if ( null !== $current_level && '#text' === $processor->get_token_type() ) {\n            $current_text .= $processor->get_modifiable_text();\n            continue;\n        }\n\n        if ( null === $token_name || 2 !== strlen( $token_name ) || 'H' !== $token_name[0] ) {\n            continue;\n        }\n\n        $level = (int) $token_name[1];\n        if ( $level < 1 || $level > 6 ) {\n            continue;\n        }\n\n        if ( $processor->is_tag_closer() ) {\n            if ( $current_level === $level ) {\n                $toc[] = array(\n                    'level' => $current_level,\n                    'text'  => $current_text,\n                );\n                $current_level = null;\n                $current_text  = '';\n            }\n        } else {\n            $current_level = $level;\n            $current_text  = '';\n        }\n    }\n\n    return $toc;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, then walks tokens with `next_token()`. On each heading opener (`H1` through `H6`) it starts collecting text, appends only `#text` token contents via `get_modifiable_text()`, and on the matching heading closer detected with `is_tag_closer()` it records the heading level and accumulated text.",
+      "confidence": 86
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\nfunction extract_toc( string $html ): array {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return array();\n    }\n\n    $toc           = array();\n    $current_level = null;\n    $current_text  = '';\n    $heading_depth = 0;\n\n    while ( $processor->next_token() ) {\n        if ( null !== $current_level && $processor->get_current_depth() < $heading_depth ) {\n            $toc[] = array(\n                'level' => $current_level,\n                'text'  => $current_text,\n            );\n\n            $current_level = null;\n            $current_text  = '';\n            $heading_depth = 0;\n        }\n\n        $tag_name = $processor->get_tag();\n        if ( null !== $tag_name && ! $processor->is_tag_closer() && 2 === strlen( $tag_name ) && 'H' === $tag_name[0] ) {\n            $level = (int) $tag_name[1];\n            if ( $level >= 1 && $level <= 6 ) {\n                $current_level = $level;\n                $current_text  = '';\n                $heading_depth = $processor->get_current_depth();\n                continue;\n            }\n        }\n\n        if ( null !== $current_level && '#text' === $processor->get_token_type() ) {\n            $current_text .= $processor->get_modifiable_text();\n        }\n    }\n\n    if ( null !== $current_level ) {\n        $toc[] = array(\n            'level' => $current_level,\n            'text'  => $current_text,\n        );\n    }\n\n    return $toc;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction is tree-aware. It walks the fragment once with `next_token()`, starts a capture when it sees an `H1` through `H6` opening tag via `get_tag()`/`is_tag_closer()`, appends only ordinary `#text` descendants with `get_token_type()` and `get_modifiable_text()`, and closes each heading capture when `get_current_depth()` drops below the heading opener’s depth.",
+      "confidence": 91
+    },
+    {
+      "id": "N06-extract-toc",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction extract_toc( string $html ): array {\n    $processor = WP_HTML_Processor::create_fragment( $html );\n\n    if ( null === $processor ) {\n        return array();\n    }\n\n    $toc = array();\n\n    while ( $processor->next_tag() ) {\n        $tag = $processor->get_tag();\n\n        if ( null === $tag || ! preg_match( '/^H([1-6])$/', $tag, $matches ) ) {\n            continue;\n        }\n\n        $level = (int) $matches[1];\n        $depth = $processor->get_current_depth();\n        $text  = '';\n\n        while ( $processor->next_token() && $processor->get_current_depth() >= $depth ) {\n            if ( '#text' === $processor->get_token_type() ) {\n                $text .= $processor->get_modifiable_text();\n            }\n        }\n\n        $toc[] = array(\n            'level' => $level,\n            'text'  => $text,\n        );\n    }\n\n    return null === $processor->get_last_error() ? $toc : array();\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` because heading text extraction is tree-aware work. It scans heading openers with `next_tag()`, records each heading level from `get_tag()`, then walks that heading’s subtree with `next_token()` and a depth guard from `get_current_depth()`, appending only ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()` so nested markup contributes text but not tags.",
+      "confidence": 87
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n    if ( $max_codepoints <= 0 ) {\n        return '';\n    }\n\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return '';\n    }\n\n    $text = '';\n\n    while ( $processor->next_token() ) {\n        if ( '#text' === $processor->get_token_type() ) {\n            $text .= $processor->get_modifiable_text();\n        } elseif ( ! $processor->is_tag_closer() ) {\n            $token_name = $processor->get_token_name();\n            if ( 'TEXTAREA' === $token_name || 'TITLE' === $token_name ) {\n                $text .= $processor->get_modifiable_text();\n            }\n        }\n\n        if ( mb_strlen( $text, 'UTF-8' ) >= $max_codepoints ) {\n            return mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n        }\n    }\n\n    return $text;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment structurally, then walks tokens with `next_token()`. It appends decoded text from ordinary `#text` tokens via `get_token_type()` and `get_modifiable_text()`, and additionally includes decoded text carried on `TITLE` and `TEXTAREA` opening-tag tokens via `get_token_name()` and `is_tag_closer()`. Truncation is done with `mb_strlen()` and `mb_substr()` in UTF-8 so the result is limited by Unicode code points without splitting multibyte characters.",
+      "confidence": 90
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n    if ( $max_codepoints <= 0 ) {\n        return '';\n    }\n\n    $processor = WP_HTML_Processor::create_fragment( $html );\n    if ( null === $processor ) {\n        return '';\n    }\n\n    $text = '';\n\n    while ( $processor->next_token() ) {\n        if ( '#text' === $processor->get_token_type() ) {\n            $text .= $processor->get_modifiable_text();\n            continue;\n        }\n\n        if ( '#tag' !== $processor->get_token_type() || $processor->is_tag_closer() ) {\n            continue;\n        }\n\n        $tag = $processor->get_tag();\n        if ( 'TEXTAREA' === $tag || 'TITLE' === $tag ) {\n            $text .= $processor->get_modifiable_text();\n        }\n    }\n\n    if ( mb_strlen( $text, 'UTF-8' ) <= $max_codepoints ) {\n        return $text;\n    }\n\n    return mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n}\n",
+      "explanation": "This walks the fragment with `WP_HTML_Processor::create_fragment()` and `next_token()`, appending ordinary `#text` token content via `get_modifiable_text()`, plus the opener-token text for the two documented special text-bearing elements that should count here: `TITLE` and `TEXTAREA`. It ignores other modifiable-text tokens such as `SCRIPT`, `STYLE`, comments, and closers, and then truncates the final UTF-8 string by Unicode code points with `mb_strlen()`/`mb_substr()` using an explicit `UTF-8` encoding.",
+      "confidence": 92
+    },
+    {
+      "id": "T05-text-excerpt",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction html_text_excerpt( string $html, int $max_codepoints ): string {\n\tif ( $max_codepoints <= 0 ) {\n\t\treturn '';\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn '';\n\t}\n\n\t$text = '';\n\n\twhile ( $processor->next_token() ) {\n\t\t$token_type = $processor->get_token_type();\n\n\t\tif ( '#text' === $token_type ) {\n\t\t\t$text .= $processor->get_modifiable_text();\n\t\t} elseif ( '#tag' === $token_type && ! $processor->is_tag_closer() ) {\n\t\t\t$tag_name = $processor->get_tag();\n\t\t\tif ( 'TEXTAREA' === $tag_name || 'TITLE' === $tag_name ) {\n\t\t\t\t$text .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t}\n\n\t\tif ( mb_strlen( $text, 'UTF-8' ) > $max_codepoints ) {\n\t\t\treturn mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t\t}\n\t}\n\n\tif ( mb_strlen( $text, 'UTF-8' ) > $max_codepoints ) {\n\t\treturn mb_substr( $text, 0, $max_codepoints, 'UTF-8' );\n\t}\n\n\treturn $text;\n}\n",
+      "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY-style HTML fragment with tree awareness, then walks tokens via `next_token()`, appending ordinary `#text` token content and, per the documented special-element rule, the opener-token text from `TEXTAREA` and `TITLE` via `get_modifiable_text()`. It excludes other modifiable-text carriers like `SCRIPT`, `STYLE`, and comments, and truncates the final result by Unicode code points with `mb_strlen()`/`mb_substr()` using explicit `UTF-8` encoding.",
+      "confidence": 89
+    }
+  ]
+}

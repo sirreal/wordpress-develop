@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment and rewrites the normalized output token-by-token with `next_token()` and `serialize_token()`. It defers serializing each `P` opener until the following token proves whether the paragraph is truly empty; if the next token is that paragraph\u2019s closer, both tokens are skipped, otherwise the stored opener is emitted and the rest of the subtree is serialized normally. Per the docs, it returns the original HTML unchanged when parsing aborts via `get_last_error()` or pauses at incomplete input via `paused_at_incomplete_token()`.",
+  "confidence": 93
+}

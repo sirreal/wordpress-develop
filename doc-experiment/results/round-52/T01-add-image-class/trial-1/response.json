@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` for byte-preserving, linear HTML edits, then looped with `next_tag( 'img' )` to match every real IMG tag case-insensitively and `add_class( 'wp-image' )` to append the class without disturbing existing classes or unrelated bytes. The modified document is returned with `get_updated_html()`, which preserves untouched input exactly.",
+  "confidence": 99
+}

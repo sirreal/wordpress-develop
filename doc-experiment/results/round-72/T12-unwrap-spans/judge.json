@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), skipped SPAN tokens via get_tag(), and emitted normalized output with serialize_token(). All called APIs are documented: create_fragment, normalize, next_token, get_tag, serialize_token, and get_last_error. Minor deduction: the processor-creation fallback normalizes or returns the original input, which would not preserve the requested rewrite policy if creation failed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical solution. Correct processor choice, documented token loop, documented get_token_type()/get_tag() filtering, and serialize_token() for normalized reconstruction. No hallucinated API usage and no _doing_it_wrong records. Only tiny deduction: on processor creation failure it returns raw input, which is a documented fallback policy but not normalized rewritten output."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and the documented serialize_token rewrite pattern, with all methods present in the rendered docs. It correctly skips SPAN opener and closer tokens using get_tag(). Minor deduction: if get_last_error() is non-null it returns the original HTML, which the docs explicitly warn discards accumulated rewrites and is not normalized output."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial; each execution passed 7/7 with no _doing_it_wrong records. The docs did well on the decisive points: the processor-choice sections say to use WP_HTML_Processor for normalized output, missing/implied closing tags, and structure-aware parsing; the serialize_token recipe explicitly says to build an output string while walking next_token(), skip tokens to remove them, and skip closing tokens too; the serialize_token method includes a general remove-element-but-keep-contents example using get_tag(). Near misses were around fallback policy, not the core algorithm: trials returned raw input or original normalization in rare creation/error paths, and the docs already say those policies discard rewrites or are not normalized, but that warning is split between overview and method sections.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() docblock",
+      "problem": "The method says it returns the matched tag name, but does not directly state that this applies to both tag openers and tag closers during next_token() walks.",
+      "suggestion": "Add a sentence that during token walks get_tag() returns the element name for both opener and closer tag tokens; callers that only want openers should also check is_tag_closer(), while wrapper-removal filters usually skip both."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock",
+      "problem": "The rewrite/error fallback guidance is present but easy to miss, and candidates still used raw-input fallbacks after emitting rewritten output.",
+      "suggestion": "Move the fallback warning into a short named subsection such as 'Fallbacks after token rewrites', explicitly contrasting accumulated output, null/empty-string failure, normalize(original), and raw original input."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() or serialize_token() docblock",
+      "problem": "Virtual/implied closers are central to normalized serialization of incomplete-but-parseable fragments, but the contract for how they appear in token walks is only implicit across several sections.",
+      "suggestion": "Add a compact example showing an unclosed ordinary element producing normalized closing output through token serialization, and state that virtual closers should be considered when skipping or wrapping element tokens."
+    }
+  ]
+}

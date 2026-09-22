@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked the document with `next_token()` and `get_current_depth()` so link text is collected in tree order. For each opening `A` token, I read the decoded `href` with `get_attribute()` and appended only `#text` token content from `get_modifiable_text()`, which gives decoded text while ignoring markup and boolean `href` values.",
+  "confidence": 93
+}

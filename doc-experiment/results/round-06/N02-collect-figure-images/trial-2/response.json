@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment to parse the HTML fragment, then iterates through all IMG tags using next_tag(). For each IMG found, it checks if FIGURE appears in the breadcrumbs (which represent the nesting path from root to current element). If a FIGURE ancestor is present, it retrieves the src attribute using get_attribute() which returns already-decoded values, and skips null values, boolean true (empty attributes), and empty strings per the task requirements.",
+  "confidence": 85
+}

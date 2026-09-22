@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a template HTML fragment with the required structure and placeholder values, then uses WP_HTML_Tag_Processor to safely update the img attributes (src and alt in order) and the figcaption text. The set_attribute() method handles proper HTML encoding of special characters, and the get_updated_html() method returns the final HTML with all updates applied. The template approach ensures the exact tag and attribute order as specified.",
+  "confidence": 72
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment and next_token() to walk tokens in document order. I appended only ordinary #text token text plus the modifiable text from TITLE and TEXTAREA opener tokens, which are the documented special text-bearing elements that decode character references, then truncated the UTF-8 text by code points with mb_substr().",
+  "confidence": 96
+}

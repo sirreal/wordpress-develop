@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_full_parser()` because the input is a complete HTML document, then searches for the first `TITLE` element with `next_tag( 'TITLE' )`. For `TITLE`, the documented `get_modifiable_text()` API returns its decoded text content, including the empty string for an empty `<title></title>`, so the function can distinguish that case from a missing title.",
+  "confidence": 94
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body-fragment HTML, then walked tokens with `next_token()` and built a normalized rewrite by concatenating `serialize_token()` for every token except `SPAN` openers and closers, which removes span wrappers while preserving their contents. If the processor cannot be created or later reports an error, I fall back to `WP_HTML_Processor::normalize()` as the documented normalization path.",
+  "confidence": 94
+}

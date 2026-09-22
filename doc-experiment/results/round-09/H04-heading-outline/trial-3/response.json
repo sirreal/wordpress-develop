@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML and WP_HTML_Processor::next_token() to iterate through all tokens. For each opening heading tag (H1-H6), it extracts the level from the tag name and records the current depth. It then collects text content from all #text tokens inside the heading by checking that current depth is greater than the heading's depth. When the processor encounters a token at a lower depth, it has exited the heading. The text is accumulated and concatenated without markup.",
+  "confidence": 60
+}

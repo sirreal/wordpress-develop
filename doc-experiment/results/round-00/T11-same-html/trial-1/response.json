@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The approach uses `WP_HTML_Processor::normalize()`, a public static method documented in html-processor.md (since 6.7.0). It normalizes an HTML fragment assumed to be in BODY context by serializing it: attribute values are double-quoted, duplicate attributes removed, omitted tags added, tag and attribute names lowercased, text re-encoded, and character references normalized. It returns `null` when it cannot parse or represent the input. By normalizing both inputs and comparing the resulting strings, all semantically-irrelevant differences (quoting style, case, optional closing tags, equivalent character references) are eliminated, while meaningful differences (attribute order, element structure, attribute values, text content) are preserved. If either input returns `null` from `normalize()`, the function returns `false` per the spec.",
+  "confidence": 90
+}

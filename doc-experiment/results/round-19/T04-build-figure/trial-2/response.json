@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template with `src` and `alt` already present so `WP_HTML_Tag_Processor::set_attribute()` preserves their exact order, then walks tokens with `next_token()` until the placeholder `#text` node inside `figcaption` and replaces it with `set_modifiable_text()`. Both documented APIs perform the necessary HTML encoding for unescaped input strings.",
+  "confidence": 95
+}

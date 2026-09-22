@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` so I could respect document structure. For each opening `A` tag I read the decoded `href` with `get_attribute()`, and while inside that element I concatenated only `#text` tokens via `get_modifiable_text()` until the element\u2019s closing depth was reached.",
+  "confidence": 93
+}

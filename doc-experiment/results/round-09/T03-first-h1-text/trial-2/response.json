@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to navigate the document structure. It finds the first H1 tag, records its depth, then walks through all subsequent tokens. For each text node (#text) at or deeper than the H1's depth, it accumulates the decoded text via get_modifiable_text(). When the depth drops below H1's depth, it has exited the H1 and stops. This handles nested elements correctly, collecting text from all descendants while handling character reference decoding automatically.",
+  "confidence": 75
+}

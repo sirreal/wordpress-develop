@@ -1,0 +1,42 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Tag Processor + next_tag('title') + get_modifiable_text(). Every method exists in the docs; no hallucinations; 7/7 pass. Idiomatic: this is exactly the TITLE-reading pattern shown in the tag-processor token example (lines 255-272), and both docs state TITLE modifiable text is plaintext with character references decoded, so entity decoding and the empty-title='' / no-title=null semantics fall out for free. Reasoning about null vs '' is correct. Docked ~12: the reference uses WP_HTML_Processor::create_full_parser for a full document, and the docs steer structure-sensitive work ('collecting an element's text content', head vs body) to the HTML Processor. The Tag Processor choice is defensible and passes the suite, but it silently mishandles a TITLE inside SVG foreign content (returns the SVG title text rather than '' / the head title), which the HTML Processor would resolve correctly. Not exercised by hidden tests, but a real robustness gap in processor choice."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 30,
+      "hallucinated_methods": [
+        "WP_HTML_Tag_Processor::create_full_parser"
+      ],
+      "notes": "Right concept (full parser for a full document), wrong class: called create_full_parser() as a static method on WP_HTML_Tag_Processor, which does not exist there — fatal error, 0/7. The tag-processor doc explicitly states (line 30) the Tag Processor 'has no static factory methods' and that 'create_fragment() and create_full_parser() exist only on WP_HTML_Processor, not on this class.' The subject conflated the two classes despite that warning. The null-guard, next_tag('TITLE'), and get_modifiable_text() logic would have worked had the processor been constructed correctly (e.g., via WP_HTML_Processor::create_full_parser or new WP_HTML_Tag_Processor). Heavy penalty on the no-hallucinated-API axis (a documented-as-nonexistent method); partial credit retained for otherwise-idiomatic intent and correct null/'' handling reasoning."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 88,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1: new WP_HTML_Tag_Processor + next_tag('title') + get_modifiable_text(). All methods documented; no hallucinations; 7/7 pass. Explanation correctly cites TITLE special-element decoding and the false->null, empty->'' semantics. Same single deduction as trial-1 for the Tag Processor choice on a full-document task where the reference/HTML Processor would be the more structure-aware and foreign-content-safe pick. Highest self-reported confidence (92) and it was warranted for the tested cases."
+    }
+  ],
+  "failure_analysis": "Only one hidden-case failure cluster: trial-2's all-7 errors, every one 'Call to undefined method WP_HTML_Tag_Processor::create_full_parser()'. Misconception: the static factories create_full_parser()/create_fragment() belong to the class hierarchy generically, so they can be called on the Tag Processor. The responsible documentation is present and explicit but was overridden by the subject: the WP_HTML_Tag_Processor 'Usage' section, step 1 (line 30 of html-tag-processor.md) states the Tag Processor 'has no static factory methods' and that 'create_fragment() and create_full_parser() exist only on WP_HTML_Processor, not on this class.' The WP_HTML_Processor doc's 'Supported elements' paragraph repeats the split ('this class is created through its static factories ... while the Tag Processor is created directly with new WP_HTML_Tag_Processor( $html ) and has no factory methods'). So this is not a documentation gap in content — the fact was stated twice — but a discoverability/placement weakness: the create_full_parser() method heading in the HTML Processor doc (and the create_fragment() heading) does not itself restate 'this is a WP_HTML_Processor static method; it does not exist on WP_HTML_Tag_Processor.' A subject scanning method headings rather than prose intros can miss the class binding. Trials 1 and 3 succeeded because they constructed the Tag Processor with its documented constructor and used the documented next_tag('title') + get_modifiable_text() path; the docs handled their needs well — particularly the repeated, prominent statements that TITLE is an atomic/special element whose modifiable text is plaintext with character references decoded (tag-processor 'Special self-contained elements' / 'Special atomic HTML elements'; HTML-processor next_token() note on SCRIPT/STYLE/TITLE/TEXTAREA producing no #text children). That guidance directly delivered the entity-decoding and empty-vs-null behavior with no extra work, which is why both passing trials needed no edge-case code. Near-miss in the passing explanations: none of the three subjects noticed that a TITLE can appear in SVG foreign content, where the Tag Processor's first-textual-<title> match diverges from the document's head title; the docs do not call out that 'the first <title> in source order is not necessarily the document title' for full documents, so the passing trials are correct only because the suite never plants a foreign-content or body TITLE.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_full_parser() and create_fragment() method headings (html-processor.md)",
+      "problem": "The class-binding of these static factories is stated only in distant prose intros (the Tag Processor 'Usage' step 1 and the HTML Processor 'Supported elements' paragraph). A subject reading the method heading in isolation has nothing at the method itself reminding them these live ONLY on WP_HTML_Processor. Trial-2 called WP_HTML_Tag_Processor::create_full_parser() and fatally errored on all cases.",
+      "suggestion": "Add a one-line note at each factory method's docblock, e.g. 'This is a static method of WP_HTML_Processor only; WP_HTML_Tag_Processor has no factory methods and must be constructed with new WP_HTML_Tag_Processor( $html ).' Co-locating the constraint with the method prevents the cross-class hallucination regardless of where the reader entered."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor get_modifiable_text() / 'Special self-contained elements' section",
+      "problem": "The docs explain that TITLE modifiable text is decoded plaintext, but never state that the Tag Processor matches the FIRST <title> in byte order with no structural awareness — so a <title> inside SVG/MathML foreign content, or a stray <title> in the body, will be returned as if it were the document title. Two of three subjects chose the Tag Processor for a whole-document title extraction and would silently return the wrong title on such input.",
+      "suggestion": "In the 'Which processor should I use?' guidance, add a concrete caveat: when an element's identity depends on document position (e.g. the document <title> belongs to <head> and an SVG <title> is a different element), prefer WP_HTML_Processor, because the Tag Processor matches tags lexically and cannot distinguish a head TITLE from a foreign-content or misplaced one."
+    },
+    {
+      "location": "WP_HTML_Processor 'Usage' / create_full_parser() overview",
+      "problem": "There is no short, copyable end-to-end recipe for the very common 'walk a full document and read one element's text' task. The reference solution (create_full_parser + next_token loop + get_token_name/is_tag_closer + get_modifiable_text) is idiomatic but the reader must assemble it from four separate method docs; only trial-2 reached for the full parser at all, and it failed on the constructor.",
+      "suggestion": "Add a brief full-document example to create_full_parser()'s docblock showing the canonical pattern: create_full_parser(); null-check; while ( next_token() ) { match get_token_name() and !is_tag_closer(); read get_modifiable_text() }. This both models the correct class for full documents and reinforces that the factory is on WP_HTML_Processor."
+    }
+  ]
+}

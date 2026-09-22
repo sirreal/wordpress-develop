@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the canonical reference. Uses only WP_HTML_Processor::normalize() (documented static method, html-processor.md line 938) on each input, returns false if either yields null, then compares the two normalized strings with ===. Correct processor choice: the task hinges on structural equivalence (implied closers, tag-case, attribute quoting, entity spellings), which is precisely what normalize() collapses while preserving attribute order, text, and structure. Honors the documented null-on-unparseable contract (html-processor.md lines 84, 988) to satisfy the 'return false if either cannot be parsed' requirement, which covers the misnesting-unsupported case. No bookmarks/token-walking needed; the single-call normalize idiom is the most idiomatic approach and the docs steer toward it. The misnesting case logs an internal trigger_error from inside serialize(), but that is emitted by the library, not the candidate, and the test still passes because normalize() returns null as documented. Passed 9/9. Self-reported confidence 85."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical to trial-1 and the reference, with explanatory comments. Only API touched is WP_HTML_Processor::normalize(); no hallucinated or undocumented calls. Correct null-guard ordering and === comparison. Explanation correctly attributes each normalization behavior (omitted closers added, casing lowercased, quoting standardized, entities decoded) to documented normalize() semantics (html-processor.md lines 949-962). Passed 9/9. Confidence 92."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Byte-for-byte equivalent to the reference solution. Single documented call to WP_HTML_Processor::normalize() per input, null check, string equality. No undocumented API, no token-walking or bookmark misuse, no _doing_it_wrong attributable to the candidate. Explanation correctly reasons that string equality of normalized forms catches structure/attribute/text differences while ignoring quoting/case/entity/whitespace-in-tag differences. Passed 9/9. Confidence 92."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial; all three passed 9/9 and are essentially the canonical reference. The documentation succeeded decisively here. The decisive passage is the `normalize()` method section (html-processor.md lines 938-988): it names normalize() as the fragment-comparison/canonicalization tool, lists exactly the normalizations the task tests (attribute values double-quoted -> covers quoting-styles-equal and whitespace-in-tag-equal; omitted tags added -> implied-closers-equal; name casing lower-cased -> tag-case-equal; text re-encoded -> entity-spellings-equal), and documents the `string|null` return with 'null if unable to normalize'. The 'Which processor should I use?' guidance (tag-processor.md lines 18-25) and the HTML-Processor overview (html-processor.md line 81) both explicitly route 'producing normalized output' / 'normalizing markup' to WP_HTML_Processor, steering subjects away from the Tag Processor and away from hand-rolling a token walk. The unsupported-markup contract (html-processor.md line 84: 'methods which produce output such as serialize() and normalize() return null') told subjects that mis-nested formatting (misnesting-unsupported-false, listed verbatim as an unsupported construct at lines 90-91) would return null, which the 'return false if either input cannot be parsed' guard turns into the expected false.\n\nNear-misses in the explanations: none of the three subjects mentioned that the misnesting case triggers an internal E_USER_WARNING ('Cannot serialize HTML Processor with parsing error: unsupported.') from inside serialize()/normalize(). It is harmless here — normalize() still returns null and the test passes — but the docs gave no hint that the null-return path is accompanied by a warning, so the subjects could not have known. Also worth noting: all three relied on === string equality being a sound proxy for 'same parsed structure'. This holds because normalize() is canonical (deterministic output for a given DOM), but the docs never state that two inputs with the same DOM always produce byte-identical normalized output (the canonicalization guarantee). The subjects assumed it implicitly and were correct, but the guarantee is load-bearing for this whole class of 'compare two fragments' tasks and is not stated.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::normalize() and ::serialize()",
+      "problem": "The docs state normalize()/serialize() return null on unsupported markup (e.g. mis-nested formatting elements) but do not mention that this null-return path also emits an internal warning via _doing_it_wrong / trigger_error (observed: 'Cannot serialize HTML Processor with parsing error: unsupported.', E_USER_WARNING). Callers who treat null as a normal 'cannot represent this input' signal — exactly the documented contract — will be surprised by a warning in logs and cannot tell from the docs whether they misused the API.",
+      "suggestion": "Add one sentence to the normalize()/serialize() Returns/notes: 'When the input contains markup the HTML Processor does not support, this returns null AND emits a warning (_doing_it_wrong). The null return is the supported way to detect unrepresentable input; the warning is informational, not a sign of caller error.' This generalizes to every consumer that uses null-return as a validity check."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() (method docblock)",
+      "problem": "The docs describe what normalize() changes (quoting, casing, omitted tags, entity re-encoding) but never state the canonicalization guarantee that makes normalize() usable for comparison: two inputs that parse to the same DOM produce byte-identical normalized output, and inputs with different structure/attributes/text do not. Every 'are these two fragments equivalent?' use case depends on this property, yet a reader must infer it.",
+      "suggestion": "Add a short 'Comparing fragments' note to normalize(): 'Normalization is canonical: two fragments that a browser would parse into the same DOM normalize to identical strings, so string equality of normalized output is a reliable equivalence test. Differences in attribute order, attribute values, text, or element structure are preserved and will produce different output.' Do not include the task's function — just state the property and that == on the results is the intended comparison primitive."
+    },
+    {
+      "location": "WP_HTML_Processor overview / 'Which processor should I use?' (tag-processor.md lines 18-25)",
+      "problem": "Minor: the routing guidance lists 'producing normalized output' under the HTML Processor but does not point to the specific static entry point (normalize()) for the common one-shot case of normalizing a BODY-context fragment. Subjects found normalize() here only because it also appears in the method index; a reader scanning the routing table is left to hunt for the method.",
+      "suggestion": "In the 'use the HTML Processor when ... producing normalized output' bullet, add a parenthetical cross-reference: '(see WP_HTML_Processor::normalize() for a one-call static helper, or ::serialize() on an unscanned instance).' This shortens the path from 'I need normalized output' to the exact API for both new and experienced readers."
+    }
+  ]
+}

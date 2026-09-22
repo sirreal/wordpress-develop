@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment safely and `next_token()` with `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect ordinary `#text` descendants inside headings while preserving document order and empty headings.",
+  "confidence": 91
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` as a token scanner, walking the fragment with `next_token()`, collecting decoded text from `#text` tokens via `get_modifiable_text()`, and also collecting decoded contents from `TITLE` and `TEXTAREA` opening-tag tokens while ignoring other special elements like `SCRIPT` and `STYLE`. Truncation is done by Unicode code points with `mb_strlen()` and `mb_substr()` using explicit `UTF-8` encoding, returning early once the limit is reached.",
+  "confidence": 93
+}

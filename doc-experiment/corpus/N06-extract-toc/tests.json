@@ -1,0 +1,128 @@
+{
+    "id": "N06-extract-toc",
+    "title": "Extract a table of contents",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "traversal",
+    "processor": "html",
+    "function": "extract_toc",
+    "cases": [
+        {
+            "id": "basic-h1-h3",
+            "args": [
+                "<h1>Intro</h1><p>Text</p><h3>Details <em>here</em></h3>"
+            ],
+            "expected": [
+                {
+                    "level": 1,
+                    "text": "Intro"
+                },
+                {
+                    "level": 3,
+                    "text": "Details here"
+                }
+            ]
+        },
+        {
+            "id": "all-heading-levels",
+            "args": [
+                "<h1>Title</h1><h2>Section</h2><h3>Subsection</h3><h4>Minor</h4><h5>Small</h5><h6>Tiny</h6>"
+            ],
+            "expected": [
+                {
+                    "level": 1,
+                    "text": "Title"
+                },
+                {
+                    "level": 2,
+                    "text": "Section"
+                },
+                {
+                    "level": 3,
+                    "text": "Subsection"
+                },
+                {
+                    "level": 4,
+                    "text": "Minor"
+                },
+                {
+                    "level": 5,
+                    "text": "Small"
+                },
+                {
+                    "level": 6,
+                    "text": "Tiny"
+                }
+            ]
+        },
+        {
+            "id": "nested-text-and-entities",
+            "args": [
+                "<h2>A <span>B &amp; C</span></h2>"
+            ],
+            "expected": [
+                {
+                    "level": 2,
+                    "text": "A B & C"
+                }
+            ]
+        },
+        {
+            "id": "empty-heading",
+            "args": [
+                "<h2><img src=\"x.jpg\"></h2><h3></h3>"
+            ],
+            "expected": [
+                {
+                    "level": 2,
+                    "text": ""
+                },
+                {
+                    "level": 3,
+                    "text": ""
+                }
+            ]
+        },
+        {
+            "id": "case-insensitive-source",
+            "args": [
+                "<H1>Upper</H1><h6>Lower</h6>"
+            ],
+            "expected": [
+                {
+                    "level": 1,
+                    "text": "Upper"
+                },
+                {
+                    "level": 6,
+                    "text": "Lower"
+                }
+            ]
+        },
+        {
+            "id": "implied-heading-close",
+            "args": [
+                "<h2>One<h3>Two"
+            ],
+            "expected": [
+                {
+                    "level": 2,
+                    "text": "One"
+                },
+                {
+                    "level": 3,
+                    "text": "Two"
+                }
+            ]
+        },
+        {
+            "id": "no-matches",
+            "args": [
+                "<p>No headings here.</p>"
+            ],
+            "expected": []
+        }
+    ]
+}

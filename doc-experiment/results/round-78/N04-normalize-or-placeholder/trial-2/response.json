@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented HTML Processor fragment API to normalize BODY-context HTML by creating a processor with `WP_HTML_Processor::create_fragment()` and serializing it with `serialize()`. If processor creation fails or the processor reports an error, the function returns the required fallback markup exactly.",
+  "confidence": 92
+}

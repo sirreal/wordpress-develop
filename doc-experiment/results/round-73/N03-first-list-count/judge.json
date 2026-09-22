@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 78,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor and used depth-bounded token walking, clean-scan checks, set_attribute(), and get_updated_html(). The central API misuse is calling seek('first-list-opener') without first setting that bookmark, so normal completed scans crash before the intended safe fallback can work."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Uses the documented pattern almost exactly: create_fragment(), find first UL/OL, set a bookmark on the opener, walk tokens by depth, count direct LI openers, reject incomplete or unsupported scans, seek back, set the attribute, release the bookmark, and return get_updated_html()."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 74,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and mostly correct direct-child token logic, including token type, closer, depth, and clean-scan checks. It never creates a public bookmark and instead calls seek('1'), apparently relying on an internal auto-generated bookmark detail; it also ignores seek()'s return before mutating."
+    }
+  ],
+  "failure_analysis": "Trials 1 and 3 failed simple-ul, ol, existing-count-overwritten, omitted-li-closers, nested-list-counts-direct-children, incomplete-token-after-closed-list, and unsupported-after-closed-list for the same misconception: after scanning past the list, they tried to return to the opener with a bookmark that did not exist. Trial 1 used a named bookmark without set_bookmark(); trial 3 used the private/internal-looking name '1'. The relevant docs are good in the HTML Processor overview, especially 'Recipe: scan a region before editing its opener', which shows set_bookmark() before walking and seek() only after a clean scan. The weaker area is the seek()/bookmark method docs: they say seek jumps to a bookmark, but do not strongly state that callers must create that bookmark with set_bookmark(), that internal auto-generated bookmark names are not public API, and that failed seek must be checked before editing. The cases incomplete-token-inside-list and unsupported-inside-list passed in those trials only because the clean-scan checks returned the original HTML before seek() was reached. Trial 2 passed everything; the docs successfully conveyed processor choice, direct-child depth checks, bookmark/seek workflow, get_updated_html(), and incomplete/unsupported scan handling.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::seek() docblock",
+      "problem": "The missing-bookmark case is underspecified for practical use. Subjects could treat seek() as harmless fallback without understanding that an unknown name is invalid and must stop the edit path.",
+      "suggestion": "State explicitly: only pass names previously created with set_bookmark(); if the bookmark is absent, seek() returns false and the processor is not positioned at the requested token, so callers must not mutate unless seek() returned true."
+    },
+    {
+      "location": "WP_HTML_Processor private bookmark_counter/property docs",
+      "problem": "Rendered docs expose internal auto-generated bookmark names starting at 1, which can look like valid public bookmark handles.",
+      "suggestion": "Mark this as implementation-only and say these internal names must not be passed to seek(), has_bookmark(), or release_bookmark(); user code should create its own literal bookmark names with set_bookmark()."
+    },
+    {
+      "location": "Bookmark recipe near 'scan a region before editing its opener'",
+      "problem": "The recipe demonstrates the right pattern, but the failure mode is easy to miss when adapting it.",
+      "suggestion": "Add a short anti-pattern note: do not call seek() for a name that was not created at the opener; keep set_bookmark(), seek(), and the mutation in the same guarded flow."
+    }
+  ]
+}

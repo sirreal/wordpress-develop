@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and concatenated `serialize_token()` for every token except `SPAN` openers and closers, which removes the wrapper while preserving and normalizing their contents. I also check `get_last_error()` so unsupported markup falls back cleanly.",
+  "confidence": 96
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction is structure-sensitive, then finds the first `TABLE` with `next_tag()`. It walks the table subtree with a single `next_token()` loop, using `get_current_depth()` to stop at the table boundary, `get_token_type()`/`get_tag()`/`is_tag_closer()` to detect rows and cells, and `get_modifiable_text()` only on `#text` tokens so cell text matches ordinary DOM-style text with character references already decoded.",
+  "confidence": 88
+}

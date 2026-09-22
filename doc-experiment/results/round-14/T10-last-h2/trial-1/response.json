@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and scans forward through the HTML document using next_tag() with a query for H2 tags. Each time an H2 is found, a bookmark named 'last-h2' is set, which moves the bookmark to the current location (a supported idiom for tracking the last occurrence). After scanning completes, if a bookmark was created (meaning at least one H2 was found), we seek back to it, add the 'final-section' class using add_class(), and release the bookmark. The modified HTML is returned via get_updated_html(), which preserves all bytes except for the modifications made.",
+  "confidence": 95
+}

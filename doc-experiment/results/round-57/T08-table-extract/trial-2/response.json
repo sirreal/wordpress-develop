@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor because the task depends on browser-like table structure and subtree text extraction. The function creates a fragment processor with `WP_HTML_Processor::create_fragment()`, locates the first `TABLE`, then walks tokens with `next_token()`, collecting decoded cell text from `#text` tokens via `get_modifiable_text()` while using `get_tag()`, `get_token_type()`, `is_tag_closer()`, and `get_current_depth()` to delimit rows and cells.",
+  "confidence": 84
+}

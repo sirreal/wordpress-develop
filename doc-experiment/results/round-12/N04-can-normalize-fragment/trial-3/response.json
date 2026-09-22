@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses the static WP_HTML_Processor::normalize() method which returns a normalized string if successful or null if the HTML contains unsupported markup. The function returns true when normalization succeeds and false when it returns null, directly answering whether the HTML API can produce a fully-normalized serialization.",
+  "confidence": 85
+}

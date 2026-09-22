@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat scan of the markup, repeatedly calling `next_tag( 'H2' )` and moving a single bookmark to remember the last matched `H2`. If any `H2` was found, it seeks back to that bookmarked opener, adds the `final-section` class with `add_class()`, and returns the result via `get_updated_html()`; otherwise it returns the original HTML unchanged.",
+  "confidence": 96
+}

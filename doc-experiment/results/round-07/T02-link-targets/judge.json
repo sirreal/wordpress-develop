@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice: WP_HTML_Tag_Processor for a flat per-tag attribute edit needing no structural awareness (max). Every method called is documented in html-tag-processor.md: next_tag (line 927), get_attribute (1469), set_attribute (2127), get_updated_html (2289); next_tag('A') via array('tag_name'=>'a') is the documented query form (line 58). No _doing_it_wrong records. Idiomatic: next_tag walk loop, get_attribute null-check, set_attribute, get_updated_html return -- byte-for-byte identical pattern to reference.php. Edge cases handled correctly: null!==get_attribute('href') treats href=\"\" ('') and valueless href (true) as present per docs lines 89-90, skips name-only A tags, and comment-embedded markup is untouched because next_tag only stops on real tags. Passed 8/8. Only nit: inline comment says get_attribute returns 'strings for valued attributes' alongside the true/empty cases -- harmlessly imprecise wording, not a usage error. Self-reported confidence 92."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Identical correct solution to trial-1 and reference.php. Correct processor choice (max). All methods documented (next_tag, get_attribute, set_attribute, get_updated_html); array('tag_name'=>'a') query form is documented. No _doing_it_wrong. Idiomatic token walk + null-check + set_attribute + get_updated_html. Edge cases: relies on documented null/''/true return semantics for href -- explanation explicitly and correctly cites the doc ('returns null when absent, true for boolean attributes like bare href, decoded string value otherwise'), the most accurately grounded of the three explanations. Passed 8/8. Confidence 87."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Same correct solution as reference.php, plus a docblock on the function. Correct processor choice (max). All methods documented; tag_name query form documented. No _doing_it_wrong. Idiomatic walk/null-check/set/get_updated_html. Edge cases handled: inline comment correctly notes href could be '' or true for valueless and that null!==check treats both as present, matching docs lines 89-90 and the get_attribute return contract (string|true|null). Passed 8/8. Confidence 92."
+    }
+  ],
+  "failure_analysis": "No failures: all three trials passed all 8 hidden cases with zero _doing_it_wrong records, and all three are functionally identical to reference.php. The documentation for this task was effective. What the docs did well, mapped to the cases that could have tripped subjects: (1) The empty-vs-valueless attribute distinction -- the crux of cases empty-href-counts and valueless-href-counts -- is stated three times in the tag-processor doc: the prose at lines 89-90 ('return null if absent ... may return \\\"\\\" if present but empty ... boolean attributes return true'), the signature 'public function get_attribute(string $name): string|true|null' at 1472, and the Returns row at 1505 ('Boolean attributes return true'). Every subject used the correct `null !== get_attribute('href')` guard rather than a truthiness check (which would have wrongly skipped href=\\\"\\\"), and the explanations cite the documented semantics, so this was grounded knowledge, not luck. (2) Overwrite semantics (case existing-target-overwritten) are documented at line 156: 'If set_attribute() is called for an existing attribute it will overwrite the existing value.' (3) Case-insensitive matching (case uppercase-attribute) -- next_tag tag_name matching is documented as 'ASCII case-insensitive' (line 952), and get_attribute name lookups are likewise case-insensitive in practice. (4) The inside-comment-ignored and nested-markup cases work for free because next_tag is documented as stopping only on real tags, not text inside comments. Near-misses worth noting: the inline comments in trials 1 and 2 paraphrase get_attribute's return as also yielding 'strings for valued attributes' lumped with the boolean case -- accurate enough but loosely worded; it did not affect the code. No trial demonstrated awareness of incomplete-input behavior (e.g. an unclosed `<a href` at EOF), but no hidden case exercised that, so it is untested rather than wrong.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() -- method docblock and the prose at lines 89-90",
+      "problem": "The three-way return contract (null = absent, '' = present-but-empty, true = valueless/boolean) is the single most load-bearing fact for any 'attribute is present' check, and it is currently spread across three locations (prose at 89-90, signature at 1472, Returns row at 1505) but the get_attribute Example block at 1480-1488 only demonstrates a valued attribute ('14'), a boolean (true), and absent (null). It never shows the present-but-empty '' case.",
+      "suggestion": "Add a present-but-empty line to the get_attribute Example, e.g. for input '<a href=\"\">', `$p->get_attribute( 'href' ) === ''`, so all three return shapes appear together in the canonical example. This generalizes to every 'is X present?' task and makes clear why a strict `null !== get_attribute(...)` check (not a truthiness/empty check) is required."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() docblock",
+      "problem": "Nothing states that the attribute-name argument is matched case-insensitively. Subjects relied on this implicitly to pass the uppercase-attribute case (HREF), but the doc only documents ASCII case-insensitivity for next_tag's tag_name, not for get_attribute/set_attribute name lookups.",
+      "suggestion": "State explicitly in the get_attribute (and set_attribute) docblock that attribute names are matched/normalized ASCII case-insensitively, so `get_attribute( 'href' )` finds `HREF`, and that set_attribute reuses the existing attribute's casing/position. This is a general fact that prevents wrong assumptions about attribute-name matching."
+    },
+    {
+      "location": "next_tag() docblock / 'When matching fails' section (lines 92-118)",
+      "problem": "The docs explain that next_tag only stops on real tags and skips text, but do not explicitly say that markup inside comments (e.g. <!-- <a href> -->) is never visited as a tag. Subjects got the inside-comment-ignored case right by reasonable inference, but the guarantee is implicit.",
+      "suggestion": "Add one sentence to next_tag noting that tag-like text inside comments, CDATA, and rawtext/RCDATA regions is part of those nodes and is never matched as a tag. This generalizes to any task that must avoid editing markup that merely looks like a tag."
+    }
+  ]
+}

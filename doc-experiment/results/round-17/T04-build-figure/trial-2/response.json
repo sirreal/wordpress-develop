@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely construct the figure fragment. It starts with a template containing the exact required structure with placeholder values (empty src/alt and a dot as text content). The processor's next_tag() method finds the img element and sets its src and alt attributes with the provided values (both are automatically HTML-encoded by set_attribute()). Then next_token() iterates through tokens to find the #text node inside figcaption and replaces the placeholder with the actual caption text using set_modifiable_text() (also automatically encoded). Finally, get_updated_html() returns the modified HTML with all updates applied.",
+  "confidence": 92
+}

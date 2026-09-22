@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk the fragment in document order, matched `A` openers with `next_tag()`, filtered to anchors whose `href` is a string via `get_attribute()`, and then used a depth-bounded `next_token()` subtree walk with `get_current_depth()` plus `get_modifiable_text()` to concatenate only ordinary `#text` descendants.",
+  "confidence": 91
+}

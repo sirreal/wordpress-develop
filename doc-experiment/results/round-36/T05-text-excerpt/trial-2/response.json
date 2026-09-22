@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` so the fragment is parsed with HTML structure awareness, then walks every token with `next_token()`, appending ordinary `#text` token contents via `get_modifiable_text()` and explicitly also appending decoded opener text for `TITLE` and `TEXTAREA`. It excludes other modifiable-text tokens such as comments, `SCRIPT`, and `STYLE`, and truncates the final UTF-8 string by Unicode code points with `mb_strlen()` and `mb_substr()` as the docs recommend.",
+  "confidence": 88
+}

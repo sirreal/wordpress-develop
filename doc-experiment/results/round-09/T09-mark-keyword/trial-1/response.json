@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to walk through all tokens in the HTML fragment, identifying text nodes with get_token_type() checking for '#text'. When a text node is found, get_modifiable_text() returns the decoded text (character references already decoded), which is checked for the keyword using case-sensitive substring matching with strpos(). If the keyword is found, the entire text node is wrapped in a <mark> element, with serialize_token() providing normalized HTML output for each token. Other tokens are serialized unchanged. The processor's create_fragment() handles parsing and normalization automatically.",
+  "confidence": 75
+}

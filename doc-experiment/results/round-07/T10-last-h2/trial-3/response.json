@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to linearly scan through the HTML document, finding each H2 tag using next_tag() with a tag_name query. Since next_tag() only matches real HTML tags and not tag-like content in comments, H2 tags in comments are automatically ignored. The solution repeatedly sets a bookmark at each H2 found, which moves the bookmark to the most recent H2 (the last one). After scanning completes, it seeks back to that bookmark and adds the 'final-section' class using add_class(), then returns the modified HTML via get_updated_html().",
+  "confidence": 85
+}

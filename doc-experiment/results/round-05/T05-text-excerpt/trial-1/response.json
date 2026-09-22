@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation iterates through all tokens using `WP_HTML_Tag_Processor::next_token()`, identifies text nodes with `get_token_type() === '#text'`, and accumulates their decoded content via `get_modifiable_text()`. It uses `mb_strlen()` and `mb_substr()` with UTF-8 encoding to safely count and truncate by Unicode codepoints, ensuring multi-byte characters are never split. The function respects all whitespace as-is and automatically excludes non-text content like script/style tags since those are not reported as `#text` tokens by the parser.",
+  "confidence": 82
+}

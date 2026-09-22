@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment input, then walks every token with `next_token()`. For each token, it skips any `SPAN` opener or closer by checking `get_tag()`, and appends all other tokens with `serialize_token()`, which yields normalized HTML serialization. After the walk, it checks `get_last_error()` to avoid returning partial output from unsupported markup.",
+  "confidence": 88
+}

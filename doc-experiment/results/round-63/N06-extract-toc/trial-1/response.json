@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and a single next_token() walk to collect ordinary #text descendants for H1 through H6 headings in document order. The function tracks the current heading opener, records its depth, appends decoded text via get_modifiable_text(), and flushes each heading when its matching closer arrives or when the walk leaves its subtree.",
+  "confidence": 91
+}

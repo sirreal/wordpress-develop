@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and find all A tags with href attributes. For each A tag found, it records the href (decoded by get_attribute), then iterates through subsequent tokens to collect all text content within the element. Text tokens are concatenated until the processor exits the A element (indicated by current_depth dropping below the entry depth), automatically handling nested elements and character reference decoding through get_modifiable_text().",
+  "confidence": 72
+}

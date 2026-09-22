@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment with document-structure awareness, then walks the document once with `next_token()`. It tracks when a heading `H1` through `H6` opens and closes, accumulates heading text from `#text` tokens via `get_modifiable_text()`, and also appends modifiable text carried on opening tag tokens for text-bearing special elements such as `SCRIPT` or `STYLE` if they appear inside a heading.",
+  "confidence": 87
+}

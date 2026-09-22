@@ -1,0 +1,44 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor::create_fragment for structure, bookmarks the opener, walks tokens with depth, counts direct LI openers, checks incomplete/unsupported scans, seeks back, sets the attribute, and returns get_updated_html(). All API calls are documented."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 72,
+      "hallucinated_methods": [
+        "seek('1') as an unset-bookmark probe"
+      ],
+      "notes": "Processor choice and depth-based token walking are good, and it checks paused_at_incomplete_token() plus get_last_error(). The central misuse is calling seek('1') without ever setting bookmark '1', then relying on failure to reparse. The docs expose seek(), but this is not a valid bookmark workflow and crashes whenever the scan succeeds."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 70,
+      "hallucinated_methods": [
+        "seek('nonexistent-bookmark') as a no-op"
+      ],
+      "notes": "Uses the right processor and mostly follows the documented subtree/direct-child pattern. It never bookmarks the list opener, then deliberately calls seek() on a nonexistent bookmark before reparsing. That is the same invalid bookmark assumption as trial-2 and causes the passing scan cases to crash."
+    }
+  ],
+  "failure_analysis": "Trials 2 and 3 fail simple-ul, ol, existing-count-overwritten, omitted-li-closers, nested-list-counts-direct-children, incomplete-token-after-closed-list, and unsupported-after-closed-list for one misconception: seek() was treated as a safe way to test or ignore an arbitrary bookmark name. The rendered bookmark docs say seek() moves to a bookmark and returns whether the cursor moved, and has_bookmark() is documented separately, but the seek() section does not explicitly state that the bookmark must already exist or that unknown names are misuse. The set_bookmark() example also uses if ($p->seek('last-li')) in a path where last-li may not have been set, which likely reinforced the misconception. The docs did well on processor choice and traversal: all trials chose WP_HTML_Processor, used next_token()/get_current_depth() for subtree scans, and checked paused_at_incomplete_token()/get_last_error() for incomplete or unsupported input inside the list.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::seek() and WP_HTML_Tag_Processor::seek() docblocks",
+      "problem": "The precondition for bookmark existence is implicit. Readers can infer that seek() is a safe false-returning existence probe for arbitrary names.",
+      "suggestion": "State that seek() must only be called for a bookmark previously created by set_bookmark() or confirmed with has_bookmark(); document the behavior for unknown bookmarks and cross-link has_bookmark()."
+    },
+    {
+      "location": "set_bookmark() bookmark examples in both rendered docs",
+      "problem": "The examples call seek('last-li') conditionally without first proving that last-li exists, which models the exact unsafe pattern used by failed trials.",
+      "suggestion": "Guard optional bookmarks with has_bookmark('last-li') before seek(), or initialize/set the bookmark on a guaranteed token before any seek()."
+    },
+    {
+      "location": "HTML Processor bookmark documentation",
+      "problem": "The method-level bookmark example inside the HTML Processor page uses WP_HTML_Tag_Processor and does not reinforce the opener-scan-seek-back pattern for structural edits.",
+      "suggestion": "Add or adapt a WP_HTML_Processor example showing: set_bookmark() on an opener, scan a bounded subtree, reject incomplete/error states, seek back only if the bookmark was set, mutate, release_bookmark()."
+    }
+  ]
+}

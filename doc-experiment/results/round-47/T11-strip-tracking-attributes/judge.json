@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Breakdown: processor 30/30, documented API 30/30, idiomatic patterns 25/25, edge handling 15/15. Uses WP_HTML_Tag_Processor for flat attribute editing, walks tags with next_tag(), removes names returned by get_attribute_names_with_prefix(), and returns get_updated_html(). All called methods are present in the rendered docs, and execution recorded no _doing_it_wrong entries."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Correctly chooses the Tag Processor, uses only documented methods, follows the documented scan-edit-return pattern, checks the null return from get_attribute_names_with_prefix(), and relies on documented case-insensitive prefix matching/lowercase returned names. Passed all cases without misuse records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same implementation as trial-1. Fully adheres to the rendered docs: tag-by-tag scan, documented prefix attribute lookup, documented remove_attribute(), and get_updated_html() for queued edits while preserving untouched bytes. Passed all cases without hallucinated API usage or _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials: each passed 7/7. The docs did well in three places: the Tag Processor overview explicitly says to use it for flat attribute/class edits; next_tag() documents that only real tags match, so comments and raw-text contents are naturally skipped; and get_attribute_names_with_prefix() documents lowercase returned names plus case-insensitive matching, which explains why uppercase DATA-TRACK-ID is removable. get_updated_html() also clearly explains that queued edits are retrieved there, with untouched bytes preserved rather than normalized. The main near-miss is that remove_attribute() itself does not restate case-insensitive attribute-name behavior or duplicate-attribute behavior, so a reader using get_attribute() or their own discovered names might not be as confident as these trials were. Another minor near-miss is that get_attribute_names_with_prefix() documents null when no tag opener is matched, but not the distinct empty-array case when a tag is matched and no attributes have the prefix.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute_names_with_prefix() docblock",
+      "problem": "The return contract distinguishes null for no matched opener but does not explicitly state that a matched tag with zero prefix matches returns an empty array.",
+      "suggestion": "Add a sentence and example showing: on a matched opener with no matching attributes, returns array(); when not matched on a tag opener, returns null."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::remove_attribute() docblock",
+      "problem": "The method docs only say it removes an attribute, without restating whether name matching is ASCII case-insensitive or how lowercased names returned from get_attribute_names_with_prefix() interact with original-cased source attributes.",
+      "suggestion": "Add a contract note that attribute names are matched ASCII case-insensitively and that lowercased names returned by get_attribute_names_with_prefix() are valid inputs to remove_attribute(), while untouched source casing/bytes are preserved by get_updated_html()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor attribute helper docs",
+      "problem": "The docs document each method separately, but the common pattern of enumerating attributes by prefix and then removing or updating them is only implied.",
+      "suggestion": "Add a general example for iterating attribute names returned by get_attribute_names_with_prefix() and applying remove_attribute() or set_attribute() to those names. Keep it generic, such as processing a configurable data-* prefix, rather than embedding this task's exact solution."
+    }
+  ]
+}

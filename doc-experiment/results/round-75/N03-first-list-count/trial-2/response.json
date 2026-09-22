@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment with full structural awareness, then walked tokens with `next_tag()` and `next_token()` while using `get_current_depth()`, `get_tag()`, and `is_tag_closer()` to find the first `UL`/`OL` opener and count only direct `LI` children. I also checked `paused_at_incomplete_token()` and `get_last_error()` so truncated or unsupported input falls back to the original HTML unchanged, and used `set_attribute()` plus `get_updated_html()` for the mutation.",
+  "confidence": 62
+}

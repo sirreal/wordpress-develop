@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Calls WP_HTML_Processor::normalize() static method to serialize the HTML fragment. Returns true if normalization succeeds (returns a string), false if it fails (returns null due to unsupported markup).",
+  "confidence": 88
+}

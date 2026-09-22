@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly and match only real `img` tags with ASCII case-insensitive tag-name matching, then used `add_class( 'wp-image' )` on each match and returned `get_updated_html()` so untouched bytes stay exactly as they were. Comments and other non-tag text are ignored by `next_tag()`, so image-like text inside comments is not modified.",
+  "confidence": 98
+}

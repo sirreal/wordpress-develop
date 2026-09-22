@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` so the fragment is parsed with HTML structure awareness, then walked tokens with `next_tag()` and `next_token()`, using `get_current_depth()` to count only direct `LI` children of the first `UL` or `OL`. A bookmark lets me return to the list opener and apply `set_attribute()` only after the scan finishes cleanly; I reject incomplete or unsupported parses by checking `paused_at_incomplete_token()` and `get_last_error()`.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to parse a BODY fragment, then `next_tag( 'H1' )` to find the first heading and `next_token()` plus `get_current_depth()` to walk only that subtree. While walking, I collected only `#text` tokens with `get_modifiable_text()`, which the docs say returns decoded text for ordinary text nodes and nested text content, so character references are handled correctly.",
+  "confidence": 96
+}

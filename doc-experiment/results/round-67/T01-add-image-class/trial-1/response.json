@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor for a linear, source-preserving scan and its add_class() helper to append wp-image to each IMG opener without disturbing other bytes; get_updated_html() returns the original HTML with only queued tag-attribute changes applied.",
+  "confidence": 98
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan each tag opener with next_tag(), collect all attribute names whose lowercase names start with the documented prefix via get_attribute_names_with_prefix('data-track-'), remove them with remove_attribute(), and then return the modified document with get_updated_html().",
+  "confidence": 98
+}

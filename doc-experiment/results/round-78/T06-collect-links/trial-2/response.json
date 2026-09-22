@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_token()`, collecting only `#text` tokens inside `A` elements. For each `A` opener I checked `get_attribute( 'href' )` and kept only string-valued hrefs; text was read with `get_modifiable_text()` so character references are already decoded.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walks tokens with `next_token()`, wrapping only ordinary `#text` tokens whose decoded text from `get_modifiable_text()` contains the keyword. Each token is emitted with `serialize_token()` so the result stays normalized, and unsupported parsing failures fall back to `WP_HTML_Processor::normalize()`.",
+  "confidence": 90
+}

@@ -1,0 +1,95 @@
+{
+  "subject_isolation": {
+    "enforced": true,
+    "agent_type": "codex-cli-isolated-workdir",
+    "isolation_mode": "isolated-workdir",
+    "runner": "codex exec",
+    "input_delivery": "prompt-embedded-docs",
+    "sandbox_mode": "read-only",
+    "approval_policy": "never",
+    "project_rules_loaded": false,
+    "user_config_loaded": false,
+    "repo_available_to_subject": false,
+    "input_files": [
+      "html-processor.md",
+      "html-tag-processor.md",
+      "task.md"
+    ],
+    "work_root": "/var/folders/v7/flqy7j3s3q72cql9ppnrbqth0000gn/T/html-api-docs-eval/round-60/codex-cli-trials",
+    "equivalent_boundary_notes": "Each subject process runs from a private non-repo directory containing only the two staged rendered docs, one task prompt, and the output schema. The task and rendered docs are embedded directly in the subject prompt because local codex exec does not expose the experiment's Read/Grep-only tools. Codex project rules and user config are ignored; the process uses a read-only sandbox and approval policy never."
+  },
+  "result": [
+    {
+      "id": "N03-first-list-count",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$found_list = false;\n\t$list_depth = null;\n\t$item_count = 0;\n\n\twhile ( $processor->next_tag() ) {\n\t\t$tag_name = $processor->get_tag();\n\n\t\tif ( ! $found_list ) {\n\t\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\t$found_list = true;\n\t\t\t$list_depth = $processor->get_current_depth();\n\t\t\t$item_count = 0;\n\n\t\t\tif ( ! $processor->set_bookmark( 'first-list-opener' ) ) {\n\t\t\t\treturn $html;\n\t\t\t}\n\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( 'LI' === $tag_name && ! $processor->is_tag_closer() && $processor->get_current_depth() === $list_depth + 1 ) {\n\t\t\t$item_count++;\n\t\t}\n\t}\n\n\tif ( ! $found_list ) {\n\t\treturn $html;\n\t}\n\n\tif ( $processor->paused_at_incomplete_token() || null !== $processor->get_last_error() ) {\n\t\t$processor->release_bookmark( 'first-list-opener' );\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->seek( 'first-list-opener' ) ) {\n\t\t$processor->release_bookmark( 'first-list-opener' );\n\t\treturn $html;\n\t}\n\n\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\t$processor->release_bookmark( 'first-list-opener' );\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with full structural awareness, then walked tokens with `next_tag()` and `next_token()` to find the first `UL` or `OL`, count direct `LI` children at `current_depth + 1`, and only apply the `data-item-count` attribute after confirming the scan finished cleanly with no `paused_at_incomplete_token()` or parser error. I used bookmarks and `seek()` to return to the first list opener before calling `set_attribute()`, then serialized the edit with `get_updated_html()`.",
+      "confidence": 90
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag( array( 'tag_closers' => 'visit' ) ) ) {\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( 'UL' !== $tag_name && 'OL' !== $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( ! $processor->set_bookmark( 'first-list-opener' ) ) {\n\t\t\treturn $html;\n\t\t}\n\n\t\t$list_depth = $processor->get_current_depth();\n\t\t$item_count = 0;\n\n\t\twhile ( $processor->next_token() ) {\n\t\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tcontinue;\n\t\t\t}\n\n\t\t\tif ( $processor->get_current_depth() === $list_depth + 1 && 'LI' === $processor->get_tag() ) {\n\t\t\t\t$item_count++;\n\t\t\t}\n\t\t}\n\n\t\t$scan_finished_cleanly = ! $processor->paused_at_incomplete_token() && null === $processor->get_last_error();\n\t\tif ( ! $scan_finished_cleanly ) {\n\t\t\t$processor->release_bookmark( 'first-list-opener' );\n\t\t\treturn $html;\n\t\t}\n\n\t\tif ( ! $processor->seek( 'first-list-opener' ) ) {\n\t\t\t$processor->release_bookmark( 'first-list-opener' );\n\t\t\treturn $html;\n\t\t}\n\n\t\t$processor->set_attribute( 'data-item-count', (string) $item_count );\n\t\t$processor->release_bookmark( 'first-list-opener' );\n\n\t\treturn $processor->get_updated_html();\n\t}\n\n\treturn $html;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to handle the fragment as BODY-context HTML, then scanned for the first `UL` or `OL` opener, bookmarked it, walked tokens with `next_token()` while tracking depth via `get_current_depth()`, counted direct `LI` child openers, and only edited the opener after confirming the scan finished cleanly with `paused_at_incomplete_token()` and `get_last_error()`. The attribute update is applied with `seek()` and `set_attribute()`, and the final result comes from `get_updated_html()`.",
+      "confidence": 91
+    },
+    {
+      "id": "N03-first-list-count",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\nfunction add_first_list_item_count( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_tag = null;\n\twhile ( $processor->next_tag() ) {\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' === $tag || 'OL' === $tag ) {\n\t\t\t$list_tag = $tag;\n\t\t\tbreak;\n\t\t}\n\t}\n\n\tif ( null === $list_tag ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->set_bookmark( 'first-list-opener' ) ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = $processor->get_current_depth();\n\t$count      = 0;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $list_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'LI' === $processor->get_tag() && $processor->get_current_depth() === $list_depth + 1 ) {\n\t\t\t$count++;\n\t\t}\n\t}\n\n\t$scan_finished_cleanly = ! $processor->paused_at_incomplete_token() && null === $processor->get_last_error();\n\tif ( ! $scan_finished_cleanly ) {\n\t\treturn $html;\n\t}\n\n\tif ( ! $processor->seek( 'first-list-opener' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor->set_attribute( 'data-item-count', (string) $count );\n\t$processor->release_bookmark( 'first-list-opener' );\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then `next_tag()` to find the first `UL` or `OL`, and `next_token()` plus `get_current_depth()`, `get_token_type()`, `is_tag_closer()`, and `get_tag()` to count only direct `LI` children. I guarded the mutation by rejecting incomplete scans with `paused_at_incomplete_token()` and `get_last_error()`, then used a bookmark plus `seek()` and `set_attribute()` to write `data-item-count` back onto the first list opener.",
+      "confidence": 92
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag( array( 'tag_name' => null ) ) ) {\n\t\t$tag = $processor->get_tag();\n\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$breadcrumbs = $processor->get_breadcrumbs();\n\t\tif ( count( $breadcrumbs ) < 3 ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$ancestors = array_slice( $breadcrumbs, 0, -1 );\n\t\tif ( in_array( 'UL', $ancestors, true ) || in_array( 'OL', $ancestors, true ) ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() to get structural awareness and inspect breadcrumbs, then relied on the inherited Tag Processor add_class() and get_updated_html() so only the targeted list openers are changed while all other bytes are preserved. A list is marked when its breadcrumbs contain any earlier UL or OL ancestor.",
+      "confidence": 92
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction mark_nested_lists( string $html ): string {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\t$list_depth = 0;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $processor->is_tag_closer() ) {\n\t\t\tif ( $list_depth > 0 ) {\n\t\t\t\t$list_depth--;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( $list_depth > 0 ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\n\t\t$list_depth++;\n\t}\n\n\tif ( null !== $processor->get_last_error() ) {\n\t\treturn $html;\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment with structural awareness, then walked tokens with `next_token()` while tracking current list nesting depth. When an opening `UL` or `OL` appeared with an existing list ancestor, I applied `add_class( 'nested-list' )`, and returned the exact original-byte-preserving result via `get_updated_html()`.",
+      "confidence": 93
+    },
+    {
+      "id": "T07-nested-lists",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\nfunction mark_nested_lists( string $html ): string {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn $html;\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn $html;\n\t}\n\n\twhile ( $processor->next_tag() ) {\n\t\t$tag = $processor->get_tag();\n\t\tif ( 'UL' !== $tag && 'OL' !== $tag ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$ancestors = 0;\n\t\tforeach ( $processor->get_breadcrumbs() as $breadcrumb ) {\n\t\t\tif ( 'UL' === $breadcrumb || 'OL' === $breadcrumb ) {\n\t\t\t\t$ancestors++;\n\t\t\t}\n\t\t}\n\n\t\tif ( $ancestors > 1 ) {\n\t\t\t$processor->add_class( 'nested-list' );\n\t\t}\n\t}\n\n\treturn $processor->get_updated_html();\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tags with `next_tag()` and inspected `get_breadcrumbs()` to detect whether each `UL` or `OL` had an earlier list ancestor. For matching nested lists I applied `add_class( 'nested-list' )`, and returned `get_updated_html()` so all untouched bytes are preserved exactly.",
+      "confidence": 95
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 1,
+      "ok": true,
+      "code": "<?php\n\nfunction table_to_array( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\tif ( ! $processor->next_tag( 'TABLE' ) ) {\n\t\treturn array();\n\t}\n\n\t$table_depth = $processor->get_current_depth();\n\t$rows        = array();\n\t$current_row = null;\n\t$current_cell = null;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $table_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag = $processor->get_tag();\n\n\t\tif ( 'TR' === $tag ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t$rows[] = $current_row;\n\t\t\t\t\t$current_row = null;\n\t\t\t\t}\n\t\t\t} else {\n\t\t\t\t$current_row  = array();\n\t\t\t\t$current_cell  = null;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TD' === $tag || 'TH' === $tag ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t$current_row[] = null === $current_cell ? '' : $current_cell;\n\t\t\t\t}\n\t\t\t\t$current_cell = null;\n\t\t\t} else {\n\t\t\t\t$current_cell = '';\n\t\t\t\tif ( null === $current_row ) {\n\t\t\t\t\t$current_row = array();\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\n\treturn $rows;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_tag()`, `next_token()`, `get_current_depth()`, `get_token_type()`, `get_tag()`, `is_tag_closer()`, and `get_modifiable_text()` to collect only text-node content inside the first table while respecting implied table structure.",
+      "confidence": 89
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 2,
+      "ok": true,
+      "code": "<?php\n\nfunction table_to_array( string $html ): array {\n\tif ( ! class_exists( 'WP_HTML_Processor' ) ) {\n\t\treturn array();\n\t}\n\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\tif ( ! $processor->next_tag( 'TABLE' ) ) {\n\t\treturn array();\n\t}\n\n\t$table_depth = $processor->get_current_depth();\n\t$rows        = array();\n\t$current_row = null;\n\t$current_cell = null;\n\n\t$flush_cell = static function () use ( &$current_row, &$current_cell ): void {\n\t\tif ( null === $current_row ) {\n\t\t\t$current_cell = null;\n\t\t\treturn;\n\t\t}\n\n\t\t$current_row[] = null === $current_cell ? '' : $current_cell;\n\t\t$current_cell  = null;\n\t};\n\n\t$flush_row = static function () use ( &$rows, &$current_row, &$current_cell, $flush_cell ): void {\n\t\tif ( null === $current_row ) {\n\t\t\t$current_cell = null;\n\t\t\treturn;\n\t\t}\n\n\t\t$flush_cell();\n\n\t\tif ( array() !== $current_row ) {\n\t\t\t$rows[] = $current_row;\n\t\t}\n\n\t\t$current_row  = null;\n\t\t$current_cell = null;\n\t};\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $table_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( '#text' === $processor->get_token_type() ) {\n\t\t\tif ( null !== $current_cell ) {\n\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name  = $processor->get_tag();\n\t\t$is_closer  = $processor->is_tag_closer();\n\n\t\tif ( 'TR' === $tag_name ) {\n\t\t\tif ( $is_closer ) {\n\t\t\t\t$flush_row();\n\t\t\t} else {\n\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t$flush_row();\n\t\t\t\t}\n\t\t\t\t$current_row  = array();\n\t\t\t\t$current_cell = null;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TD' === $tag_name || 'TH' === $tag_name ) {\n\t\t\tif ( $is_closer ) {\n\t\t\t\t$flush_cell();\n\t\t\t} else {\n\t\t\t\tif ( null === $current_row ) {\n\t\t\t\t\t$current_row = array();\n\t\t\t\t}\n\t\t\t\t$flush_cell();\n\t\t\t\t$current_cell = '';\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\t}\n\n\t$flush_row();\n\n\treturn $rows;\n}\n",
+      "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked tokens with `next_tag()` and `next_token()` so table structure is handled by the HTML processor rather than string parsing. Cell text comes only from `#text` tokens via `get_modifiable_text()`, and rows/cells are finalized on `TR`, `TD`, and `TH` tag boundaries while stopping at the first `TABLE` subtree boundary using `get_current_depth()`.",
+      "confidence": 84
+    },
+    {
+      "id": "T08-table-extract",
+      "trial": 3,
+      "ok": true,
+      "code": "<?php\n\ndeclare( strict_types=1 );\n\nfunction table_to_array( string $html ): array {\n\t$processor = WP_HTML_Processor::create_fragment( $html );\n\tif ( null === $processor ) {\n\t\treturn array();\n\t}\n\n\tif ( ! $processor->next_tag( 'TABLE' ) ) {\n\t\treturn array();\n\t}\n\n\t$table_depth = $processor->get_current_depth();\n\t$rows        = array();\n\t$current_row = null;\n\t$current_cell = null;\n\n\twhile ( $processor->next_token() ) {\n\t\tif ( $processor->get_current_depth() < $table_depth ) {\n\t\t\tbreak;\n\t\t}\n\n\t\tif ( '#tag' !== $processor->get_token_type() ) {\n\t\t\tif ( null !== $current_cell && '#text' === $processor->get_token_type() ) {\n\t\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\t$tag_name = $processor->get_tag();\n\t\tif ( null === $tag_name ) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TR' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_row ) {\n\t\t\t\t\t$rows[] = $current_row;\n\t\t\t\t}\n\t\t\t\t$current_row  = null;\n\t\t\t\t$current_cell = null;\n\t\t\t} else {\n\t\t\t\t$current_row  = array();\n\t\t\t\t$current_cell = null;\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( 'TD' === $tag_name || 'TH' === $tag_name ) {\n\t\t\tif ( $processor->is_tag_closer() ) {\n\t\t\t\tif ( null !== $current_row && null !== $current_cell ) {\n\t\t\t\t\t$current_row[] = $current_cell;\n\t\t\t\t}\n\t\t\t\t$current_cell = null;\n\t\t\t} else {\n\t\t\t\t$current_cell = '';\n\t\t\t}\n\t\t\tcontinue;\n\t\t}\n\n\t\tif ( null !== $current_cell && '#text' === $processor->get_token_type() ) {\n\t\t\t$current_cell .= $processor->get_modifiable_text();\n\t\t}\n\t}\n\n\treturn $rows;\n}\n",
+      "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_tag(), next_token(), get_current_depth(), get_token_type(), get_tag(), is_tag_closer(), and get_modifiable_text(). The function tracks the first TABLE subtree, collects TR rows and TD/TH cell text from #text tokens only, and returns an empty array when no table is found.",
+      "confidence": 86
+    }
+  ]
+}

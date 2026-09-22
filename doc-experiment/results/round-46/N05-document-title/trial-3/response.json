@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented `WP_HTML_Tag_Processor` for a linear scan of the full HTML string, finds the first `TITLE` opener with `next_tag( 'TITLE' )`, and returns its decoded plain-text contents via `get_modifiable_text()`. If no `<title>` element is found, it returns `null`; an empty `<title></title>` correctly returns an empty string.",
+  "confidence": 96
+}

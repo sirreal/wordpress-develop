@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to preserve fragment parsing and byte-exact output, then walked tags with `next_tag( array( 'tag_closers' => 'visit' ) )`, checked `is_tag_closer()`, and used `get_breadcrumbs()` to detect whether a `UL` or `OL` already appears above the current list. Matching openers get `add_class( 'nested-list' )`, and the result is returned via `get_updated_html()` so untouched bytes stay unchanged.",
+  "confidence": 96
+}

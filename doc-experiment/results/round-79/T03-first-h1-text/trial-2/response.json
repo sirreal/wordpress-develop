@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the HTML fragment in BODY context, then found the first H1 opener with next_tag(). From that point I walked tokens with next_token(), accumulating only #text nodes via get_modifiable_text() until the walk left the H1 subtree; this yields decoded text from nested markup while ignoring non-text content. Returning null is reserved for the case where no H1 exists.",
+  "confidence": 95
+}

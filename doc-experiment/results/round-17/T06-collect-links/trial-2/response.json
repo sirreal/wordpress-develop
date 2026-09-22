@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment, then iterates through all A tags using next_tag(). For each link with an href attribute, it records the decoded href value. To collect the text content, it uses next_token() to walk through all tokens inside the A element while tracking depth, accumulating text from #text nodes until exiting the element. The get_modifiable_text() method automatically provides decoded character references as required by the task specification.",
+  "confidence": 45
+}

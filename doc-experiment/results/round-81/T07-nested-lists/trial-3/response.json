@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, `next_tag()` to visit each real opener, `get_breadcrumbs()` to detect whether a `UL` or `OL` ancestor exists above the current list, and `add_class()` plus `get_updated_html()` to apply the byte-preserving attribute edit. If the processor fails, I return the original HTML unchanged to preserve the input exactly.",
+  "confidence": 90
+}

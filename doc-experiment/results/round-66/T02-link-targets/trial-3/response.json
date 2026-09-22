@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the HTML linearly, matched only `A` tags with `next_tag( 'a' )`, checked `get_attribute( 'href' )` so empty-string and boolean `href` values still count as present, and then overwrote `target` with `set_attribute( 'target', '_blank' )`. `get_updated_html()` returns the original bytes unchanged except for the queued attribute edits.",
+  "confidence": 97
+}

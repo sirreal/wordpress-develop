@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), structural breadcrumbs, add_class(), and get_updated_html(); all called HTML API methods are documented. The next_token() loop is valid and correctly filters #tag tokens and closers, but next_tag() would be the more direct documented pattern for tag-only mutation. No _doing_it_wrong records; passed 7/7."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and documented API usage throughout. class_exists() is a PHP builtin, not hallucinated HTML API. The breadcrumbs count guard is unnecessary because BODY fragments include HTML and BODY, and the next_token() walk is slightly less idiomatic than next_tag() for this tag-only edit. No post-scan incomplete/unsupported-input policy; passed 7/7."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Closest to the reference shape: create_fragment(), next_tag(), get_tag(), get_breadcrumbs(), add_class(), and get_updated_html(). The is_tag_closer() guard is redundant after plain next_tag(), whose documented default skips closers, but harmless. No _doing_it_wrong records; passed 7/7."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial: all three passed 7/7 and execution.json recorded no _doing_it_wrong misuse. The docs did well on the critical decisions: Tag Processor docs explicitly say it has no tree awareness and points structural work to WP_HTML_Processor; HTML Processor docs describe create_fragment() for BODY fragments, breadcrumbs with implicit HTML/BODY ancestors, scanning multiple tag names by next_tag()+get_tag(), add_class(), and get_updated_html() for byte-preserving queued edits. Near-misses were minor: trials 1 and 2 used a next_token() loop for a tag-only mutation, and trial 3 redundantly checked is_tag_closer() after plain next_tag(). None of the candidates checked get_last_error() or paused_at_incomplete_token() after scanning; this did not affect the frozen cases, but the docs could make the mutation fallback policy more prominent.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md / Breadcrumbs and get_breadcrumbs()",
+      "problem": "The docs explain exact breadcrumb paths, but do not give a compact general pattern for testing whether the current element has an arbitrary ancestor of a given tag. This is common structural work and different from matches_breadcrumbs(), which does not support an unbounded ** ancestor match.",
+      "suggestion": "Add a short generic ancestor-membership note: breadcrumbs include the current node and implicit HTML/BODY, so inspect array_slice( get_breadcrumbs(), 0, -1 ) when asking about ancestors only; use matches_breadcrumbs() for fixed paths, not arbitrary-depth ancestor queries."
+    },
+    {
+      "location": "html-processor.md / next_tag()",
+      "problem": "The docs say tag_name is not a list and show scanning any tag then branching, but the example stops at the first match. Candidates doing all-matches edits may drift to next_token() unnecessarily.",
+      "suggestion": "Add a full-loop example for mutating all tags in a small set with while ( next_tag() ), in_array( get_tag(), $wanted, true ), and no is_tag_closer() guard unless tag_closers => 'visit' is requested."
+    },
+    {
+      "location": "html-processor.md / Usage or inherited mutation methods",
+      "problem": "get_updated_html() is inherited from WP_HTML_Tag_Processor and mentioned near serialization, but it is not prominent in the HTML Processor usage flow despite being the right return path after add_class()/set_attribute() mutations.",
+      "suggestion": "Add a 'Returning edited HTML' paragraph near Usage: after queued class/attribute/text edits on an HTML Processor, return get_updated_html() to preserve untouched bytes; use serialize()/serialize_token() only for normalization or token-by-token rewrites."
+    },
+    {
+      "location": "html-processor.md / create_fragment(), next_token(), and mutation recipes",
+      "problem": "Completion and fallback guidance for get_last_error() and paused_at_incomplete_token() is present but scattered. Candidates did not express an explicit policy for parser aborts or trailing incomplete syntax.",
+      "suggestion": "Add a concise mutation-policy checklist: if the function promises whole-input coverage, check get_last_error() and paused_at_incomplete_token() after the walk and fall back deliberately; if best-effort per-token edits are acceptable, document that returning queued updates is intentional."
+    }
+  ]
+}

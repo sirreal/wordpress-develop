@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment, structure-aware parsing. All HTML API calls are documented. Uses documented token walking, is_tag_closer(), add_class(), and get_updated_html(). Slightly less idiomatic than the reference because it tracks list depth manually instead of using get_breadcrumbs() for the ancestor predicate, and it does not check get_last_error() after a structural scan, but there was no API misuse and all cases passed."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and fully documented API usage: create_fragment(), next_token(), get_token_type(), is_tag_closer(), get_tag(), get_breadcrumbs(), add_class(), get_last_error(), and get_updated_html(). The breadcrumb check correctly excludes the current node before testing ancestors. It also handles unsupported-parser aborts by falling back to the original input. Only minor idiom nit: next_tag() would have been sufficient for opener-only tag scanning, but the token loop is documented and safe here."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor and documented traversal/mutation methods. The breadcrumb ancestor check is idiomatic and excludes the current element. The extra class_exists() guard is harmless PHP, not an HTML API hallucination. Compared with trial-2, it lacks a get_last_error() fallback after scanning, so it is slightly weaker on the documented unsupported/incomplete-input policy, but it does not misuse the API."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, with no _doing_it_wrong records. The docs did well in the places this task depended on most: html-tag-processor.md explicitly says the Tag Processor has no tree awareness and that get_breadcrumbs() belongs to WP_HTML_Processor; html-processor.md documents create_fragment() for BODY fragments, get_breadcrumbs() including implicit HTML/BODY/current node, next_tag()/next_token() traversal, add_class(), and get_updated_html() as the byte-preserving way to retrieve queued class mutations. Near-misses: trial-1 solved ancestry by manually counting structural list openers/closers rather than using breadcrumbs; this is valid with WP_HTML_Processor but easier to get wrong around implied or virtual closers. Trials 2 and 3 inferred the important ancestor-only rule by subtracting the current breadcrumb; a model that simply checked whether UL/OL appeared anywhere in get_breadcrumbs() would mark top-level lists incorrectly. The current docs contain the facts needed, but the ancestor-vs-current-node distinction could be made more explicit.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md get_breadcrumbs() docblock and Breadcrumbs overview",
+      "problem": "The docs state that breadcrumbs include the currently matched node, but they do not spell out the common ancestor-only pattern. This leaves room for off-by-one mistakes where code treats the current element as its own ancestor.",
+      "suggestion": "Add a general note: when checking ancestors rather than the current node, ignore the final breadcrumb, for example by slicing get_breadcrumbs() before applying the predicate."
+    },
+    {
+      "location": "html-processor.md next_tag() breadcrumbs query documentation",
+      "problem": "The breadcrumbs query examples emphasize exact DOM sub-path matching, but do not clearly distinguish that from arbitrary ancestor-membership tests.",
+      "suggestion": "Add a sentence explaining that breadcrumbs queries match a path pattern, while arbitrary ancestor predicates should scan tokens/tags and inspect get_breadcrumbs() directly."
+    },
+    {
+      "location": "html-processor.md next_token() and is_tag_closer() docs",
+      "problem": "The docs mention virtual closers and popped breadcrumbs, but the relationship is split across sections. Manual state-tracking code can miss that closers are structural parser events, not only source closing tags.",
+      "suggestion": "Cross-link next_token() to is_tag_closer() with a compact example showing opener, text, virtual closer, and the breadcrumb value reported at the closer."
+    },
+    {
+      "location": "html-processor.md mutation/retrieval guidance around get_updated_html()",
+      "problem": "Unsupported-parser fallback guidance is clearer for serialization than for simple class/attribute mutations after a structural scan.",
+      "suggestion": "Add a general note that when structural traversal determines queued mutations, callers requiring complete coverage should check get_last_error() before returning get_updated_html(), and choose an explicit fallback policy."
+    }
+  ]
+}

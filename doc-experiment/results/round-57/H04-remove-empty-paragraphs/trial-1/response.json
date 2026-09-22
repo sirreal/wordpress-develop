@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token(), serialized each token with serialize_token(), and rebuilt the output while tracking paragraph openers so only truly empty <p></p> pairs are dropped. I also check paused_at_incomplete_token() and get_last_error(), and fall back to the original HTML unchanged if the fragment cannot be fully processed.",
+  "confidence": 78
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context, then iterates through all tokens via next_token(), collecting only text nodes (identified by get_token_type() === '#text'). Text is decoded automatically via get_modifiable_text(), and codepoints are counted using mb_strlen() with UTF-8 encoding, allowing safe truncation via mb_substr() without splitting multi-byte characters. The function handles edge cases: zero/negative codepoint limits return empty string, non-positive limits are validated, and the processor is checked for null on creation failure.",
+  "confidence": 82
+}

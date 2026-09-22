@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to linearly scan for A tags and modify their attributes. It calls next_tag() with tag_name query to find each A tag, then uses get_attribute() to check if href is present (returns null only when absent), and set_attribute() to set target=\"_blank\". The get_updated_html() method returns the modified HTML with all changes applied while preserving the rest of the document byte-for-byte. This approach handles all specified cases: href with value, href empty, href without value, and ignores A tags without href.",
+  "confidence": 92
+}

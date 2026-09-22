@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` and `next_token()` approach, collected `#text`, and explicitly whitelisted `TITLE`/`TEXTAREA` opener-carried text while excluding `SCRIPT`/`STYLE`. All HTML API methods used are documented. Minor deduction: it rejects the whole result when `paused_at_incomplete_token()` is true, which is stricter than this read-only excerpt contract and can discard already-visited text."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the documented text-extraction pattern closely: fragment processor, single token walk, `#text` via `get_modifiable_text()`, opener-only `TITLE`/`TEXTAREA` handling, and UTF-8 codepoint truncation. No undocumented API usage or `_doing_it_wrong` records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Also follows the documented pattern: fragment processor, token walk, `#text` plus opener-only `TITLE`/`TEXTAREA`, decoded UTF-8 text handling, and no undocumented HTML API calls. The extra `class_exists()` and PCRE fallback are harmless and outside the HTML API rubric."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 10 hidden cases, so there are no functional failures to attribute. The docs did well in the decisive areas: `WP_HTML_Processor::create_fragment()` is presented as the right constructor for BODY fragments; the `next_token()` docs say to use token walking when text matters; the text-extraction recipe says ordinary DOM text is `#text` tokens; and `get_modifiable_text()` explains that `TITLE`/`TEXTAREA` text is carried on the opener and decoded, while `SCRIPT`/`STYLE` are raw and should not be included unless explicitly wanted. The main near-miss is trial-1's fail-closed incomplete-input policy: the docs mention checking `paused_at_incomplete_token()`, but the relevant read-only extraction passage has to compete with stronger mutation/rewrite warnings. A subject can overgeneralize those warnings and return empty even after valid text was already visited, although the docs do state that incomplete status does not erase accumulated data and that the caller's contract decides the policy.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` / read-only text extraction guidance",
+      "problem": "The docs correctly say incomplete-token handling is a caller policy, but mutation/rewrite warnings may make readers over-apply fail-closed behavior to read-only extraction.",
+      "suggestion": "Add a small policy contrast showing that read-only scanners may return accumulated visited text for best-effort extraction, while validators or mutators should reject incomplete input when their contract requires complete source bytes."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::get_modifiable_text()` and `WP_HTML_Processor::next_token()` cross-reference",
+      "problem": "The distinction between ordinary DOM text and special-element opener text is documented, but it is spread across recipe text, tables, and method docs.",
+      "suggestion": "Add a compact decision table for token walkers: `#text` for ordinary text, explicit opener whitelist for `TITLE`/`TEXTAREA`, explicit raw-text whitelist for `SCRIPT`/`STYLE`, and never use non-empty `get_modifiable_text()` as the predicate."
+    },
+    {
+      "location": "`get_tag()` / `get_token_name()` docs",
+      "problem": "Both methods are documented and valid, but token-walking examples mix them. This can leave readers unsure which one to use when handling both text tokens and tag tokens.",
+      "suggestion": "Clarify that `get_tag()` is tag-only and returns null for non-tags, while `get_token_name()` names both tags and non-tag tokens; recommend checking `get_token_type()` first in mixed token walks."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, finds the first `TABLE` with `next_tag()`, then walks tokens with `next_token()` until leaving that table based on `get_current_depth()`. It builds rows from `TR` open/close tokens, cells from `TD`/`TH` open/close tokens, and appends only ordinary `#text` token content via `get_modifiable_text()`, which provides decoded text as documented.",
+  "confidence": 88
+}

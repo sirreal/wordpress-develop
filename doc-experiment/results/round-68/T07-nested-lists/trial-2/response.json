@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()` while tracking the current nesting level of `UL`/`OL` elements. When I encountered a list opener while already inside another list, I added the documented `nested-list` class with `add_class()`, and returned the modified bytes via `get_updated_html()` so untouched markup stays byte-for-byte preserved.",
+  "confidence": 93
+}

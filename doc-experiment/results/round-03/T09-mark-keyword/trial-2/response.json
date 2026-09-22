@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens using next_token(). For each token, it checks if it's a text node (#text). If it is, it retrieves the decoded text content and checks if it contains the keyword using str_contains() for case-sensitive substring matching. If the keyword is found, the entire text token is wrapped in <mark> tags using serialize_token() to produce the normalized serialization. All tokens are accumulated to produce the final normalized output.",
+  "confidence": 72
+}

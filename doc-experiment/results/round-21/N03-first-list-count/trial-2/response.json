@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` for tree-aware parsing, finds the earliest `UL` or `OL`, bookmarks its opener, then walks tokens with `next_token()` while tracking `get_current_depth()` so only direct child `LI` openers at depth `list depth + 1` are counted. It only writes `data-item-count` with `set_attribute()` after confirming the scan finished cleanly with no incomplete token and no processor error, then returns the modified HTML via `get_updated_html()`.",
+  "confidence": 84
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the document linearly, reusing a single bookmark named `last-h2` on each `H2` opener so it always points at the final one seen. After the scan, I `seek()` back to that bookmark, call `add_class( 'final-section' )`, and return `get_updated_html()`, which preserves all untouched bytes exactly as documented.",
+  "confidence": 98
+}

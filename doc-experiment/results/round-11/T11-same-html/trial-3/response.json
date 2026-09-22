@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function uses WP_HTML_Processor::normalize() to transform both HTML fragments into a canonical form. The normalize method handles all structural equivalences: optional closing tags are added, attribute quoting is standardized to double quotes, tag names are lowercased, equivalent character references are normalized, and duplicate attributes are removed. If either input cannot be fully parsed (normalize returns null), the function returns false. Otherwise, it compares the two normalized strings for exact equality, returning true only if they represent the same parsed structure.",
+  "confidence": 92
+}

@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment for body-fragment, tree-aware text extraction. Every API call is documented: create_fragment, next_token, get_token_name, is_tag_closer, get_attribute, get_current_depth, get_token_type, get_modifiable_text. The depth-bounded #text walk is the documented pattern and handles decoded href/text, valueless href via is_string(), empty href, and unclosed anchors. Minor near-miss: it uses a nested token loop despite the docs warning that repeated regions can be easier to get wrong with nested cursor walks, though this shape matches the reference and passed cleanly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and no undocumented methods: create_fragment, next_token, get_token_type, get_tag, is_tag_closer, get_attribute, get_modifiable_text, get_last_error all appear in the rendered docs. The single-pass state machine follows the documented closer-driven pattern and handles attribute true/null/string semantics and decoded text. Near-misses: returning an empty array on any later get_last_error() is an all-or-nothing read policy that can discard links already parsed before unsupported markup, while the docs leave read-only extraction policy to the caller; also, a stack flushed on closers would output nested A records inner-before-outer if nested anchors were encountered."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 94,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment and used only documented methods. It applies the key edge rules: is_string() excludes missing and boolean href while preserving empty-string href, get_modifiable_text() is read only for #text tokens, and virtual closers make the unclosed-link case pass. The main weakness is the single $current record: it relies on A closers rather than a depth-bounded subtree walk or stack, and it clears current when any non-string A opener is seen. That is fine for the frozen cases but less robust around nested or foreign-content A elements."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases: simple, no-href-excluded, entity-in-href-decoded, valueless-href, image-link-empty-text, entities-in-text, no-links, and unclosed-link. The docs worked well because they directly surfaced the needed concepts: the Tag Processor \"Which processor should I use?\" section says to use the HTML Processor for text content and subtree walking; the HTML Processor \"Recipe: collect DOM-style text from a subtree\" gives the #text-only pattern; get_attribute documents string|true|null semantics and decoded attribute values; get_modifiable_text documents decoded #text and warns not to treat all modifiable text as DOM text; next_token/get_current_depth explain virtual closers and the >= depth boundary that make unclosed anchors work. The near-misses were not hidden-test failures: trial-2 chose an all-or-nothing get_last_error policy that differs from the reference's best-effort prefix behavior on unsupported markup after a parsed link, and trials 2/3 would be shaky if nested A tokens appear in foreign or invalid markup because their closer-driven state is not explicitly ordered by opener document position.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_last_error and the read-only extraction guidance in \"Recipe: collect DOM-style text from a subtree\"",
+      "problem": "The docs say read-only callers choose whether to return accumulated data or reject, but they do not make the consequences concrete for array extractors. A model reasonably returned [] on any later parser abort, discarding already-parsed records.",
+      "suggestion": "Add a general note or small table contrasting best-effort prefix extraction with all-or-nothing extraction: get_last_error() means the scan ended early, not that previously visited tokens are invalid; choose and document the function's policy."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token, \"There is only ONE cursor\" warning",
+      "problem": "The docs warn against nested token loops for repeated regions, while nearby subtree examples use a bounded inner loop. The distinction is subtle.",
+      "suggestion": "Clarify when a bounded inner subtree walk is acceptable and what token the processor is left on after the loop, versus when repeated sibling regions should use a single state-machine loop."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token closer-driven example",
+      "problem": "The DT example demonstrates flushing on closers, but not how to preserve document-order records for nested matching elements or attribute-qualified elements.",
+      "suggestion": "Add a general pattern for collecting repeated element records: create the record at the qualifying opener for document order, accumulate while active, and flush/update on the matching closer; note when a stack is needed and when nested matches are impossible or parser-normalized."
+    },
+    {
+      "location": "WP_HTML_Processor::get_attribute method section",
+      "problem": "The HTML Processor method section lists string|true|null but is less explicit than the Tag Processor section about decoded string values. Subjects had both files, but the subclass section should stand alone.",
+      "suggestion": "Repeat or explicitly inherit the decoded attribute-value contract: string values are already character-reference decoded, true means valueless boolean attribute, null means unavailable."
+    },
+    {
+      "location": "WP_HTML_Processor::create_fragment / HTML Support / next_token incomplete-token notes",
+      "problem": "Factory failure, unsupported parser abort, trailing incomplete syntax, and virtual closers are documented in separate places, making edge-policy decisions harder.",
+      "suggestion": "Add a compact parser-state decision table: create_fragment() null, next_token() false with paused_at_incomplete_token(), get_last_error() non-null, and normal virtual closers for unclosed elements, with what each means for already-visited tokens."
+    }
+  ]
+}

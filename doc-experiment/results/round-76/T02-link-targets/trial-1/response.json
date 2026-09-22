@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan each `a` tag and `get_attribute( 'href' )` to detect presence, which correctly treats empty-string and boolean `href` values as present. For matching links, `set_attribute( 'target', '_blank' )` overwrites any existing target while preserving all untouched bytes, and `get_updated_html()` returns the modified HTML.",
+  "confidence": 98
+}

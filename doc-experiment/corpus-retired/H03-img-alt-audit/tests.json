@@ -1,0 +1,76 @@
+{
+    "id": "H03-img-alt-audit",
+    "title": "Audit image alt text",
+    "difficulty": "intermediate",
+    "split": "holdout",
+    "function": "find_images_missing_alt",
+    "cases": [
+        {
+            "id": "mixed-states",
+            "args": [
+                "<img src=\"a.jpg\"><img src=\"b.jpg\" alt=\"A bee\"><img src=\"c.jpg\" alt=\"\">"
+            ],
+            "expected": [
+                "a.jpg",
+                "c.jpg"
+            ]
+        },
+        {
+            "id": "valueless-alt",
+            "args": [
+                "<img src=\"a.jpg\" alt>"
+            ],
+            "expected": [
+                "a.jpg"
+            ]
+        },
+        {
+            "id": "whitespace-alt-is-present",
+            "args": [
+                "<img src=\"a.jpg\" alt=\" \">"
+            ],
+            "expected": []
+        },
+        {
+            "id": "no-src-skipped",
+            "args": [
+                "<img alt=\"\"><img src=\"real.jpg\">"
+            ],
+            "expected": [
+                "real.jpg"
+            ]
+        },
+        {
+            "id": "empty-and-valueless-src-skipped",
+            "args": [
+                "<img src alt=\"\"><img src=\"\" alt=\"\"><img src=\"real.jpg\" alt=\"\">"
+            ],
+            "expected": [
+                "real.jpg"
+            ]
+        },
+        {
+            "id": "entity-in-src",
+            "args": [
+                "<img src=\"/i?a=1&amp;b=2\">"
+            ],
+            "expected": [
+                "/i?a=1&b=2"
+            ]
+        },
+        {
+            "id": "all-good",
+            "args": [
+                "<img src=\"a.jpg\" alt=\"one\"><img src=\"b.jpg\" alt=\"two\">"
+            ],
+            "expected": []
+        },
+        {
+            "id": "no-images",
+            "args": [
+                "<p>none</p>"
+            ],
+            "expected": []
+        }
+    ]
+}

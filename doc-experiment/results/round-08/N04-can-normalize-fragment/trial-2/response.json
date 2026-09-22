@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses the documented WP_HTML_Processor::normalize() static method, which returns a normalized string on success or null when normalization fails due to unsupported markup (such as mis-nested formatting elements). By checking if the return value is not null, we determine whether normalization is possible and return true/false accordingly.",
+  "confidence": 92
+}

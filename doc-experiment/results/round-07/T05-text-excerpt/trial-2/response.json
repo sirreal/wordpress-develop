@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Tag_Processor's next_token() to iterate through all tokens in document order. Identifies text nodes via get_token_type() === '#text' and extracts their decoded content via get_modifiable_text(). Counts UTF-8 code points using mb_strlen/mb_substr to handle multi-byte characters correctly and never truncate mid-character. Returns empty string for non-positive max_codepoints.",
+  "confidence": 85
+}

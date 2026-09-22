@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the input HTML fragment, then iterates through all tokens using next_token(). For each #text token, it checks if the decoded text contains the keyword using strpos() with case-sensitive matching. If the keyword is found, the entire text node is wrapped in <mark> tags by prepending and appending the tags around the serialized token output. All other tokens are serialized unchanged to maintain the HTML structure and normalization.",
+  "confidence": 68
+}

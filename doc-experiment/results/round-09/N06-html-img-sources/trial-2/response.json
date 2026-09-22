@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML in body context, then iterates through tags with next_tag( array( 'tag_name' => 'img' ) ) to find IMG elements. For each match, it checks that the namespace is 'html' (excluding SVG <image> elements), retrieves the decoded src attribute value using get_attribute(), and only collects non-empty, non-null src values in document order.",
+  "confidence": 82
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment structurally, walks every token with `next_token()`, checks only ordinary `#text` tokens via `get_token_type()` and decoded text from `get_modifiable_text()`, and emits normalized output with `serialize_token()`, inserting literal `<mark>` wrappers around matching text tokens so special text-bearing elements, comments, and attributes are naturally excluded.",
+  "confidence": 76
+}

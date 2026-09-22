@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because structure matters for collecting each anchor\u2019s descendant text. It walks `A` openers in document order with `next_tag('A')`, filters to anchors whose `href` is reported by `get_attribute()` as a string (excluding missing and boolean attributes), then scans that anchor\u2019s subtree with `next_token()` bounded by `get_current_depth()`, concatenating decoded `#text` content via `get_modifiable_text()` and also reading modifiable text carried on special element tokens.",
+  "confidence": 87
+}

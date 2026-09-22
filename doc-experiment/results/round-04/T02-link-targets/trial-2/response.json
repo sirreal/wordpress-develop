@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to iterate through all A tags, checking if each has an href attribute (present even if empty or valueless, which get_attribute returns as null, true, or string). When found, it sets the target attribute to \"_blank\" on that tag, then returns the updated HTML. This preserves all other content byte-for-byte while modifying only the target attributes on A tags with href.",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor with a literal template that already includes the target attribute order and a placeholder text node inside FIGCAPTION, then filled `src` and `alt` with `set_attribute()` and replaced the placeholder via `next_token()` plus `set_modifiable_text()`. That preserves exact markup shape while letting the HTML API handle all required encoding.",
+  "confidence": 92
+}

@@ -1,0 +1,333 @@
+{
+  "round": "round-20",
+  "mode": "weak-tier-calibration",
+  "task_ids": [
+    "N03-first-list-count",
+    "N04-normalize-or-placeholder",
+    "N06-extract-toc",
+    "T01-add-image-class",
+    "T02-link-targets",
+    "T03-first-h1-text",
+    "T04-build-figure",
+    "T05-text-excerpt",
+    "T06-collect-links",
+    "T07-nested-lists",
+    "T08-table-extract",
+    "T09-mark-keyword",
+    "T10-last-h2",
+    "T11-strip-tracking-attributes",
+    "T12-unwrap-spans"
+  ],
+  "task_count": 15,
+  "splits": {
+    "train": 15
+  },
+  "concepts": {
+    "attributes": 3,
+    "classes": 1,
+    "normalization": 1,
+    "serialization": 2,
+    "text": 3,
+    "traversal": 5
+  },
+  "trials_per_task": 3,
+  "subject": {
+    "model": "gpt-5.4",
+    "reasoning_effort": "low",
+    "service_tier": "priority"
+  },
+  "judge": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "service_tier": "priority"
+  },
+  "git_head": "528361b40f42fdecefd35791bfb4c97883895583",
+  "git_status_short": "",
+  "source_file_digests": {
+    "ref": "528361b40f42fdecefd35791bfb4c97883895583",
+    "algorithm": "sha256",
+    "php_behavior_fingerprint": "token_get_all with T_COMMENT, T_DOC_COMMENT, and T_WHITESPACE removed; JSON-encoded token names and text",
+    "files": {
+      "src/wp-includes/html-api/class-wp-html-tag-processor.php": {
+        "source_sha256": "661f7e09278826cf87c3cdc9ca7e498dc331a39adc67d154b63adda641f8f835",
+        "php_without_comments_sha256": "d073f5772a64826878e4132ed9bb30717fb1b6f3ddb5e23a014a4fa9db218ad7",
+        "php_without_comments_token_count": 9881
+      },
+      "src/wp-includes/html-api/class-wp-html-processor.php": {
+        "source_sha256": "014a5560b4c1c27fe3f9a971441c65d716b675ad56203c75680d4a3a50d06f50",
+        "php_without_comments_sha256": "2da9aa482f295c89a7018c5b74b622b4add7e942599c97785434408cfa72c083",
+        "php_without_comments_token_count": 16806
+      }
+    }
+  },
+  "corpus_file_digests": {
+    "ref": "528361b40f42fdecefd35791bfb4c97883895583",
+    "algorithm": "sha256",
+    "tasks": {
+      "N03-first-list-count": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N03-first-list-count/task.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
+          "doc-experiment/corpus/N03-first-list-count/reference.php": "588468ac5c4009fd1a1a27a530efa208e1ce08025d34a0e4353ea5b976d705ba",
+          "doc-experiment/corpus/N03-first-list-count/tests.json": "e0467ccc5475d2c87cc11eb54b4f2cb40fe4d44ef82c761f745d1cca91101314"
+        }
+      },
+      "N04-normalize-or-placeholder": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "normalization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N04-normalize-or-placeholder/task.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
+          "doc-experiment/corpus/N04-normalize-or-placeholder/reference.php": "e47feb6d3be887e1ee5df77e39160ffe812cb8322ca8600898de2a34e56ddeed",
+          "doc-experiment/corpus/N04-normalize-or-placeholder/tests.json": "417d2f770b341fc46bb8b7b46df899f1fd1e65d343aa8cc6c4e39307afcb4d18"
+        }
+      },
+      "N06-extract-toc": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/N06-extract-toc/task.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+          "doc-experiment/corpus/N06-extract-toc/reference.php": "7e5cf569519dc0411da5659e473fc773d82eb634886b5623610b696936c0b2e2",
+          "doc-experiment/corpus/N06-extract-toc/tests.json": "22f8950aace5d22a842a8c76df372d5d09e770cf4adefb06099eb81f7410317e"
+        }
+      },
+      "T01-add-image-class": {
+        "labels": {
+          "split": "train",
+          "role": "smoke",
+          "commonness": "high",
+          "concept": "classes",
+          "processor": "tag"
+        },
+        "files": {
+          "doc-experiment/corpus/T01-add-image-class/task.md": "d3b65e68db2bf26d3423b5474c3adb49b592375afc8005c127d4d20eb2740e28",
+          "doc-experiment/corpus/T01-add-image-class/reference.php": "8c9cf2ac9194dfce36a45c2f987d7bbfcdb334020aa94a86fb388bb1ce28171f",
+          "doc-experiment/corpus/T01-add-image-class/tests.json": "0ab7c7527432604d31e5e8d57e810a0167730a111c018d8a05a1bbad24617787"
+        }
+      },
+      "T02-link-targets": {
+        "labels": {
+          "split": "train",
+          "role": "smoke",
+          "commonness": "high",
+          "concept": "attributes",
+          "processor": "tag"
+        },
+        "files": {
+          "doc-experiment/corpus/T02-link-targets/task.md": "86f539bd48a600db4d47492e2abdf44d3048ba0463bcca0f3ed628228f82d0f8",
+          "doc-experiment/corpus/T02-link-targets/reference.php": "8942a4ef55241d6d1deda51046430c3d8cd7c4ca716c8bc79bdf9aa723fdb6f6",
+          "doc-experiment/corpus/T02-link-targets/tests.json": "c21515f7d43962b86975ccee1b3a39747170edc75ec1af26416494d312870a4a"
+        }
+      },
+      "T03-first-h1-text": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T03-first-h1-text/task.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+          "doc-experiment/corpus/T03-first-h1-text/reference.php": "a64806dcd5f7f91e254c287aad72401502aec44a7661eb691b51e56e17064f2d",
+          "doc-experiment/corpus/T03-first-h1-text/tests.json": "499c5da8b3d916a6739142c6ed164e8a6a05c43a6c517003bcb31d6929094533"
+        }
+      },
+      "T04-build-figure": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "attributes",
+          "processor": "tag"
+        },
+        "files": {
+          "doc-experiment/corpus/T04-build-figure/task.md": "69c807b773b41e98c0e5122bee32eca3780ccdfd123279590b4d098f8b7848e1",
+          "doc-experiment/corpus/T04-build-figure/reference.php": "973bcd94265496fe52fe7f9b895c266b4ae91c99460abbfd9088f1931a5d590e",
+          "doc-experiment/corpus/T04-build-figure/tests.json": "45cea68d9b4606600a7d57cd46e84348edb5599ec43a1fec44002424a0820d3a"
+        }
+      },
+      "T05-text-excerpt": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T05-text-excerpt/task.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+          "doc-experiment/corpus/T05-text-excerpt/reference.php": "1081c297e36fa566e8a6a2cf8098fe8d3117da8ac49d4106691b9bb65b3739b6",
+          "doc-experiment/corpus/T05-text-excerpt/tests.json": "8b2276d754c887d6246f321b2dfad0de59718bc252c0a6bed52b65ae1bad1496"
+        }
+      },
+      "T06-collect-links": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "text",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T06-collect-links/task.md": "29bc31f664b27ca880bf5cdd6a50d0da8f3828cf59d085d2897df2cb987d7d3e",
+          "doc-experiment/corpus/T06-collect-links/reference.php": "c0e5ae9ec5d4448a525962f1e27250a7243541d613209e3bbdc86913ff7e7a81",
+          "doc-experiment/corpus/T06-collect-links/tests.json": "34460376a147fa18739e7743d341479489f46a88b58b9f5aa5fe0d901f2b3140"
+        }
+      },
+      "T07-nested-lists": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T07-nested-lists/task.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
+          "doc-experiment/corpus/T07-nested-lists/reference.php": "f082fca4f2419435d0d8fe275068a0d486bda2359a668dc969b6cddf78100a61",
+          "doc-experiment/corpus/T07-nested-lists/tests.json": "79632d22e7c44696e5779df8ea2351c36e335c20aa316437a8edc885d20c40cd"
+        }
+      },
+      "T08-table-extract": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "traversal",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T08-table-extract/task.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+          "doc-experiment/corpus/T08-table-extract/reference.php": "289b8c6d1b69d4ef4dd7810dbdcba35445c30a7f26b631a00835ef737b78709e",
+          "doc-experiment/corpus/T08-table-extract/tests.json": "cdec7559d63ee541f1b0dad34a4f9f0982ce66e58ddfea98ec482c425e1b2638"
+        }
+      },
+      "T09-mark-keyword": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "serialization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T09-mark-keyword/task.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+          "doc-experiment/corpus/T09-mark-keyword/reference.php": "0141ececbe459f50729e657f59dd75e8b74911cd1d70940b8fd5072d2f1efb60",
+          "doc-experiment/corpus/T09-mark-keyword/tests.json": "946bb96c922fea63cda3c31b94840b05ffded9f2e1dfa4b1547c755b99cda0c5"
+        }
+      },
+      "T10-last-h2": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "traversal",
+          "processor": "tag"
+        },
+        "files": {
+          "doc-experiment/corpus/T10-last-h2/task.md": "285eca1aece8e63d9ab86d1d72319e1eef13f1e184a95216b373bbab22de2d0d",
+          "doc-experiment/corpus/T10-last-h2/reference.php": "dabda32a9cf4ffb8a1b6ca613feb0a87791619be3bdfd2502b93f5972ba454a5",
+          "doc-experiment/corpus/T10-last-h2/tests.json": "4b3be0b61681e587c88a2d2ae0b9dec88306dcdad5b0f41a9b3a6a5883aceb07"
+        }
+      },
+      "T11-strip-tracking-attributes": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "high",
+          "concept": "attributes",
+          "processor": "tag"
+        },
+        "files": {
+          "doc-experiment/corpus/T11-strip-tracking-attributes/task.md": "6f2bc727f767a27a8f5d6f7a5e56ebd075db494c444dc0bbc8318c1bf4f8715b",
+          "doc-experiment/corpus/T11-strip-tracking-attributes/reference.php": "6ab0dceded92febd085f447eafd1ded777bf7ad6d184c6dc05b265ec41f420f0",
+          "doc-experiment/corpus/T11-strip-tracking-attributes/tests.json": "65032bd058bfa4819f040c3d8f9590224684a6cfff28434ad6708ab1f6ce94fc"
+        }
+      },
+      "T12-unwrap-spans": {
+        "labels": {
+          "split": "train",
+          "role": "core",
+          "commonness": "medium",
+          "concept": "serialization",
+          "processor": "html"
+        },
+        "files": {
+          "doc-experiment/corpus/T12-unwrap-spans/task.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b",
+          "doc-experiment/corpus/T12-unwrap-spans/reference.php": "93d6828161817ec9a0b90765d91e7dae1c48f3b3aac35f6cad6f785b1c715797",
+          "doc-experiment/corpus/T12-unwrap-spans/tests.json": "fcade4b9f46bbb824b0095f58b99d4c71c8b3e696093ab0d0ae25d666aae5f53"
+        }
+      }
+    }
+  },
+  "created_at_utc": "2026-06-13T09:32:01+00:00",
+  "isolation": {
+    "scratch_contains": [
+      "html-tag-processor.md",
+      "html-processor.md",
+      "tasks/<task-id>.md"
+    ],
+    "subjects_must_not_read": [
+      "reference.php",
+      "tests.json",
+      "source files",
+      "logs",
+      "plans",
+      "hypothesis docs"
+    ]
+  },
+  "scratch": "/tmp/html-api-docs-eval/round-20",
+  "staged_task_files": [
+    "tasks/N03-first-list-count.md",
+    "tasks/N04-normalize-or-placeholder.md",
+    "tasks/N06-extract-toc.md",
+    "tasks/T01-add-image-class.md",
+    "tasks/T02-link-targets.md",
+    "tasks/T03-first-h1-text.md",
+    "tasks/T04-build-figure.md",
+    "tasks/T05-text-excerpt.md",
+    "tasks/T06-collect-links.md",
+    "tasks/T07-nested-lists.md",
+    "tasks/T08-table-extract.md",
+    "tasks/T09-mark-keyword.md",
+    "tasks/T10-last-h2.md",
+    "tasks/T11-strip-tracking-attributes.md",
+    "tasks/T12-unwrap-spans.md"
+  ],
+  "scratch_isolation_check": "OK: /tmp/html-api-docs-eval/round-20 exposes 2 docs and 15 task prompt(s), with no forbidden files.",
+  "scratch_file_sha256": {
+    "html-processor.md": "170d9c35de939deb9b24a7a3a6f2c2f3d845b8adb5294046f8453e5423ce3fc0",
+    "html-tag-processor.md": "3896668fcfee5640a59363aebf18ce0c99caf979825796b3a8c215c8bb33c4d8",
+    "tasks/N03-first-list-count.md": "a928648fe82d23863b2e1f8f0a1654ef97e6cb8fb579f3d37fdc0712caaa0082",
+    "tasks/N04-normalize-or-placeholder.md": "cef7cd04d639b6b7b435be2d33f3435b8b76f0a4d83748aa7c232204746ad3d0",
+    "tasks/N06-extract-toc.md": "ba341a3927bb81410b8662b29f479f23a0887d4ec6f19db95702c1346d670581",
+    "tasks/T01-add-image-class.md": "d3b65e68db2bf26d3423b5474c3adb49b592375afc8005c127d4d20eb2740e28",
+    "tasks/T02-link-targets.md": "86f539bd48a600db4d47492e2abdf44d3048ba0463bcca0f3ed628228f82d0f8",
+    "tasks/T03-first-h1-text.md": "66a882aef20a6af4430fb6a7eafc54ba306adcf982980967e07eba7881fc0030",
+    "tasks/T04-build-figure.md": "69c807b773b41e98c0e5122bee32eca3780ccdfd123279590b4d098f8b7848e1",
+    "tasks/T05-text-excerpt.md": "5e69766456a6343f99ee24037574ed3f9bdf7795ab8be9a61203f6254b8fa2de",
+    "tasks/T06-collect-links.md": "29bc31f664b27ca880bf5cdd6a50d0da8f3828cf59d085d2897df2cb987d7d3e",
+    "tasks/T07-nested-lists.md": "481851a0b94a81599154a82cc309e4c0e6e6204ab4270a98faa8bb60fe1401b3",
+    "tasks/T08-table-extract.md": "d7aee8a4765781a8f7c36b976f914b495b70989817ba0612aa9fc4589bedfeee",
+    "tasks/T09-mark-keyword.md": "5abba63d508cb56284ce7a02e374d35e4cdd45958d664174eb3002c13f1c3bce",
+    "tasks/T10-last-h2.md": "285eca1aece8e63d9ab86d1d72319e1eef13f1e184a95216b373bbab22de2d0d",
+    "tasks/T11-strip-tracking-attributes.md": "6f2bc727f767a27a8f5d6f7a5e56ebd075db494c444dc0bbc8318c1bf4f8715b",
+    "tasks/T12-unwrap-spans.md": "e95fcebf3ce7e2fd9004c4ff82b66a77d712b81b1317f3d020c4c89ace25eb6b"
+  }
+}

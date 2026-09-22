@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the documented full-document parser, `WP_HTML_Processor::create_full_parser()`, because the input is a complete HTML document. It then finds the first `TITLE` element with `next_tag( 'TITLE' )` and reads its decoded text from the opener token via `get_modifiable_text()`, returning `null` only when no title element is found or the parser could not be created.",
+  "confidence": 94
+}

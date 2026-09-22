@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body-context fragment and WP_HTML_Processor::serialize() to produce normalized HTML. If processor creation fails or serialization returns null / reports an error, the function falls back to the exact placeholder required by the task.",
+  "confidence": 97
+}

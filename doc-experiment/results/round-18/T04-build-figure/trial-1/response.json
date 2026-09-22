@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds the fragment from a fixed HTML template using `WP_HTML_Tag_Processor`, which the docs recommend for safely filling known markup shapes. The template already contains `src` and `alt` in the required order, then `next_tag()` and `set_attribute()` fill those values with proper encoding, and `next_token()` plus `set_modifiable_text()` replaces the `figcaption` placeholder text with the caption safely encoded as text.",
+  "confidence": 96
+}

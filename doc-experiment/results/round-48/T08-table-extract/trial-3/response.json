@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because table extraction depends on browser-like structure such as implied table elements and proper subtree walking. It finds the first `TABLE` with `next_tag()`, then walks tokens inside that table with `next_token()`, using `get_current_depth()`, `get_token_name()`, `get_token_type()`, `is_tag_closer()`, and `get_modifiable_text()` to collect only ordinary `#text` descendants within each `TD` or `TH` until each `TR` closes.",
+  "confidence": 88
+}

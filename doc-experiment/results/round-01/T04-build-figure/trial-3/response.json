@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor initialized with a fixed template string that already has src before alt on the img element and a placeholder text node (\"x\") inside figcaption. It calls next_tag('img') to position at the img opener, then set_attribute('src', $url) and set_attribute('alt', $alt) \u2014 both update existing attributes in-place, preserving their declared order. Then next_token() advances past the figcaption opener, and a second next_token() lands on the text node, where set_modifiable_text($caption) replaces the placeholder with the properly encoded caption. Both set_attribute and set_modifiable_text accept plain unescaped strings and handle all necessary HTML encoding internally. Finally, get_updated_html() returns the serialized result.",
+  "confidence": 72
+}

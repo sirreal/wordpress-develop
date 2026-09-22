@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` API to normalize the fragment in BODY context, then returned the required fallback HTML when normalization is not possible. The implementation is a single wrapper function with no extra behavior.",
+  "confidence": 98
+}

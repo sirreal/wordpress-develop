@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and walk through all tokens. For each token, it checks if the current tag is a SPAN element - if so, it skips that token (both opener and closer). All other tokens are serialized and accumulated, producing normalized HTML with spans removed. The serialization automatically handles normalization (double-quoted attributes, closed tags, canonical text encoding).",
+  "confidence": 78
+}

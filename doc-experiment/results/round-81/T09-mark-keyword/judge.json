@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correctly used WP_HTML_Processor::create_fragment(), next_token(), get_token_type() === '#text', get_modifiable_text() for decoded matching, and serialize_token() for normalized wrapper output. All HTML API methods used are documented and no _doing_it_wrong records appeared. Minor adherence issue: the normalize($html) ?? $html fallback on creation failure or parser abort can discard emitted wrappers and may return raw non-normalized input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Correct processor choice and idiomatic token-serialization rewrite. It gates on '#text', so comments, attributes, and special-element opener text are not wrapped, and decoded entity matches work through get_modifiable_text(). All API calls are documented and no _doing_it_wrong records appeared. Minor issue: the failure policy is only implicit; create_fragment() failure can still fall back to raw input."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Passed 8/8. Uses the documented wrapper-rewrite pattern almost exactly: walk tokens, inspect decoded #text, emit '<mark>' around serialize_token(). All API calls are documented and no _doing_it_wrong records appeared. Minor adherence issue: normalize($html) ?? $html after parser abort intentionally discards any emitted rewrite, which is a questionable policy for this string-returning contract though not exercised by the tests."
+    }
+  ],
+  "failure_analysis": "All trials passed every hidden case, so there were no functional failures to attribute to misconceptions. The rendered docs did well in the exact places this task needed: the processor-choice guidance says to use WP_HTML_Processor for normalized output and structural/body-fragment parsing; the DOM-style text recipe says ordinary text is only '#text' tokens and warns that comments and special-element opener text also have modifiable text; get_modifiable_text() states that #text and TITLE/TEXTAREA text are decoded; serialize_token() explains token-by-token normalized rewrites and includes a general wrapper pattern using get_modifiable_text() for matching and serialize_token() for output. The near-miss across trials was fallback handling: subjects added normalize($html) or raw-input fallbacks around parser creation/errors. The serialize_token() docs warn that normalize($html) starts over from original bytes and discards loop changes, but the examples leave enough policy choice that models improvised inconsistent behavior for unsupported or uncreatable input.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment()",
+      "problem": "The docs say a null return means no processor was created, but do not make the default BODY-context failure conditions concrete enough for callers handling arbitrary fragments.",
+      "suggestion": "State the practical conditions under which create_fragment($html) with default context/UTF-8 can return null, and recommend a return policy for string-returning normalizers when creation fails."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() / rewrite while serializing tokens",
+      "problem": "The wrapper example is strong, but the surrounding examples leave completion/error policy separate from the code, so callers may append an ad hoc normalize($html) or raw-input fallback that silently discards rewrites.",
+      "suggestion": "Add a general complete rewrite skeleton showing processor creation, token loop, get_last_error handling, optional paused_at_incomplete_token handling, and returning the accumulated output only under the chosen success policy."
+    },
+    {
+      "location": "WP_HTML_Processor::normalize() and serialization docs",
+      "problem": "The distinction between unclosed elements that are normalized with virtual closers and truly incomplete trailing syntax that is omitted is spread across multiple sections.",
+      "suggestion": "Add a small table contrasting malformed-but-complete markup, omitted optional end tags, unsupported markup, and incomplete trailing tokens, with the observable effects on next_token(), serialize_token(), normalize(), get_last_error(), and paused_at_incomplete_token()."
+    }
+  ]
+}

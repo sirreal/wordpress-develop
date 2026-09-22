@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Tag_Processor, which the docs identify as the right tool for flat tag/attribute rewrites. All called APIs are documented: constructor usage, next_tag(), get_attribute(), set_attribute(), and get_updated_html(). The loop, null presence check, overwrite via set_attribute(), and final get_updated_html() are idiomatic and handle empty-string and valueless href semantics."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same correct documented pattern as the reference: WP_HTML_Tag_Processor plus next_tag('a'), null !== get_attribute('href'), set_attribute('target', '_blank'), and get_updated_html(). No _doing_it_wrong records. Lowercase tag query is supported by the documented ASCII case-insensitive matching."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and fully documented API usage. The implementation preserves untouched bytes through get_updated_html(), overwrites existing target attributes, and treats href presence correctly by distinguishing null from empty string/true."
+    }
+  ],
+  "failure_analysis": "All trials passed all 8 hidden cases. The docs did well on the critical points: the \"Which processor should I use?\" sections clearly direct flat attribute edits to WP_HTML_Tag_Processor; next_tag() documents case-insensitive tag-name matching and that comments/raw text are not matched as tags; get_attribute() documents null for absent attributes, empty string for empty values, and true for valueless attributes; set_attribute() documents overwriting existing attributes and placement of newly added attributes; get_updated_html() documents byte preservation outside queued edits. Near miss: the subjects described valueless href as a \"boolean href\". That matched the API behavior they needed, but the get_attribute() wording could be read as applying true only to spec-defined boolean attributes rather than any present valueless attribute syntax.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute()",
+      "problem": "The docs say boolean attributes return true, but tasks often need a more general presence test for attributes written without a value, including non-boolean attributes in malformed or permissive HTML.",
+      "suggestion": "Clarify that an attribute present without an explicit value is reported as true by the processor, and that callers checking presence should compare against null rather than using truthiness."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor overview / custom queries",
+      "problem": "The docs explain the needed pieces separately, but the presence-check idiom is easy to miss when empty string and valueless attributes both count as present.",
+      "suggestion": "Add a general example of checking for attribute presence with null !== get_attribute($name), distinct from reading a meaningful string value."
+    }
+  ]
+}

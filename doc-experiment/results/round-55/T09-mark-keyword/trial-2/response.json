@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and then walked tokens with `next_token()`, wrapping only ordinary `#text` tokens whose decoded text from `get_modifiable_text()` contains the keyword. Each visited token is emitted with `serialize_token()`, which gives the normalized serialization required by the task while preserving all non-text structure, including special elements like `script`, `style`, `title`, and `textarea` whose contents are not ordinary `#text` nodes.",
+  "confidence": 89
+}

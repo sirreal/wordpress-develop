@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through all H2 tags. By repeatedly setting a bookmark with the same name on each H2 found, the bookmark gets \"moved\" to the last occurrence (as documented: \"Setting a bookmark with a name that is already in use MOVES that bookmark to the current location\"). After the loop completes, we seek back to that last H2 position and add the 'final-section' class using the add_class() method. This approach preserves all other HTML byte-for-byte while only modifying the H2 tag opener. Tags inside comments are automatically ignored by the processor since next_tag() only matches real HTML tags.",
+  "confidence": 92
+}

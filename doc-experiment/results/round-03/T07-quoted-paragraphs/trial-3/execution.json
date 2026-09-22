@@ -1,0 +1,113 @@
+{
+    "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-03/T07-quoted-paragraphs/trial-3/candidate.php",
+    "function": "mark_quoted_paragraphs",
+    "passed": 1,
+    "total": 7,
+    "cases": [
+        {
+            "id": "simple",
+            "status": "fail",
+            "expected": "<blockquote><p class=\"quoted\">Quoted.</p></blockquote><p>Not quoted.</p>",
+            "actual": "<blockquote><p>Quoted.</p></blockquote><p>Not quoted.</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "deep-ancestor",
+            "status": "fail",
+            "expected": "<blockquote><div><section><p class=\"quoted\">Deep quote.</p></section></div></blockquote>",
+            "actual": "<blockquote><div><section><p>Deep quote.</p></section></div></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "outside-untouched",
+            "status": "pass",
+            "expected": "<p>One</p><p>Two</p>",
+            "actual": "<p>One</p><p>Two</p>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "implicitly-closed-paragraphs",
+            "status": "fail",
+            "expected": "<blockquote><p class=\"quoted\">first<p class=\"quoted\">second</blockquote>",
+            "actual": "<blockquote><p>first<p>second</blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "existing-class-preserved",
+            "status": "fail",
+            "expected": "<blockquote><p class=\"lead quoted\">Quote.</p></blockquote>",
+            "actual": "<blockquote><p class=\"lead\">Quote.</p></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "nested-blockquotes",
+            "status": "fail",
+            "expected": "<blockquote><blockquote><p class=\"quoted\">Inner.</p></blockquote><p class=\"quoted\">Outer.</p></blockquote>",
+            "actual": "<blockquote><blockquote><p>Inner.</p></blockquote><p>Outer.</p></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        },
+        {
+            "id": "mixed-document",
+            "status": "fail",
+            "expected": "<p>intro</p><blockquote><p class=\"quoted\">a</p></blockquote><p>middle</p><blockquote><div><p class=\"quoted\">b</p></div></blockquote>",
+            "actual": "<p>intro</p><blockquote><p>a</p></blockquote><p>middle</p><blockquote><div><p>b</p></div></blockquote>",
+            "error": null,
+            "doing_it_wrong": [],
+            "trigger_error": [
+                {
+                    "function": "WP_HTML_Processor::serialize",
+                    "message": "An HTML Processor which has already started processing cannot serialize its contents. Serialize immediately after creating the instance.",
+                    "level": 512
+                }
+            ]
+        }
+    ]
+}

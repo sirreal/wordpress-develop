@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor in fragment parsing mode to safely parse the HTML. It finds the first H1 tag using next_tag(), records its nesting depth, then walks through subsequent tokens while accumulating text from all #text tokens inside the H1 element (at any nesting level) until it encounters a token at a shallower depth, signaling the H1's closing. The get_modifiable_text() method automatically handles character reference decoding, and returning an empty string for H1 elements with no text nodes satisfies the requirement.",
+  "confidence": 85
+}

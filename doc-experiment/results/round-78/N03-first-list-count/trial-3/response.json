@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()`, `next_tag()`, `next_token()`, `get_current_depth()`, `is_tag_closer()`, `set_bookmark()`, `seek()`, `set_attribute()`, `release_bookmark()`, `paused_at_incomplete_token()`, `get_last_error()`, and `get_updated_html()` APIs. The function scans to the first `UL` or `OL` opener, counts direct `LI` child openers by depth, and only applies the `data-item-count` update after confirming the list was scanned without truncation or parser errors.",
+  "confidence": 89
+}

@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), a single next_token() walk, get_attribute() with is_string(), #text filtering, and get_modifiable_text(); all called methods are documented and execution recorded no API misuse. Small deduction: the final paused_at_incomplete_token()/get_last_error() all-or-nothing return is too conservative for this read-only extraction task and would discard already collected links after a trailing incomplete token."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and only documented methods. The closer/depth tracking reflects the documented get_current_depth()/is_tag_closer() semantics, and text/attribute handling is idiomatic. Same small edge-policy issue as trial-1: it rejects the whole result on trailing incomplete syntax even though the task and reference allow best-effort extraction of already visited links."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), one next_token() loop, string-only href handling, #text-only text accumulation, and closer-driven flushing. All methods are documented and no misuse was recorded. It relies on a single current link rather than depth/breadcrumb state, which is acceptable for A elements under the processor's virtual-closer behavior but is a less general pattern for repeated subtree extraction."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8. The docs appear to have succeeded on the key concepts: the HTML Processor overview and create_fragment() docs pointed subjects to the structural parser; get_attribute() documented null/true/string and decoded values clearly enough that every trial used is_string(); the DOM-style text recipe and get_modifiable_text() docs led every trial to append only #text tokens and avoid comments/markup/special-element token text; and next_token() documented virtual closers well enough that unclosed links worked. Near-miss: trials 1 and 2 over-applied the clean-scan guidance from the mutation/rewrite examples. In a read-only probe, `<a href=\"/ok\">ok</a><span` produced an accumulated link in the reference and trial-3, but trials 1 and 2 returned an empty array because paused_at_incomplete_token() was true after the already-complete link. This suggests the docs' safety warnings are memorable, but the distinction between mutation safety, unsupported-parser aborts, and best-effort extraction policy could be sharper.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() incomplete-input notes",
+      "problem": "The docs say to check paused_at_incomplete_token() when a result must reject truncated input, but examples can make an all-or-nothing clean-scan check feel like the default even for read-only extraction.",
+      "suggestion": "Add a short policy note distinguishing read-only best-effort scans from mutations: unclosed elements still get virtual closers, incomplete trailing tokens are never visited, and callers may keep already collected data when their contract allows it."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() repeated-region recipe",
+      "problem": "The one-pass state-machine guidance is strong, but there is no generic recipe that combines opener attributes, accumulated subtree text, and closer-driven finalization for repeated elements.",
+      "suggestion": "Add a generalized example for collecting per-element summaries: capture needed opener state, append #text tokens while active, flush on the matching closer, and mention when depth or breadcrumbs are needed for nested/repeated containers."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_attribute() return-value docs",
+      "problem": "The null/true/empty-string/string distinction is present, but the practical filtering idiom is implicit.",
+      "suggestion": "Add a compact return-state table and explicitly call out that `is_string( $value )` includes `''` but excludes missing attributes and valueless boolean attributes."
+    }
+  ]
+}

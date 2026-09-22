@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` and collected only opener tokens whose `get_tag()` was `H1` through `H6`. For each heading, I used `get_current_depth()` to bound a subtree walk and appended only `#text` tokens via `get_modifiable_text()`, which preserves markup-free heading text in document order.",
+  "confidence": 96
+}

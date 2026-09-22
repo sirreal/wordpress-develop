@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the document linearly, match `img` tags case-insensitively with `next_tag()`, and append the `wp-image` class with `add_class()`. `get_updated_html()` returns the original HTML with only the queued tag-level edits applied, preserving all untouched bytes exactly as documented.",
+  "confidence": 98
+}

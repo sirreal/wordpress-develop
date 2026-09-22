@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly with `next_tag()`, then removed every matched attribute returned by `get_attribute_names_with_prefix( 'data-track-' )` via `remove_attribute()`. The final HTML is returned with `get_updated_html()`, which preserves untouched bytes exactly as documented.",
+  "confidence": 98
+}

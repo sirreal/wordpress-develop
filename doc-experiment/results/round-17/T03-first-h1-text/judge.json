@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor (fragment mode), required for structural depth awareness; Tag Processor lacks get_current_depth. All six methods called (create_fragment, next_tag, get_current_depth, next_token, get_token_type, get_modifiable_text) are documented; no hallucinations or _doing_it_wrong records. Idiomatic: reproduces the documented depth-bounded token-walk recipe (html-processor.md L652-676) almost verbatim, anchoring on the depth recorded at the matched element and using the required >= comparison. Handles entities (decoded get_modifiable_text), image-only H1 (empty string via no #text), and unclosed H1 (end-of-input closer) correctly. Minor gap: omits the create_fragment null check, so a null return would fatal on ->next_tag(); docs document the static|null return (L384) though the example at L655 also omits the guard. -4 for that edge-case robustness miss."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and same documented recipe, written as an explicit break-on-depth loop rather than the inline >= guard; semantically identical and equally idiomatic. All methods documented; no hallucinations or _doing_it_wrong. Only trial that guards the create_fragment null return (! $processor || ! $processor->next_tag(...)), matching the documented static|null contract and handling the incomplete-input/null edge gracefully. Uses lowercase 'h1' in next_tag, which the processor case-folds, so no issue. Full marks across all rubric dimensions."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor, identical inline >= depth-bounded walk to trial-1, matching the documented recipe (html-processor.md L658). All methods documented; no hallucinations or _doing_it_wrong. Explanation correctly notes get_modifiable_text decodes references and that the walk stops at the H1's closer. Same single gap as trial-1: no create_fragment null guard despite the documented static|null return, so -4 for the missed incomplete/invalid-input robustness case."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 8/8, including the discriminating edges (entities-decoded, image-only-empty-string, unclosed-h1, nested-in-div, first-of-two). The docs were the decisive factor. html-processor.md ships a near-complete worked recipe for exactly this shape — the \"Collect the text content of the first LI element\" example (L652-676) maps one-to-one onto the H1 task: match the element with next_tag, record get_current_depth, walk next_token while depth >= recorded depth, accumulate get_modifiable_text on '#text' tokens. All three subjects reproduced it, which is why difficulty collapsed to trivial.\\n\\nThe docs pre-empted every edge in the test set: (1) the >= vs > pitfall is called out explicitly twice (L658 comment and L673-675), so no trial used > and dropped trailing text after nested markup (covers nested-markup 'A B C', nested-in-div 'Deep title'); (2) get_modifiable_text is documented to return decoded text and the example annotates the result as decoded UTF-8 (L669-671), covering entities-decoded; (3) the empty-region behavior is described (L648, '...records an empty string rather than skipping the region') and the recipe naturally yields '' when an H1 holds only an <img> with no #text child, covering image-only-empty-string; (4) the LI example's note that 'unclosed LI and UL still produce closing tokens at the end of the input' (L666-667) and the next_token guidance that closers are visited for every opener including end-of-input closes (L648) cover unclosed-h1; (5) returning null when next_tag fails to find the element covers no-h1-null; (6) next_tag matching the first occurrence covers first-of-two. The only near-miss in the responses is robustness, not correctness: trials 1 and 3 omit the create_fragment null check, mirroring the docs' own example which also omits it (L655); a null return (documented at L384 as static|null) would have caused a fatal, but the corpus never exercises that path so it stayed latent.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() — example usage in next_token() recipe (html-processor.md ~L652-655) and the depth-walk recipe block",
+      "problem": "The worked recipe and the inline example call ->next_tag() directly on the result of create_fragment() without checking for the documented null return. Two of three subjects copied this and omitted the guard, leaving a latent fatal error on malformed/unsupported input even though the method's Returns section documents static|null.",
+      "suggestion": "Add the null guard to the recipe example itself (e.g. `$processor = WP_HTML_Processor::create_fragment( $html ); if ( null === $processor ) { return; }`) and a one-line note that create_fragment returns null for unparseable input or unsupported context/encoding, so callers should guard before invoking instance methods. Fixing the canonical example propagates correct robustness to copied code."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() (html-processor.md ~L2099)",
+      "problem": "The method-level docblock describes the return as decoded text only indirectly; subjects relied on the recipe annotation (L669) and on inference rather than a definitive statement at the method heading that character references are decoded. This worked here but leaves the decoded-vs-raw distinction implicit at the place a reader looks up the method.",
+      "suggestion": "State explicitly in the get_modifiable_text() method docblock that the returned string has character references decoded (e.g. '&amp;' -> '&') and is decoded UTF-8, with a one-line contrast to any raw/source-text accessor, so the guarantee is discoverable without reading a downstream recipe."
+    },
+    {
+      "location": "next_token() recipe — special-content elements note (html-processor.md ~L623)",
+      "problem": "The note that SCRIPT/STYLE/TITLE/TEXTAREA carry their text on the element token and produce no #text children is correct and well-placed, but it lives only in the prose recipe. A reader who jumps straight to get_modifiable_text() or get_token_type() would not see that the collect-#text pattern silently returns '' for these elements.",
+      "suggestion": "Cross-reference this exception from the get_modifiable_text() method docblock (a single 'See: special elements such as SCRIPT/STYLE/TITLE/TEXTAREA — read their text on the opening tag, they have no #text children' line), so the caveat is reachable from the method a text-extraction author lands on."
+    }
+  ]
+}

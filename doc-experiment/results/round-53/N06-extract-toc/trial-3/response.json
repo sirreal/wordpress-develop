@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with structural awareness, then walked tokens with `next_token()`. For each opening `H1` through `H6`, I recorded its depth via `get_current_depth()` and collected only `#text` tokens inside that subtree with `get_modifiable_text()`, which preserves nested markup as plain text while keeping empty headings as empty strings.",
+  "confidence": 94
+}

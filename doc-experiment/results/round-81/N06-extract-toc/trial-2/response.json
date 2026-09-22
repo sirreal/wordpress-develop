@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment and next_token() to walk the document in order, then read only #text tokens inside heading openers discovered via get_token_type(), is_tag_closer(), get_tag(), and get_current_depth(). This keeps markup out of the result and preserves empty headings as empty strings.",
+  "confidence": 92
+}

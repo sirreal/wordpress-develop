@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Chose WP_HTML_Processor::create_fragment(), which is the right processor for structure-aware direct-child counting. Every called method is documented in the rendered files. The solution follows the documented opener-bookmark, depth-bounded next_token(), clean-scan check, seek-back, set_attribute(), get_updated_html() pattern and handles incomplete/unsupported scans before mutating. Execution passed 11/11."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and all method calls are documented. It uses the same bookmark/depth-bounded scan/seek/update pattern and checks paused_at_incomplete_token() plus get_last_error(). Minor idiom nit: inside a next_token() loop it checks get_tag()/is_tag_closer() without an explicit get_token_type() === '#tag' guard, relying on get_tag() returning null for non-tag tokens. That behavior is documented and the code passed 11/11."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly uses WP_HTML_Processor for tree-aware traversal. All called methods are present in the rendered docs. The implementation closely matches the documented region-scan-before-editing pattern: bookmark the opener, walk with next_token() and get_current_depth(), count non-closing LI tag tokens at parent_depth + 1, reject incomplete/unsupported scans, seek back, set the attribute, and return get_updated_html(). Execution passed 11/11."
+    }
+  ],
+  "failure_analysis": "No hidden case failed in any trial. The docs were unusually effective for this task because they contained the key conceptual chain: the Tag Processor overview says it has no tree awareness and points structure-sensitive work to WP_HTML_Processor; the HTML Processor overview and create_fragment() docs match body-fragment input; the \"Recipe: scan a region before editing its opener\" gives the bookmark, forward scan, clean-scan check, seek-back mutation pattern; next_token() and get_current_depth() explain depth-bounded subtree walks, virtual/implied closers, and why the guard must use >=; get_last_error() and paused_at_incomplete_token() explain unsupported markup and truncated input; set_attribute() and get_updated_html() explain overwriting attributes and returning byte-preserving modified HTML. Near misses were small: trial-2 relied on get_tag() returning null on non-tag tokens rather than explicitly checking get_token_type(), and none of the trials used the alternative tag-only next_tag( array( 'tag_closers' => 'visit' ) ) pattern from the reference. Neither caused functional or API-adherence failures.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_current_depth() / next_token() docs",
+      "problem": "The docs explain subtree bounds well, but the direct-child predicate is implicit. Subjects had to infer that a direct child opener is a non-closing tag token at parent_depth + 1.",
+      "suggestion": "Add a short general note or example for direct-child detection: record the parent opener depth, walk while depth >= parent depth, and treat non-closing tag tokens with depth === parent_depth + 1 as direct children."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docs",
+      "problem": "Token-walk examples do not consistently show a tag-token guard before calling tag-specific predicates. This leaves room for code that works only because get_tag() returns null on non-tag tokens.",
+      "suggestion": "Add a tag-only token-walk idiom showing `'#tag' === $processor->get_token_type()` before checking get_tag() and is_tag_closer(), with a sentence that non-tag tokens return null from get_tag()."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::paused_at_incomplete_token() and HTML Processor region-scan recipe",
+      "problem": "The Tag Processor doc says to drain all tokens in a longer document before checking paused_at_incomplete_token(), while bounded HTML Processor edits often need to know whether the scanned region, not the whole remaining document, was complete.",
+      "suggestion": "Clarify the distinction: for whole-document truncation checks, drain the document; for a bounded subtree scan that drives a local edit, check paused_at_incomplete_token() and get_last_error() after leaving that subtree, and only continue scanning if the edit depends on later input."
+    }
+  ]
+}

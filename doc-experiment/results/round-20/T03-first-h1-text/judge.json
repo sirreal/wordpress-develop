@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor::create_fragment(), next_tag('H1'), next_token(), get_current_depth() with the documented >= subtree guard, get_token_type(), get_modifiable_text(), and is_tag_closer(). No _doing_it_wrong records. Minor precision loss: it appends get_modifiable_text() for every opening tag, relying on the documented empty-string fallback instead of explicitly distinguishing ordinary elements from atomic text carriers."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical reference: correct structural processor, all API calls are documented, and the depth-bounded token walk is idiomatic. It handles decoded #text and unclosed H1 input. The only adherence gap is that it ignores the documented next_token()/get_modifiable_text() exception for SCRIPT, STYLE, TITLE, and TEXTAREA text carried on the element token rather than a #text child."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice, all API calls are documented, no _doing_it_wrong records, and the implementation follows the documented subtree walk while also accounting for atomic/raw-text element tokens via get_modifiable_text(). Handles decoded text, raw text, empty content, nested markup, and end-of-input virtual closure appropriately."
+    }
+  ],
+  "failure_analysis": "All three trials passed all eight frozen cases: simple, nested-markup, entities-decoded, no-h1-null, image-only-empty-string, first-of-two, nested-in-div, and unclosed-h1. The rendered docs did well in the sections 'Which processor should I use?', WP_HTML_Processor::create_fragment(), WP_HTML_Processor::next_token(), WP_HTML_Processor::get_current_depth(), and WP_HTML_Processor::get_modifiable_text(): those passages directly led subjects to choose the structural processor, use body-fragment parsing, collect text with next_token(), preserve nested trailing text with the >= depth guard, and rely on decoded #text. The unclosed-H1 case was also covered by next_token() documentation saying the HTML Processor visits closing tokens for elements left unclosed at end of input. The main near-miss is trial-2's #text-only collector: hidden tests did not include TITLE/TEXTAREA/SCRIPT/STYLE inside H1, but the docs explicitly say those elements produce no #text child tokens and carry their text on the element token. Trials 1 and 3 handled that; trial 2 would return an empty string for those cases. A second near-miss is documentation inconsistency around atomic elements: one rendered Tag Processor passage lists NOFRAME while another lists NOFRAMES, and NOSCRIPT is described both as raw plaintext and as descended into when scripting is disabled. That did not break these trials, but it makes the special-element contract harder to apply confidently.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() docblock",
+      "problem": "The doc gives a strong #text accumulation recipe and separately mentions the atomic-element exception. Trial 2 followed the recipe but missed the exception, which suggests the exception is easy to treat as ancillary rather than part of a complete text-collection contract.",
+      "suggestion": "Add a compact general pattern for collecting text from an arbitrary element subtree that states the decision point explicitly: collect #text tokens, and if DOM-like text for raw/RCDATA elements is desired, also read get_modifiable_text() from non-closing element tokens that carry their own text."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() and WP_HTML_Tag_Processor::get_modifiable_text() docblocks",
+      "problem": "The special-element list is vague/inconsistent: SCRIPT, STYLE, TEXTAREA, TITLE are highlighted; other text-carrying elements are described as 'any other section ... (DATA)'; Tag Processor prose includes NOFRAME while other docs use NOFRAMES, and NOSCRIPT guidance conflicts with the scripting-flag section.",
+      "suggestion": "Replace the vague wording with a single canonical table of element tokens that can carry modifiable text, whether their returned text is decoded or raw, and whether the processor descends into their children."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docblock",
+      "problem": "It says the HTML Processor visits a closing token for every element it opens, but special atomic elements such as SCRIPT/STYLE/TITLE/TEXTAREA/IFRAME are represented as one token carrying their text and do not behave like ordinary open-token plus child-token plus close-token sequences.",
+      "suggestion": "Qualify the closer guarantee with the atomic-element exception, or state that these elements are represented as self-contained tokens whose own token carries their text."
+    }
+  ]
+}

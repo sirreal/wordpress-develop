@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor in fragment mode so the result is normalized on serialization, and I walked tokens with next_token() while skipping SPAN opener and closer tokens but emitting serialize_token() for everything else. A simple span-depth counter ensures nested spans are removed too, and I fall back to normalize() if the processor cannot complete cleanly.",
+  "confidence": 89
+}

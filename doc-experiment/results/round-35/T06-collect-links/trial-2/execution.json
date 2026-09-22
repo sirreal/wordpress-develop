@@ -1,0 +1,148 @@
+{
+  "candidate": "/Users/jonsurrell/a8c/wordpress-develop/html-api-docs-improvement/doc-experiment/results/round-35/T06-collect-links/trial-2/candidate.php",
+  "function": "collect_links",
+  "passed": 8,
+  "total": 8,
+  "cases": [
+    {
+      "id": "simple",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/a",
+          "text": "First"
+        },
+        {
+          "href": "/b",
+          "text": "second link"
+        }
+      ],
+      "actual": [
+        {
+          "href": "/a",
+          "text": "First"
+        },
+        {
+          "href": "/b",
+          "text": "second link"
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-href-excluded",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/only",
+          "text": "real"
+        }
+      ],
+      "actual": [
+        {
+          "href": "/only",
+          "text": "real"
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entity-in-href-decoded",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/search?q=a&b",
+          "text": "query"
+        }
+      ],
+      "actual": [
+        {
+          "href": "/search?q=a&b",
+          "text": "query"
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "valueless-href",
+      "status": "pass",
+      "expected": [],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "image-link-empty-text",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/img",
+          "text": ""
+        }
+      ],
+      "actual": [
+        {
+          "href": "/img",
+          "text": ""
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "entities-in-text",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/x",
+          "text": "Fish & Chips"
+        }
+      ],
+      "actual": [
+        {
+          "href": "/x",
+          "text": "Fish & Chips"
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "no-links",
+      "status": "pass",
+      "expected": [],
+      "actual": [],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    },
+    {
+      "id": "unclosed-link",
+      "status": "pass",
+      "expected": [
+        {
+          "href": "/x",
+          "text": "runs to the end"
+        }
+      ],
+      "actual": [
+        {
+          "href": "/x",
+          "text": "runs to the end"
+        }
+      ],
+      "error": null,
+      "doing_it_wrong": [],
+      "trigger_error": []
+    }
+  ]
+}

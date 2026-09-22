@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a token-by-token rewrite with `next_token()` and `serialize_token()` so the result is normalized serialization. It buffers each `P` element from its opener until its closer; if no token appears inside, the paragraph is dropped, otherwise its buffered normalized markup is emitted unchanged. After the full scan it checks `paused_at_incomplete_token()` and `get_last_error()` and falls back to the original HTML if the fragment was not fully processable.",
+  "confidence": 84
+}

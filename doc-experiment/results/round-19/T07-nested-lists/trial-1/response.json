@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on ancestor structure. It walks list openers with `next_tag()`, checks each matched `UL` or `OL` token\u2019s ancestry via `get_breadcrumbs()`, and calls `add_class()` when any earlier breadcrumb is `UL` or `OL`. The result is returned with `get_updated_html()`, and the function falls back to the original HTML if fragment creation fails, parsing stops at an incomplete token, or the processor reports unsupported markup.",
+  "confidence": 92
+}

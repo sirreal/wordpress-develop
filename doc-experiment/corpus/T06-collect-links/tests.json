@@ -1,0 +1,103 @@
+{
+    "id": "T06-collect-links",
+    "title": "Collect all links",
+    "difficulty": "intermediate",
+    "split": "train",
+    "role": "core",
+    "commonness": "high",
+    "concept": "text",
+    "processor": "html",
+    "function": "collect_links",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<p><a href=\"/a\">First</a> and <a href=\"/b\"><em>second</em> link</a></p>"
+            ],
+            "expected": [
+                {
+                    "href": "/a",
+                    "text": "First"
+                },
+                {
+                    "href": "/b",
+                    "text": "second link"
+                }
+            ]
+        },
+        {
+            "id": "no-href-excluded",
+            "args": [
+                "<a name=\"x\">anchor</a><a href=\"/only\">real</a>"
+            ],
+            "expected": [
+                {
+                    "href": "/only",
+                    "text": "real"
+                }
+            ]
+        },
+        {
+            "id": "entity-in-href-decoded",
+            "args": [
+                "<a href=\"/search?q=a&amp;b\">query</a>"
+            ],
+            "expected": [
+                {
+                    "href": "/search?q=a&b",
+                    "text": "query"
+                }
+            ]
+        },
+        {
+            "id": "valueless-href",
+            "args": [
+                "<a href>empty</a>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "image-link-empty-text",
+            "args": [
+                "<a href=\"/img\"><img src=\"i.png\" alt=\"pic\"></a>"
+            ],
+            "expected": [
+                {
+                    "href": "/img",
+                    "text": ""
+                }
+            ]
+        },
+        {
+            "id": "entities-in-text",
+            "args": [
+                "<a href=\"/x\">Fish &amp; Chips</a>"
+            ],
+            "expected": [
+                {
+                    "href": "/x",
+                    "text": "Fish & Chips"
+                }
+            ]
+        },
+        {
+            "id": "no-links",
+            "args": [
+                "<p>plain text</p>"
+            ],
+            "expected": []
+        },
+        {
+            "id": "unclosed-link",
+            "args": [
+                "<a href=\"/x\">runs to the end"
+            ],
+            "expected": [
+                {
+                    "href": "/x",
+                    "text": "runs to the end"
+                }
+            ]
+        }
+    ]
+}

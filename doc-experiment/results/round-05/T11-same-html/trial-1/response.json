@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::normalize() to parse and serialize both HTML fragments, normalizing differences in tag casing, attribute quoting, optional closing tags, and character references. This method handles the HTML5 parsing rules to create a canonical form. If either fragment cannot be fully parsed (normalize returns null), or if the normalized forms differ, the function returns false. Otherwise it returns true.",
+  "confidence": 72
+}

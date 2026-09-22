@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates an HTML Processor fragment parser and iterates through all tokens using next_token(). For each text node (#text), it retrieves the decoded text content and checks if it contains the keyword using a case-sensitive strpos() check. When the keyword is found anywhere in the text node, the entire text node is wrapped with <mark> and </mark> tags around its serialized representation. All other tokens are serialized unchanged. The processor normalizes the HTML structure, including closing optional tags and encoding special characters properly.",
+  "confidence": 60
+}

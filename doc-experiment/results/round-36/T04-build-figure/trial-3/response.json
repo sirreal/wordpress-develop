@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This builds from a fixed template with `WP_HTML_Tag_Processor`, which the docs recommend when exact output shape matters. The template already contains `src` and `alt` in the required order so `set_attribute()` updates them in place with proper escaping, and the placeholder text inside `figcaption` is replaced by scanning tokens with `next_token()` until the `#text` node and then calling `set_modifiable_text()` for correctly encoded caption text.",
+  "confidence": 96
+}

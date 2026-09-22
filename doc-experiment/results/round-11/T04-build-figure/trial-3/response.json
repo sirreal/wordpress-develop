@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Tag_Processor to safely build the figure fragment from a template. It starts with a template containing the exact structure, then uses set_attribute() to assign the src and alt attributes (which automatically handles HTML encoding), and set_modifiable_text() to fill in the figcaption text content (also automatically encoded). This approach ensures proper escaping of all user inputs and correct attribute ordering as specified in the documentation.",
+  "confidence": 92
+}

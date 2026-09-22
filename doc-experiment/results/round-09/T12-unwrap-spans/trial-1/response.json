@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML in BODY context (default), then iterates through all tokens with next_token(). For each token, it checks if the current tag is a SPAN (case-insensitive match is handled by get_tag() which returns uppercase). If it's a SPAN, both the opening and closing tags are skipped via continue. All other tokens are serialized using serialize_token(), which provides normalized HTML output as specified. The processor's serialize_token() method handles all normalization including attribute double-quoting, tag name lowercasing (except SVG/MathML), and proper text re-encoding.",
+  "confidence": 82
+}

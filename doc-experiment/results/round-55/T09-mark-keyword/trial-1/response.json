@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the input as a body fragment, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded text from `get_modifiable_text()` with a case-sensitive `str_contains()` and wrapped that whole token using `serialize_token()` inside `<mark>`, leaving special-element content untouched because it is not exposed as ordinary `#text` tokens.",
+  "confidence": 92
+}

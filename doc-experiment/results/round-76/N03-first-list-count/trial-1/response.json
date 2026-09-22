@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then a single token walk with `next_tag()` and `next_token()` plus `get_current_depth()` to locate the first `UL`/`OL`, count only direct `LI` opener children, and reject truncated/unsupported input via `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan I `seek()` back to the bookmarked list opener and apply `set_attribute()` before returning `get_updated_html()`.",
+  "confidence": 91
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I use the documented HTML Processor fragment parser to scan body-fragment HTML, find the first `H1` opener with `next_tag()`, record its depth with `get_current_depth()`, then walk the subtree with `next_token()` and concatenate only `#text` tokens via `get_modifiable_text()`, which already returns decoded text.",
+  "confidence": 94
+}

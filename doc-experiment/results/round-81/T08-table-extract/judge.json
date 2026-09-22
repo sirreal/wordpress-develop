@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), then a single depth-bounded next_token() walk over the first TABLE. All HTML API calls are documented. It follows the documented #text + get_modifiable_text() pattern and handles implied/omitted closers through processor closers. Minor only: unused state and no explicit unsupported/incomplete-input policy check, though the task did not require whole-input validation."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and documented API throughout: create_fragment, next_tag, next_token, get_current_depth, get_token_type, get_tag, is_tag_closer, get_modifiable_text. The implementation uses the documented single-cursor state-machine pattern and decoded text extraction. No _doing_it_wrong records. Same minor caveat about no explicit get_last_error()/paused_at_incomplete_token policy."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correctly used WP_HTML_Processor and only documented methods. It applies the intended token-walking/state approach and decoded #text extraction, and hidden tests confirm the implied table structure cases. Slightly less careful than the others around row/cell state guards, but not an API misuse and still aligned with the documented model."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases with no _doing_it_wrong records. The docs were effective for this task: the Tag Processor docs explicitly direct DOM-style text extraction and implied/missing closing-tag handling to WP_HTML_Processor; the HTML Processor overview identifies structure, subtree walking, implied/virtual closers, and table support; next_token() documents depth-bounded walks, synthesized TBODY for <table><tr>, one-cursor state-machine traversal for repeated regions, and reliable virtual closers; get_modifiable_text() documents decoded #text semantics and warns not to use it as a predicate. The only near-miss is completeness policy: candidates rely on best-effort virtual closers and do not inspect paused_at_incomplete_token() or get_last_error(). That is acceptable for this read-only extraction task, but callers needing whole-input validation would need the additional checks described in the docs.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_tag() docblock",
+      "problem": "The example under the HTML Processor method uses new WP_HTML_Tag_Processor, which weakens the otherwise clear processor distinction in a traversal-heavy task.",
+      "suggestion": "Use a WP_HTML_Processor::create_fragment() example in this docblock, and show that get_tag() returns uppercase tag names while matched on tag tokens, including when visiting closers."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() docblock",
+      "problem": "The docs explain single-cursor repeated-region extraction with a DL example, but the reusable pattern could be easier to recognize for nested repeated structures that have parent and child states.",
+      "suggestion": "Add a short generic example or note showing two-level state tracking, such as collecting repeated child regions inside repeated parent regions, without making it table-specific."
+    },
+    {
+      "location": "WP_HTML_Processor completeness/error policy notes",
+      "problem": "The guidance on virtual closers versus incomplete source is present but spread across next_token(), get_current_depth(), and serialization sections.",
+      "suggestion": "Add a concise cross-reference note: read-only subtree extraction may accept virtual end-of-input closers as best-effort, while callers requiring complete input should check paused_at_incomplete_token() and get_last_error() at the caller-defined boundary."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This function creates an HTML fragment processor, iterates through all tokens using next_token(), and collects text from each #text token using get_modifiable_text(). The text is already decoded (character references converted) per the documentation. It then uses mb_substr() with UTF-8 encoding to safely truncate to the specified number of code points without cutting multi-byte characters. Returns empty string for non-positive max_codepoints values or if the processor fails to initialize.",
+  "confidence": 85
+}

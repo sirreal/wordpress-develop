@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor to parse the HTML fragment and navigate the table structure. It creates a processor with create_fragment(), finds the first TABLE tag with next_tag(), then iterates through all tokens with next_token(). For each TR tag, it starts a new row; for TD/TH tags, it collects text content by accumulating #text tokens via get_modifiable_text(). The current depth is tracked to know when we've exited the table. The function handles browser-like HTML parsing where closing tags may be omitted, thanks to the HTML Processor's structural awareness.",
+  "confidence": 75
+}

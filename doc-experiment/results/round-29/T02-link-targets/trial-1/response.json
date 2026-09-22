@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` because the task is a flat, byte-preserving attribute edit. It scans only `A` tags with `next_tag( 'A' )`, checks `get_attribute( 'href' ) !== null` so empty-string and boolean `href` forms still count as present, then overwrites or creates `target` with `set_attribute( 'target', '_blank' )` and returns the result via `get_updated_html()`.",
+  "confidence": 98
+}

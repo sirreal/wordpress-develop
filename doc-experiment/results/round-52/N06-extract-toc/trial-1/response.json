@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then made a single `next_token()` pass that starts a heading record on each `H1`-`H6` opener, tracks subtree depth with `get_current_depth()`, and concatenates only ordinary `#text` tokens via `get_modifiable_text()` until the heading closes.",
+  "confidence": 90
+}

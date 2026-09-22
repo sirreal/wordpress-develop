@@ -1,0 +1,50 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment(), not the flat Tag Processor. Every called API is documented in the supplied markdown: next_tag, get_tag, set_bookmark, get_current_depth, next_token, is_tag_closer, paused_at_incomplete_token, get_last_error, release_bookmark, seek, set_attribute, and get_updated_html. The bookmark + bounded token walk + seek-back pattern matches the docs and handles incomplete/unsupported markup correctly."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same documented structural approach as the reference: HTML Processor fragment parsing, bookmark the opener, walk by depth with next_token(), reject incomplete/unsupported scans, seek back, set_attribute(), and return get_updated_html(). The extra try/catch is not a hallucinated API use and is consistent with documented Exception throws on traversal/seek."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Fully documented API usage and idiomatic traversal. Correctly distinguishes direct LI children with get_current_depth() === list_depth + 1, checks paused_at_incomplete_token() and get_last_error() before editing, releases the bookmark, and uses get_updated_html() for the attribute mutation."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed in any trial: all three passed 11/11 with no _doing_it_wrong records. The docs did well on the exact risk points for this task. The Tag Processor overview clearly says it has no tree awareness and points structural work to WP_HTML_Processor. The HTML Processor overview and the 'Recipe: scan a region before editing its opener' heading directly model the bookmark, forward scan, clean-scan check, seek-back, and edit flow. The next_tag() docs warn that tag_name is not a list of alternatives and show scanning any tag then branching on get_tag(), which all trials used for UL/OL. The next_token() and get_current_depth() docs explain bounded subtree walks, virtual/implied closers, the required >= depth guard, and separate checks for paused_at_incomplete_token() and get_last_error(). The set_attribute() docs explain overwriting existing attributes and string-vs-boolean semantics, avoiding mistakes around existing data-item-count. Near-misses: the recipe mentions 'how many direct children' but its code only detects a descendant heading; models had to infer the direct-child depth comparison themselves. The docs also imply, but do not sharply state, that incomplete/unsupported markup checks are scoped to the portion already scanned, which matters for trailing bad markup after a closed region. Finally, the next_token() method's changelog line saying 'Added for internal support; do not use' conflicts with the surrounding public recipes recommending it.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md, 'Recipe: scan a region before editing its opener'",
+      "problem": "The recipe names direct-child counting as a use case, but the sample only checks whether any H2 appears in a subtree. It does not show the idiom for distinguishing direct children from deeper descendants.",
+      "suggestion": "Add a small generic example or note: record the container opener depth, count element openers where get_current_depth() === $container_depth + 1 and ! is_tag_closer(), and use >= only for the loop boundary."
+    },
+    {
+      "location": "html-processor.md, next_token() / get_current_depth() incomplete-input guidance",
+      "problem": "The docs say to check paused_at_incomplete_token() and get_last_error() after a bounded scan, but do not make the scope explicit. A reader may drain the whole document and reject a valid regional edit because unrelated trailing markup is incomplete or unsupported.",
+      "suggestion": "Clarify that these checks report the state reached by the scan performed so far. For region-local mutations, stop at the region boundary and check there; only drain the full document when the caller requires whole-input validity."
+    },
+    {
+      "location": "html-processor.md, next_token() 'Since' block",
+      "problem": "The changelog says 'Added for internal support; do not use' even though the overview and method prose recommend next_token() for public traversal recipes.",
+      "suggestion": "Remove or qualify the stale 'do not use' wording so it does not contradict the documented public traversal contract."
+    },
+    {
+      "location": "html-processor.md, set_bookmark() example",
+      "problem": "The HTML Processor bookmark section uses a WP_HTML_Tag_Processor example with tag_closers, which is less aligned with tree-aware HTML Processor patterns and can blur processor choice.",
+      "suggestion": "Replace or supplement it with an HTML Processor example using create_fragment(), get_current_depth() or get_breadcrumbs(), seek(), and release_bookmark()."
+    },
+    {
+      "location": "html-processor.md, set_attribute()",
+      "problem": "The HTML Processor set_attribute() section omits the attribute placement details that appear in the Tag Processor docs, even though callers use the inherited behavior through WP_HTML_Processor.",
+      "suggestion": "Cross-link or repeat the placement contract: existing attributes update in place; new attributes are inserted after the tag name and multiple new attributes sort by name."
+    }
+  ]
+}

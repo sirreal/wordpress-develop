@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Tag_Processor` scan-and-bookmark flow: iterate through all `h2` openers with `next_tag()`, remember the last one with `set_bookmark()`, then `seek()` back and call `add_class()` before returning `get_updated_html()`. If no `h2` is found, the function returns the original HTML unchanged.",
+  "confidence": 98
+}

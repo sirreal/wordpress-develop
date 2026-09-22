@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the HTML fragment structurally, finds the first `H1` with `next_tag()`, then walks its subtree with `next_token()` while the current depth remains inside that heading. It concatenates decoded text from `#text` tokens via `get_modifiable_text()`, and also reads text carried directly on atomic/raw-text element tokens like `SCRIPT`, `STYLE`, `TEXTAREA`, and `TITLE`, as documented.",
+  "confidence": 90
+}

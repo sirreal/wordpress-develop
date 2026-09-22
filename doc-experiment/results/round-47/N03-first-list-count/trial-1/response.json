@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because the task depends on tree structure. It scans tags in document order to find the first `UL` or `OL`, bookmarks that opener, walks its subtree with `next_token()`, counts only direct child `LI` openers by checking `get_token_type()`, `is_tag_closer()`, `get_tag()`, and `get_current_depth()`, then only applies `set_attribute()` if the scan finished cleanly according to `paused_at_incomplete_token()` and `get_last_error()`; otherwise it returns the original HTML unchanged.",
+  "confidence": 92
+}

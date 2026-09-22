@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Chose WP_HTML_Processor::create_fragment(), walked tokens with next_token(), filtered ordinary #text tokens with get_token_type(), matched decoded text with get_modifiable_text(), and emitted normalized output with serialize_token(). All called HTML API methods are present in the rendered docs and execution recorded no _doing_it_wrong misuse. Minor deduction only for an unnecessary post-loop get_last_error policy choice that is outside the task surface, though it follows documented guidance for unsupported markup."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Uses the right processor and the documented token-serialization pattern. It correctly avoids attributes, comments, split text, and special text-bearing element contents by checking #text before get_modifiable_text(). All HTML API methods used are documented. Slight deduction for falling back to the original, unnormalized HTML on create_fragment() null or get_last_error(); this is a defensible fallback for unsupported markup, but it would not preserve the task's normalized-output contract if such input were in scope."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Same API usage pattern as trial-2, using str_contains() for the substring check. Correct processor, no undocumented methods, no _doing_it_wrong records, and idiomatic serialize_token() accumulation. Slight deduction for the original-HTML fallback on parser failure/unsupported markup, which is documented as a possible fallback but weak for a function whose contract is normalized serialization."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 frozen cases, so there are no failed hidden cases to attribute to a documentation gap. The docs were effective on the central API choices: the 'Which processor should I use?' and HTML Processor overview steer normalized structural work to WP_HTML_Processor; 'Recipe: collect DOM-style text from a subtree' says to append only ordinary #text tokens and not call get_modifiable_text() on every token; the get_modifiable_text() section states that #text is returned decoded; the SCRIPT/STYLE/TITLE/TEXTAREA notes explain why those contents are skipped by a #text-only walk; and 'Recipe: rewrite while serializing tokens' plus serialize_token() explain the exact token-by-token rewrite pattern the candidates used. The only near-miss is error policy: all candidates added get_last_error() handling, and two return original HTML on unsupported markup. The serialize_token() docs do discuss incomplete trailing tokens and unsupported-parser aborts, but the distinction between best-effort normalization, rejecting, and falling back to original input remains a policy choice that subjects resolved differently. This did not affect the provided cases.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() docblock",
+      "problem": "The docs explain fragment context, but do not crisply state that ordinary malformed body fragments with omitted optional closing tags are still parseable and should normally be serialized, while null is mainly about invalid/unsupported setup rather than common unclosed markup.",
+      "suggestion": "Add a short return-value note distinguishing a null factory result from parse recovery during token walking, with guidance that callers should still walk/serialize normal body fragments containing omitted optional tags."
+    },
+    {
+      "location": "WP_HTML_Processor::serialize_token() docblock / rewrite recipe",
+      "problem": "The docs mention that callers may return the accumulated output or reject it according to policy, but subjects may still conflate unsupported markup, incomplete trailing syntax, and normal optional-tag recovery.",
+      "suggestion": "Add a compact policy table: normal EOF with virtual closers => accumulated serialization is complete; paused_at_incomplete_token() => caller chooses best-effort vs reject; get_last_error() => unsupported abort, reject or explicit fallback."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_modifiable_text() and WP_HTML_Processor::get_modifiable_text() docblocks",
+      "problem": "The method docs say modifiable text includes comments and special element contents, but the ordinary-DOM-text recipe is easier to find in the overview than at the method itself.",
+      "suggestion": "Add a prominent method-level note: when only DOM text nodes are intended, first require get_token_type() === '#text'; otherwise comments, processing instructions, SCRIPT/STYLE/TITLE/TEXTAREA tokens can also return modifiable text."
+    }
+  ]
+}

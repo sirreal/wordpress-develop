@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` because the task depends on HTML structure, then scanned tokens with `next_tag()` and `next_token()` to find the first `UL` or `OL`, count only direct `LI` children by comparing `get_current_depth()`, and reject incomplete or unsupported scans with `paused_at_incomplete_token()` and `get_last_error()`. After a clean scan, I revisited the opener with a bookmark and wrote `data-item-count` via `set_attribute()`, then returned `get_updated_html()`.",
+  "confidence": 92
+}

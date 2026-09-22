@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because text extraction depends on document structure, then finds the first `H1` with `next_tag()`, records its depth with `get_current_depth()`, and walks its subtree with `next_token()`, concatenating only `#text` tokens via `get_modifiable_text()`. That follows the documented HTML Processor recipe for collecting DOM-style text, with character references already decoded by the API.",
+  "confidence": 88
+}

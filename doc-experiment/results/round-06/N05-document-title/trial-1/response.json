@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_full_parser() to properly parse a complete HTML document with DOCTYPE and full structure. It locates the TITLE tag using next_tag('title'), then walks through tokens with next_token() to collect all text nodes inside the TITLE element. Character references are automatically decoded by get_modifiable_text() as documented for TITLE elements. The function returns null if no TITLE tag is found or if parsing fails, and returns the accumulated text (empty string if TITLE was empty) when the TITLE closing tag is encountered.",
+  "confidence": 45
+}

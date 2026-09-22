@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses the structure-aware `WP_HTML_Processor::create_fragment()` and a single forward scan with `next_tag( array( 'tag_closers' => 'visit' ) )`. It tracks whether the current position is inside one or more `FIGURE` elements by incrementing/decrementing on `FIGURE` openers/closers, then collects decoded `src` values from `IMG` openers encountered while that depth is positive via `get_attribute( 'src' )`, skipping missing or empty values.",
+  "confidence": 94
+}

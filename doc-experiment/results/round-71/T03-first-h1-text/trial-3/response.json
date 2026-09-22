@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the HTML fragment in BODY context, then `next_tag( 'H1' )` to find the first heading opener. From there I walked tokens with `next_token()`, accumulated only `#text` token contents via `get_modifiable_text()`, and stopped when the current depth dropped above the heading subtree boundary using `get_current_depth()`. This preserves nested text and returns `null` only when no H1 exists.",
+  "confidence": 96
+}

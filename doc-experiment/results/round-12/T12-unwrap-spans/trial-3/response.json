@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML fragment with full structural awareness. It then iterates through every token using next_token(), and uses get_tag() to identify SPAN elements. Both opening and closing SPAN tags are skipped (via continue), while all other tokens are serialized using serialize_token(). This approach naturally handles nested spans since each closing tag is visited separately and skipped. The serialize_token() method produces normalized HTML output (double-quoted attributes, canonical text encoding, etc.) as required.",
+  "confidence": 85
+}

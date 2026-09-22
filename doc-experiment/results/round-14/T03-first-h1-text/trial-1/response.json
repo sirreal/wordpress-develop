@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to find the first H1 element, then walks through all tokens inside it with next_token(). It accumulates text from #text tokens using get_modifiable_text(), which automatically decodes character references. The depth-based guard (current_depth >= h1_depth) ensures we collect text only from inside the H1 element, including from nested elements, and stop when we exit the H1. Returns null if no H1 exists, or the concatenated text (possibly empty string) if one is found.",
+  "confidence": 78
+}

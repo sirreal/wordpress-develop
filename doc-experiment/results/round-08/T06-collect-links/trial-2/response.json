@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML. It finds all A tags with next_tag(), checks each for an href attribute, and collects text content by walking tokens while the depth is at or above the A element's opening depth. All #text tokens encountered inside the A element contribute to the text result. The depth-based approach correctly handles nested elements like EM tags.",
+  "confidence": 55
+}

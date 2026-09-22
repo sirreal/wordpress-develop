@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then walked tokens with `next_token()` and wrapped only ordinary `#text` tokens whose decoded text contains the keyword. For output, I concatenated `serialize_token()` so the result stays normalized, and I left special-element contents like `script`, `style`, `title`, and `textarea` untouched because they do not appear as ordinary `#text` tokens in the documented API.",
+  "confidence": 92
+}

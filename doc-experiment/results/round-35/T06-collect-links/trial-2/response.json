@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because link text extraction is tree-aware. It scans `A` openers with `next_tag('A')`, reads `href` via `get_attribute()` and keeps only string-valued attributes (excluding missing and boolean `href`), then walks the anchor subtree with `next_token()` bounded by `get_current_depth()`, concatenating only `#text` tokens through `get_token_type()` and `get_modifiable_text()` so markup contributes nothing and character references are already decoded by the API.",
+  "confidence": 94
+}

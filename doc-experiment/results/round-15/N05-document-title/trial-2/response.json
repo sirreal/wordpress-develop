@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a full HTML parser using WP_HTML_Tag_Processor::create_full_parser() since we're processing a complete document, then searches for the TITLE tag using next_tag(). The TITLE element is documented as a special element whose contents are plaintext with character references decoded, so get_modifiable_text() automatically returns the decoded text inside the TITLE tag. If no TITLE is found, null is returned; otherwise the decoded text is returned (including empty strings for empty TITLE elements).",
+  "confidence": 85
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment and `next_token()` to walk the document in tree order, collecting only `#text` tokens that occur while inside an `H1` through `H6` opener. I flush each heading when its matching closer is seen, preserving empty headings as empty strings and ignoring markup while still including its text via `get_modifiable_text()`.",
+  "confidence": 83
+}

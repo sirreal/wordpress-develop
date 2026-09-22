@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in body context, then walked all tokens with `next_token()`, appending decoded `#text` nodes plus only the opener text for `TITLE` and `TEXTAREA` via `get_modifiable_text()`. I excluded script/style content by never treating their opener text as excerpt text, and truncated the final UTF-8 string by Unicode code points with `mb_strlen`/`mb_substr`, falling back to a regex-based code point split if mbstring is unavailable.",
+  "confidence": 94
+}

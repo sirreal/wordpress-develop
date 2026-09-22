@@ -1,0 +1,35 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Idiomatic mirror of the canonical 'custom query' pattern: unfiltered next_tag() loop with 'IMG' === get_tag() guard, then add_class + get_updated_html. Tag Processor is the correct choice for flat attribute work. get_tag() returns uppercase (docs line 1572), so the uppercase 'IMG' comparison is exactly right and matches the docs' own DIV/SPAN custom-query example. All 4 methods (next_tag, get_tag, add_class, get_updated_html) are documented. No hallucinations, no _doing_it_wrong, no trigger_error. Explanation is accurate, including correct claims that comments/incomplete tags are skipped and output is byte-preserved. 8/8 hidden cases pass."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Uses next_tag( array( 'tag_name' => 'img' ) ) — the array query form shown verbatim in the docs' finding-tags table (line 58) — then add_class + get_updated_html. Correct processor, fully documented API, no _doing_it_wrong, 8/8 pass. Minor prose near-miss in the explanation: claims add_class('wp-image') 'removes the class attribute if wp-image was the only class.' That only-class-removal behavior belongs to remove_class, not add_class; it's a confused paraphrase of the docs' remove_class note. The misstatement is in prose only, not in code, so it cannot affect output, but it reflects a small misreading of the modifying-CSS-classes section. Slight deduction under 'idiomatic use of documented patterns'."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical code to trial-2 (next_tag with tag_name=>'img', add_class, get_updated_html) but a cleaner, fully-accurate explanation that does not repeat trial-2's remove_class confusion. Correct processor, documented API only, no _doing_it_wrong, 8/8 pass. Textbook use of the documented array-query + add_class + get_updated_html flow."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials pass 8/8, with no _doing_it_wrong or trigger_error records in any execution.json. This is the smoke/basic task and the two docs covered it completely. What the docs did well, mapped to the cases that could have tripped a less-careful subject: (1) Case-insensitive tag matching (uppercase-tag case) — next_tag()'s 'What this matches' section (html-tag-processor.md line 937) states tag-name matching is ASCII case-insensitive and preserves source casing, and get_tag() is explicitly documented (line 1572) to return the UPPERCASE name, so both query styles used across trials match <IMG> and trial-1's `'IMG' === get_tag()` guard is correct. (2) Comments ignored (inside-comment-ignored case) — line 939 states tag-like text inside comments is never matched. (3) Incomplete trailing tag (incomplete-tag-at-end case) — line 941 plus the 'When matching fails' section state a truncated tag pauses the processor and is never matched/modified, so the trailing `<img src=\\\"a.jpg` is correctly left untouched. (4) Existing classes preserved/appended (existing-classes case) — the 'Modifying CSS classes' section shows add_class appending to existing classes and preserving order/whitespace (lines 184-217, 328). (5) Byte-for-byte preservation including unquoted attributes (unquoted-attributes case) — get_updated_html() docs (line 2297) guarantee untouched bytes are returned exactly; note the input's unquoted src=a.jpg width=10 survive because only the class attribute is added (the double-quoting-on-update caveat at line 328 applies only to attributes the API writes). The only blemish anywhere is a prose near-miss in trial-2's explanation, which misattributes remove_class's 'remove the attribute when removing the only class' behavior to add_class. It had no effect on output and reflects the add_class and remove_class behaviors being described in close proximity in the same section without each method's docblock restating its own scope crisply.\"",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class() method docblock",
+      "problem": "The only-class-removal semantics ('if removing the only class then the entire class attribute will be removed') live in the shared 'Modifying CSS classes' prose and the remove_class examples, immediately adjacent to add_class. trial-2's explanation bled that behavior onto add_class, asserting add_class can remove the class attribute. A subject reading only the section overview can conflate the two methods' contracts.",
+      "suggestion": "In the add_class() method docblock, state its scope explicitly and contrastively: 'add_class only ever adds; it never removes the class attribute. Adding a class that is already present is a no-op. (Removing the final class via remove_class is what empties and drops the class attribute.)' Keeping each method's docblock self-contained prevents adjacent-behavior bleed."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::get_updated_html() / 'Design and limitations' attribute-quoting note",
+      "problem": "The note that 'all attribute updates store their values as double-quoted strings, meaning attributes with single-quoted or unquoted values appear with double-quotes' (line 328) could lead a subject to fear that unrelated unquoted attributes on an edited tag get re-quoted. The unquoted-attributes case shows they do not — only the attribute the API writes is re-quoted; untouched attributes keep their original bytes. The two facts are stated far apart.",
+      "suggestion": "Co-locate the guarantee: in the attribute-quoting note add one clause — 'This applies only to attributes the API actually writes; attributes left untouched (including other unquoted or single-quoted attributes on the same tag) are preserved byte-for-byte.' This generalizes the byte-preservation contract and removes ambiguity about whether one edit reformats a whole tag."
+    }
+  ]
+}

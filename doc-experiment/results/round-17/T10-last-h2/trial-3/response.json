@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function creates a WP_HTML_Tag_Processor instance and scans through the entire document with next_tag() looking for H2 tags. For each H2 found, it sets a bookmark named 'last_h2', which moves the bookmark to the most recently found tag. After scanning completes, it seeks back to the last H2 tag and adds the 'final-section' class using add_class(). If no H2 tags are found, the document is returned unchanged. The Tag Processor automatically excludes tags inside comments from matching, satisfying the requirement that H2s in comments don't count.",
+  "confidence": 92
+}

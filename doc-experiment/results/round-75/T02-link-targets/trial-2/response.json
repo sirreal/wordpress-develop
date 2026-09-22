@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` because the task requires byte-preserving attribute edits on flat tag openers. The function scans for `A` tags with `next_tag( array( 'tag_name' => 'a' ) )`, checks `get_attribute( 'href' )` so empty-string and boolean `href` count as present, then overwrites `target` with `set_attribute( 'target', '_blank' )` and returns `get_updated_html()`.",
+  "confidence": 98
+}

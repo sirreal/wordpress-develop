@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose `WP_HTML_Tag_Processor` for a flat attribute-editing task. Every API call is documented in the rendered docs: constructor, `next_tag()`, `get_attribute_names_with_prefix()`, `remove_attribute()`, and `get_updated_html()`. The loop is idiomatic and handles case-insensitive attribute names, comments, no matches, and byte-preserving output through the documented API."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Equivalent to the reference approach. Uses the documented Tag Processor scan/edit/readback pattern, with no undocumented calls or `_doing_it_wrong` records. The `null` guard is harmless; inside a successful `next_tag()` loop the documented return is an array, possibly empty."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Equivalent to trial 2 and the reference. It uses the documented prefix helper rather than manual attribute parsing, removes each returned normalized attribute name, and returns `get_updated_html()` so untouched bytes are preserved."
+    }
+  ],
+  "failure_analysis": "No failed hidden cases across the three trials: all passed 7/7. The docs did well on this task because the `Which processor should I use?` section explicitly says the Tag Processor is for flat attribute/class edits and byte-precise preservation, while the HTML Processor is for structure. The `Usage` and `Finding tags` sections show the linear `while ( next_tag() )` pattern. The `get_attribute_names_with_prefix()` section directly documents the needed helper, including lowercase returned names, case-insensitive matching, and `null` only when no tag opener is matched. The `remove_attribute()` method exists and the broader attribute-editing section says removal is safe even if the attribute is absent. The `get_updated_html()` section clearly says this is the readback method after queued edits and that untouched bytes are preserved. Near-misses: `remove_attribute()` itself is terse, and the empty-array-vs-null behavior for prefix lookups with no matching attributes is only implicit from the return description rather than shown in an example.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Tag_Processor::get_attribute_names_with_prefix()` docblock",
+      "problem": "The docs show a tag with matching prefixed attributes and a no-current-tag case returning `null`, but do not show the current-tag/no-matching-prefix case.",
+      "suggestion": "Add a short example or sentence: when matched on a tag opener, the method returns an array of matching names, which may be empty; it returns `null` only when there is no currently matched tag opener."
+    },
+    {
+      "location": "`WP_HTML_Tag_Processor::remove_attribute()` docblock",
+      "problem": "The method section does not state that attribute-name matching is ASCII case-insensitive, even though prefix lookup returns lowercase names and source attributes may be uppercase or mixed case.",
+      "suggestion": "Add a contract note that `remove_attribute()` compares attribute names ASCII case-insensitively and accepts normalized lowercase names returned by `get_attribute_names_with_prefix()`."
+    },
+    {
+      "location": "Attribute-removal/readback documentation near `remove_attribute()` and `get_updated_html()`",
+      "problem": "Whitespace preservation after removing an attribute is explained indirectly by byte-preservation/future-pruning notes, not at the removal method where users are likely to look.",
+      "suggestion": "Add a concise note that removing an attribute removes that attribute’s source span but does not reformat the surrounding tag; callers should not expect whitespace normalization from `get_updated_html()`."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This implementation uses WP_HTML_Tag_Processor to find all H2 tags linearly. It maintains a bookmark named \"last_h2\" that gets updated each time an H2 opening tag is found, effectively tracking the position of the last H2 in the document. After scanning completes, if a bookmark was created, the processor seeks to that position and adds the \"final-section\" class using the add_class() method. Comments are automatically ignored since the Tag Processor doesn't match tag-like content inside comments. The get_updated_html() method returns the modified HTML with all other bytes preserved.",
+  "confidence": 92
+}

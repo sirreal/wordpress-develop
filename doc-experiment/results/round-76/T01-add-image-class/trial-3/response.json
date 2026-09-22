@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan the document linearly and match only real IMG tag openers with case-insensitive tag-name matching via next_tag( 'img' ); then add_class( 'wp-image' ) appends the class without disturbing existing class order or other bytes, and get_updated_html() returns the minimally edited document exactly as preserved by the documented HTML API.",
+  "confidence": 98
+}

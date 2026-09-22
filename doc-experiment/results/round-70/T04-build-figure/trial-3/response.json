@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::create_fragment()` factory to start from a literal figure template that already has `src` and `alt` in the required order, then `next_tag('img')` plus `set_attribute()` to safely encode the URL and alt text, and finally `next_token()` with `get_token_type()` and `set_modifiable_text()` to replace the caption placeholder text without hand-escaping.",
+  "confidence": 97
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the fragment in BODY context, then `next_tag( 'H1' )` plus `get_current_depth()` to bound a subtree walk. Inside that walk I appended only `#text` tokens via `get_modifiable_text()`, which the docs say is already decoded for ordinary text nodes, and I returned `null` only when no `H1` was found.",
+  "confidence": 96
+}

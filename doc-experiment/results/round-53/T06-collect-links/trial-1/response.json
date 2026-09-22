@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()` so I could respect structure while collecting only ordinary `#text` tokens inside each `<a>` subtree. Link filtering uses `get_tag()`, `is_tag_closer()`, `get_attribute('href')`, `get_current_depth()`, and `get_modifiable_text()`; `href` values are accepted only when the documented API returns a string, which excludes boolean-style `href` attributes without a value.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Tag_Processor` to scan the input linearly for real `img` tags and `add_class( 'wp-image' )` to update each matched tag while preserving the rest of the document byte-for-byte. `next_tag()` is case-insensitive for tag names and ignores tags inside comments, and `get_updated_html()` returns the original HTML with only the queued attribute edits applied.",
+  "confidence": 98
+}

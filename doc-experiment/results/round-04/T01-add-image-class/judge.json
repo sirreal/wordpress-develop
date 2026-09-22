@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical to the canonical reference in substance. Uses WP_HTML_Tag_Processor (correct processor for a flat attribute edit; the reference does the same), walks tags with while(next_tag(array('tag_name'=>'img'))) — the exact idiom shown at tag-processor doc line 50 — applies add_class('wp-image') (documented line 2168, preservation of existing classes covered lines 162-185), and returns get_updated_html() (documented line 2232). All 8 hidden cases pass; no _doing_it_wrong records. Comment-skipping, unquoted attributes, incomplete-tag-at-end, and case-insensitive IMG matching are all handled by the library and correctly understood. Explanation is accurate."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same code as trial-1 (variable renamed to $processor). Correct processor choice, idiomatic token walk, all documented methods, 8/8 pass, no doing_it_wrong. Explanation is accurate and even notes the byte-for-byte preservation guarantee documented at tag-processor line 294."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Code is identical to trial-2 and passes 8/8 with no doing_it_wrong. Minor prose near-miss: the explanation claims add_class 'safely handles both new and existing classes by appending without duplication.' The idempotency claim is actually correct behavior (verified: add_class('wp-image') on an element already having wp-image does not duplicate), but neither markdown file documents this, so the subject was asserting un-documented behavior it could not have read. No effect on this task; docked 1 point for stating an unverified-from-docs guarantee."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials pass 8/8 on every case (simple, multiple, existing-classes, uppercase-tag, inside-comment-ignored, no-images, unquoted-attributes, incomplete-tag-at-end), with zero _doing_it_wrong and zero trigger_error records. This is the 'smoke' task and the docs supported it cleanly.\n\nWhat the docs did well: (1) The next_tag() query table in the Tag Processor doc (lines 49-53) shows the exact array('tag_name'=>'img') form, plus the bare-string alternative, so subjects picked the matching idiom immediately. (2) add_class()'s relationship to existing classes is well covered — lines 162-185 and the byte-difference-minimization note at line 294 explain that add_class preserves whitespace and class ordering, which is why the existing-classes case passed without anyone reaching for set_attribute('class', ...). (3) get_updated_html() is clearly positioned as the way to read output after edits (line 2232; cross-referenced repeatedly from the Processor doc's serialize_token/serialize sections at lines 1031-1032), so no subject mis-reached for serialize(). (4) The implicit edge cases the task hinged on — comments not being parsed as tags, case-insensitive tag matching, double-quoting of attribute output (line 294), and graceful handling of the truncated trailing tag — are all behaviors the library provides automatically and that no subject had to special-case.\n\nNear-miss in the explanations: trial-3 asserts add_class appends 'without duplication.' That happens to be true (verified by probe: re-adding an existing class is a no-op), but it is NOT stated anywhere in either rendered doc. A subject reasoning in the opposite direction (assuming add_class blindly appends and could double a class) would have been equally unguided. Worth documenting since duplicate-class behavior is a common real-world concern even though this task never exercises it.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor::add_class()",
+      "problem": "The docblock describes that add_class preserves existing class whitespace and ordering, but does not state what happens when the class being added is already present on the element. A subject in trial-3 asserted (correctly, but unsupported by the docs) that it appends 'without duplication'; the docs give no basis for that, so a reader could just as reasonably assume the class gets duplicated.",
+      "suggestion": "Add one sentence to add_class() stating its idempotency explicitly, e.g. 'If the class name is already present on the tag, add_class() leaves the class attribute unchanged (it will not add a duplicate).' A two-line example showing add_class on an element that already has the class would make this concrete."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — next_tag() / overview",
+      "problem": "Tag-name matching is case-insensitive (so '<IMG>' matches a query of 'img' and the original casing is preserved in output), but this is never stated. Every subject relied on it implicitly for the uppercase-tag case and got lucky. Subjects had to infer it rather than read it.",
+      "suggestion": "In the next_tag() $tag_name parameter description (or the overview), state that tag-name matching is ASCII case-insensitive and that the original tag-name casing in the source is preserved in get_updated_html() output. This also reassures readers that querying lowercase 'img' is correct regardless of source casing."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor — overview / 'what is and isn't a tag'",
+      "problem": "The task depends on text inside HTML comments (<!-- <img ...> -->) NOT being treated as tags, and on a truncated trailing tag (<img src=\"a.jpg with no closing >) being left untouched. The doc mentions comments only obliquely (get_modifiable_text / bogus-comment discussion) and never plainly states that next_tag() skips over comment, CDATA, and text content, nor what happens at an incomplete tag at end-of-input.",
+      "suggestion": "Add a short 'What next_tag() matches' note to the overview: next_tag() only stops on real tag tokens; content inside comments, CDATA, script/style raw text, and plain text is never matched, and a truncated tag at the end of input is treated as incomplete and is not matched or modified. This directly explains the inside-comment-ignored and incomplete-tag-at-end behaviors that subjects had to guess."
+    }
+  ]
+}

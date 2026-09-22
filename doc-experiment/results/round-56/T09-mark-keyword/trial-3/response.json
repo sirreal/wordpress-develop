@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a body fragment, then walked tokens with next_token(), wrapping only ordinary #text tokens whose decoded text contains the case-sensitive keyword. Each visited token is emitted with serialize_token() so the output stays normalized, and I fall back to WP_HTML_Processor::normalize() if the processor cannot be created or aborts on unsupported markup.",
+  "confidence": 89
+}

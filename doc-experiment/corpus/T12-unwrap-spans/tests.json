@@ -1,0 +1,62 @@
+{
+    "id": "T12-unwrap-spans",
+    "title": "Remove span wrappers",
+    "difficulty": "advanced",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "serialization",
+    "processor": "html",
+    "function": "unwrap_spans",
+    "cases": [
+        {
+            "id": "simple",
+            "args": [
+                "<p>a <span class=\"x\">b <em>c</em></span> d</p>"
+            ],
+            "expected": "<p>a b <em>c</em> d</p>"
+        },
+        {
+            "id": "nested-spans",
+            "args": [
+                "<p><span>outer <span>inner</span> tail</span></p>"
+            ],
+            "expected": "<p>outer inner tail</p>"
+        },
+        {
+            "id": "no-spans-normalized-passthrough",
+            "args": [
+                "<div><p>plain &AMP; simple"
+            ],
+            "expected": "<div><p>plain &amp; simple</p></div>"
+        },
+        {
+            "id": "attributes-discarded",
+            "args": [
+                "<span id=\"a\" style=\"color:red\" data-x=\"1\">styled</span>"
+            ],
+            "expected": "styled"
+        },
+        {
+            "id": "adjacent-spans",
+            "args": [
+                "<p><span>a</span><span>b</span></p>"
+            ],
+            "expected": "<p>ab</p>"
+        },
+        {
+            "id": "span-with-block-content",
+            "args": [
+                "<div><span>before <img src=\"i.png\"> after</span></div>"
+            ],
+            "expected": "<div>before <img src=\"i.png\"> after</div>"
+        },
+        {
+            "id": "unclosed-span",
+            "args": [
+                "<p><span class=\"x\">runs to end"
+            ],
+            "expected": "<p>runs to end</p>"
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor to scan only `a` tag openers, checked `href` with `get_attribute()` so empty-string and boolean-style `href` both count as present, and then overwrote `target` via `set_attribute()`. The processor\u2019s `get_updated_html()` preserves all untouched bytes exactly while applying only the attribute edits.",
+  "confidence": 97
+}

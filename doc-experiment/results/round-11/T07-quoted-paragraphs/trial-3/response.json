@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The solution uses WP_HTML_Processor to parse the HTML fragment and iterate through all P tags. For each P tag found, it retrieves the breadcrumbs (the full ancestor path from root to the current element) and checks if \"BLOCKQUOTE\" appears anywhere in that array. If it does, the \"quoted\" class is added to the P element. Finally, it returns the modified HTML using get_updated_html(), which preserves all other content byte-for-byte.",
+  "confidence": 92
+}

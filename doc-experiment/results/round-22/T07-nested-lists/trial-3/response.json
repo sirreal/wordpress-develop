@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body-fragment with structural awareness, scans tag openers with `next_tag()`, checks each `UL`/`OL` element\u2019s `get_breadcrumbs()` for any `UL` or `OL` ancestor, and applies `add_class( 'nested-list' )` only to those nested lists. The final HTML is returned with `get_updated_html()`, and the function falls back to the original input if parsing stopped on incomplete or unsupported markup via `paused_at_incomplete_token()` or `get_last_error()`.",
+  "confidence": 89
+}

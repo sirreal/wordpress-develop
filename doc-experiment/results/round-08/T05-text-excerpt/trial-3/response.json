@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and iterate through all tokens. For each text node (#text token type), we retrieve the decoded text using get_modifiable_text() (which automatically decodes character references per the docs). We accumulate the text and use mb_substr() with UTF-8 encoding to safely truncate to the exact number of code points without cutting multi-byte characters. The function returns an empty string for zero or negative limits, and excludes non-text-node content like script/style contents automatically since they're not visited as text nodes.",
+  "confidence": 72
+}

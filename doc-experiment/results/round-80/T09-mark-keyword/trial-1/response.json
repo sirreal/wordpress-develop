@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor fragment parser to walk tokens in body context, then rewrote the fragment token-by-token with `serialize_token()` so the output stays normalized. The function only wraps ordinary `#text` tokens whose decoded text contains the keyword, which avoids matching comments, attributes, split text, and special-element opener text such as `TITLE`, `TEXTAREA`, `SCRIPT`, and `STYLE` contents.",
+  "confidence": 95
+}

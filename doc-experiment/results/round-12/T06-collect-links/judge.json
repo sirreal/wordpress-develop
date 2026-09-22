@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (WP_HTML_Processor::create_fragment) for structural text collection. Every method called is documented: create_fragment, next_tag (array form), is_tag_closer, get_attribute, get_current_depth, next_token, get_token_type, get_modifiable_text. Idiomatic depth-bounded subtree walk using the documented recipe: records depth at the A opener, breaks when current_depth < link_depth (the < break form the get_current_depth() docs endorse). Correctly handles the edge cases the docs describe: null get_attribute => skip (no-href), true for valueless href, decoded attribute/text, empty text for image-only link, and unclosed-link via HTML Processor's guaranteed closers. The explicit is_tag_closer() skip is redundant because next_tag() with a tag_name query visits openers only by default (tag_closers defaults to skip), but it is harmless and not wrong. Passed 8/8. Minor deduction only for the unnecessary is_tag_closer guard."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice. Cleanest of the three: single depth-bounded walk using get_current_depth() >= depth_inside_a as the continue condition, which matches the documented canonical recipe verbatim (the >= form the next_token() and get_current_depth() sections repeatedly stress). No redundant is_tag_closer check (correctly relies on next_tag defaulting to openers-only). All methods documented, no hallucinations. Handles every edge case: null vs true href, decoded values, empty image-link text, unclosed link. Passed 8/8. Highest-quality idiomatic use."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 72,
+      "hallucinated_methods": [],
+      "notes": "Correct processor and no hallucinated/undocumented methods (create_fragment, next_tag, is_tag_closer, get_attribute, get_current_depth, next_token, get_token_type, get_modifiable_text all documented). The structure is sound but it used the WRONG depth comparison: get_current_depth() > $depth_at_a (strict greater-than) instead of >=. The docs explicitly and repeatedly warn against exactly this (get_current_depth and next_token sections: 'a > guard exits at the first child closer and drops everything after it'). For '<a href=\"/b\"><em>second</em> link</a>', the A opener is depth 4; </em> reports depth 4 (equal, not greater), so the loop terminates at </em> and drops the trailing ' link' text — producing text='second'. Failed the 'simple' case 1/8 fail. This is a documented-pattern misuse, not a hallucination: it ignored the prominent >= guidance. Edge cases that happened to have flat (non-nested) text still passed."
+    }
+  ],
+  "failure_analysis": "One hidden case failed across all trials: trial-3 / 'simple' case. Input: '<p><a href=\\\"/a\\\">First</a> and <a href=\\\"/b\\\"><em>second</em> link</a></p>'. Expected second link text 'second link'; got 'second'. \\n\\nMisconception: trial-3 bounded its text-collection walk with a STRICT depth comparison, `while ( next_token() && get_current_depth() > $depth_at_a )`, where $depth_at_a is the depth recorded at the A opener. The second link contains nested markup (`<em>second</em> link`). Verified by probe: the A opener reports depth 4; the EM opener is 5; the inner text 'second' is 6; the `</em>` closer reports depth 4 — EQUAL to the A opener's depth, not greater. Because the guard is strict `> 4`, the loop stops the instant it reaches `</em>` (depth 4) and never visits the subsequent ' ' and 'link' text nodes (depth 5). Trials 1 and 2 used the correct forms (trial-1: break when depth < link_depth; trial-2: continue while depth >= depth_inside_a) and passed. The first link ('First') passed for trial-3 only because it had no nested element, so the A closer was the first depth-4 token and no text was lost.\\n\\nDocumentation responsibility: this is a DOC-FOLLOWED-CORRECTLY-BY-2-OF-3 situation, not a doc gap in content. The html-processor.md `get_current_depth()` and `next_token()` sections are unusually thorough here: both contain the exact LI/STRONG worked example, state 'a child element's closing token reports a depth EQUAL to the matched ancestor's opening-token depth ... that equality is precisely why a subtree walk's guard must be >=', and explicitly call out that '> would end this walk at the first nested closer and silently drop the trailing text.' Trial-3 simply did not apply this guidance — it is the single most-emphasized pitfall in the docs and it still got missed. The remaining doc weakness is one of PLACEMENT/SALIENCE rather than absence: the >= rule lives only in the long prose of get_current_depth() and the next_token() example comments; the code example bound to the most-skimmable spot (the next_token() 'Collect the text content of the first LI' example) uses `>=`, but a reader who copies the shorter `> $depth` break-form mental model from the term-collection DT example (which uses a different closer-driven shape) can arrive at a strict comparison. All other failed-case categories (null/true href, decoded text/href, empty image text, unclosed input) passed in every trial, showing those doc sections (get_attribute's true/null semantics, get_modifiable_text decoding, next_token guaranteed-closers for malformed input) were effective.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_current_depth() and next_token() — subtree-walk guidance",
+      "problem": "The critical '>= not >' guard rule is correct and present but buried in long prose plus example comments. The one mistake that actually broke a trial (strict > drops text after the first nested child's closer) is exactly the rule these sections spend the most words on, yet a reader still chose >. The rule is stated discursively rather than as a copy-paste-safe canonical snippet placed where it can't be missed.",
+      "suggestion": "Add a short, visually distinct 'Canonical subtree-text walk' block (one ~5-line snippet) near the TOP of both get_current_depth() and next_token(), with an inline one-line comment 'use >= (or break on < depth); > drops text after a nested child's closer.' Keeping the single blessed form adjacent to the method signature reduces the chance a skimmer reconstructs a strict-comparison variant."
+    },
+    {
+      "location": "WP_HTML_Processor::next_tag() — default tag_closers behavior",
+      "problem": "Two of three trials added a defensive `if ( is_tag_closer() ) continue;` after next_tag('A'). The next_tag() docblock lists tag_closers ('visit'/'skip', default skip) only inside the dense $query parameter blob, so subjects could not confirm that a plain tag_name query never stops on closers and added a redundant guard. Redundant code is a (mild) idiomatic-quality cost.",
+      "suggestion": "State explicitly in the next_tag() description (not only the parameter table) that next_tag() visits tag OPENERS only by default, and that is_tag_closer() can only be true after next_tag() when tag_closers => 'visit' is requested. A one-sentence note prevents defensive dead code."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() / next_token() — multi-#text accumulation",
+      "problem": "The task hinges on an element's text being spread across several consecutive #text tokens (the ' ' and 'link' siblings around <em>). next_token() does state 'An element's text content may be split across several consecutive #text tokens', but get_modifiable_text() itself (the method subjects actually call) does not cross-reference this, so a reader landing on get_modifiable_text() alone might assume one token holds all text.",
+      "suggestion": "In get_modifiable_text(), add a one-line note: 'A single element's text may span multiple consecutive #text tokens; concatenate while walking rather than reading one token.' with an @see to next_token(). Reinforces the accumulate-don't-assume pattern at the point of use."
+    }
+  ]
+}

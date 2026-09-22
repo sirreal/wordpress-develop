@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML fragment in body context. It iterates with next_tag('A') to find each A element, then calls get_attribute('href') to check for and retrieve the href value (null means absent, so those are skipped; true or string values are included as-is per spec). For each qualifying A tag, get_current_depth() records the nesting depth at the opener. Then next_token() iterates through all subsequent tokens while depth remains at or above that level, accumulating get_modifiable_text() for every '#text' token encountered \u2014 exactly the pattern shown in the next_token() documentation example for collecting text content. After the inner loop exits (on the A's closing token whose depth is lower), the link entry is appended. This correctly handles text split across multiple text nodes and ignores nested element markup.",
+  "confidence": 92
+}

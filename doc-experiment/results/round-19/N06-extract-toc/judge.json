@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct `WP_HTML_Processor::create_fragment()` path, checked for `null`, and only called methods documented in the rendered files: `next_tag`, `is_tag_closer`, `get_tag`, `get_current_depth`, `next_token`, `get_token_type`, and `get_modifiable_text`. The depth-bounded subtree walk matches the documented pattern and handles decoded text and implied heading closes. Minor deductions: the `is_tag_closer()` guard after plain `next_tag()` is unnecessary because the docs say closers are skipped by default, and appending `get_modifiable_text()` for every opening tag is broad but harmless because ordinary element tokens return an empty string."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor factory and only documented methods: `create_fragment`, `next_token`, `get_token_type`, `get_tag`, `is_tag_closer`, and `get_modifiable_text`. The single token-walk state machine follows the docs' recommended closer-driven pattern for repeated regions, and it naturally handles empty headings, decoded text, special element text carried on opener tokens, and virtual closers. Tiny deduction only for relying on any heading closer to flush rather than explicitly tracking depth or the matching heading token."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the correct processor and only documented methods: `create_fragment`, `next_token`, `get_token_name`, `get_token_type`, `is_tag_closer`, and `get_modifiable_text`. The state-machine walk is idiomatic and uses matching heading closers, which aligns with the docs' statement that virtual closers are visited. It also benefits from documented decoded `#text` semantics and special-element modifiable text. Minor deduction: it does not use depth or breadcrumbs, so its correctness depends more tightly on closer-token behavior than trial 1's bounded walk."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases with no `_doing_it_wrong` records, so there are no failed hidden cases to attribute to a documentation gap. The docs did well on the critical concepts for this task: `html-tag-processor.md` explicitly says to use the HTML Processor when structure matters, including collecting element text and handling implied or missing closing tags; `html-processor.md` documents `create_fragment()` for body fragments; `next_token()` explains that text may be split across multiple `#text` tokens, that one cursor advances through the document, and that virtual closing tokens are visited; `get_current_depth()` gives the exact depth-bounded subtree recipe with `>=`; and `get_modifiable_text()` states that `#text` is decoded while raw-text sections are carried on the element token. The near miss is visible across all trials: each candidate appended `get_modifiable_text()` on non-closing tag tokens to account for SCRIPT/STYLE/TITLE/TEXTAREA-like content. That is defensible from the docs, but the general recipe for 'element text content' is scattered across `next_token()` and `get_modifiable_text()`, so less capable models had to synthesize it themselves. Trial 1 also used a nested `next_tag()` plus bounded `next_token()` loop even though `next_token()` warns against nested walk loops for repeated regions; it works here because headings cannot contain other headings in the parsed tree and virtual closers are visited before the next heading opener, but the docs could make that safe/unsafe distinction more explicit.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor::next_token()` and/or `WP_HTML_Tag_Processor::get_modifiable_text()` docs",
+      "problem": "The general pattern for collecting an element's rendered text is split across several passages: accumulate `#text`, also read modifiable text from raw-text/RCDATA element opener tokens, stop at the element boundary, and do not decode again.",
+      "suggestion": "Add a generic 'collect text content for the current element' recipe that names the contract rather than a task-specific heading example: record opener depth, walk tokens while inside the element, append decoded `#text`, append opener-carried modifiable text only for non-closing tokens that actually have it, and explain raw vs decoded output."
+    },
+    {
+      "location": "`WP_HTML_Processor::next_token()` warning about nested walks",
+      "problem": "The docs warn that nested walk loops can skip tokens, but they also show depth-bounded scans after a matched opener. The boundary between a safe bounded scan and an unsafe repeated nested extraction is subtle.",
+      "suggestion": "Clarify that a bounded one-off scan from an opener is safe when the caller intentionally resumes after that region, while repeated sibling extraction is usually better as a single state-machine loop unless the skipped boundary token is understood."
+    },
+    {
+      "location": "`get_token_name()`, `get_tag()`, and `is_tag_closer()` docs",
+      "problem": "The docs describe these methods separately, but candidates had to infer the exact values across openers, text nodes, explicit closers, and virtual closers.",
+      "suggestion": "Add a compact table showing token type, token name, tag value, closer flag, and depth for a small malformed fragment such as `<h2>One<h3>Two`, including the virtual closer tokens."
+    }
+  ]
+}

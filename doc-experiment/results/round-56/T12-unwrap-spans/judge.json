@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and the documented token-rewrite pattern: create_fragment(), next_token(), get_token_type()/get_tag(), serialize_token(), and get_last_error() are all in the rendered docs. No _doing_it_wrong records. Minor issue: on parser error it falls back to normalize($html) ?? $html, which can discard the emitted rewrite and return non-normalized original input."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 95,
+      "hallucinated_methods": [],
+      "notes": "All called APIs are documented, including is_tag_closer(), and it uses WP_HTML_Processor with serialize_token() correctly. The span_depth counter is unnecessary and its explanation implies nested spans need special depth tracking, although skipping every SPAN tag token already handles openers and closers. Same questionable normalize/raw fallback after a rewrite loop as trial-1."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Most direct implementation of the documented pattern: body-fragment HTML Processor, one next_token() loop, skip SPAN tokens by get_token_name(), append serialize_token() for everything else. All APIs are documented and there were no misuse records."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 7 frozen cases, so there were no failed hidden cases to attribute to documentation gaps. The docs worked well here: html-tag-processor.md's 'Which processor should I use?' points users to WP_HTML_Processor for normalized output and missing closing tags; html-processor.md's 'Recipe: rewrite while serializing tokens' and serialize_token() section explicitly describe building output by walking tokens, skipping tokens to remove them, and appending serialize_token(); next_token() explains that closing tokens are visited even for implicit and end-of-input closers. Near misses: trials 1 and 2 used normalize($html) ?? $html as an error fallback after a rewrite loop, a pattern the serialize_token() docs warn can abandon emitted changes. Trial 2 also added unused span-depth state, suggesting the docs could more explicitly distinguish removing wrapper tokens from removing an entire subtree.",
+  "doc_gaps": [
+    {
+      "location": "/tmp/html-api-docs-eval/round-56/html-processor.md:5 Overview",
+      "problem": "The future-direction bullet about 'Unwrapping a tag' can imply no unwrap-like operation is possible today, even though streaming token rewrites can remove element tokens while preserving children.",
+      "suggestion": "Clarify that there is no high-level DOM mutation API for unwrap yet, but token-by-token serialization supports simple streaming rewrites that skip selected tokens."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-56/html-processor.md:1205 serialize_token()",
+      "problem": "The SUP example is good, but it does not name the general distinction between skipping an element's own tokens and skipping its whole subtree.",
+      "suggestion": "Add a short note: skipping only matching opener/closer tokens preserves child tokens because the walk continues through them; use depth or breadcrumb state only when the desired operation removes or scopes a whole subtree."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-56/html-processor.md:139 Recipe: rewrite while serializing tokens",
+      "problem": "Fallback guidance lists possible policies but does not make it obvious which policies still satisfy a normalized string-rewrite contract.",
+      "suggestion": "Add a compact decision table for create_fragment() returning null, get_last_error(), and paused_at_incomplete_token(), explicitly noting that returning raw input or normalize($html) abandons any emitted rewrite."
+    },
+    {
+      "location": "/tmp/html-api-docs-eval/round-56/html-processor.md:1984 get_token_name()",
+      "problem": "The method docs say tag matches return uppercase tag names, but do not directly state that opener and closer tokens report the same token name during next_token() walks.",
+      "suggestion": "Cross-reference is_tag_closer() and state that callers should test it only when they need to distinguish openers from closers; otherwise a token-name check intentionally matches both."
+    }
+  ]
+}

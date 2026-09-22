@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment and documented token APIs only: next_token, get_token_type, get_tag, is_tag_closer, get_attribute, get_current_depth, and get_modifiable_text. It chose the right processor, filtered href with is_string(), and accumulated only #text. Minor idiom issue: the state machine has redundant depth-drop checks and is less clear than the docs' closer-driven pattern, but it did not misuse the API."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical approach: create_fragment, next_tag('A') via documented array query, depth-bounded next_token walk, #text filtering, and get_modifiable_text for decoded text. Attribute semantics are handled correctly with is_string(). Only small caveat is the nested next_token loop inside a repeated next_tag scan; it is safe here, but the docs warn that repeated-region extraction often benefits from a single explicit-state token loop."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "Used the correct HTML Processor and only documented methods. The single-pass next_token state machine follows the docs' guidance for repeated regions well, flushes on A closers and EOF, filters href with is_string(), and reads decoded ordinary text only from #text tokens. No hallucinated APIs or runtime misuse."
+    }
+  ],
+  "failure_analysis": "All three trials passed all 8 hidden cases, with no _doing_it_wrong or trigger_error records. The docs succeeded on the key concepts: the processor-selection guidance points structural text extraction to WP_HTML_Processor; get_attribute documents string|true|null and decoded values, which led all trials to exclude missing/valueless hrefs and avoid double-decoding; next_token/get_current_depth explain subtree walking and virtual closers, which covered the unclosed-link case; and get_modifiable_text warns to read ordinary DOM-style text only from #text tokens, which avoided including markup, comments, or img alt text. The only near-miss is that both the canonical/reference style and trial-2 use a nested depth-bounded walk under a repeated next_tag search, while the docs also warn about one shared cursor. It works for this shape, but the distinction between safe subtree scans and unsafe nested repeated-region scans could be sharper.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::get_attribute() / inherited get_attribute() docs",
+      "problem": "The method docs show missing attributes and valueless boolean attributes, but the empty-string attribute case is less prominent than the overview text.",
+      "suggestion": "Add a compact return-value table or assertions distinguishing attribute missing => null, attribute present without value => true, and attribute present with an empty quoted value => ''. Recommend is_string() when callers require an actual string value."
+    },
+    {
+      "location": "WP_HTML_Processor::next_token() and get_current_depth() docs",
+      "problem": "The docs contain both a depth-bounded subtree pattern and a warning against nested loops for repeated regions, but the boundary between acceptable and risky uses is subtle.",
+      "suggestion": "Add a short general note explaining where the cursor is left after a bounded subtree walk, and when repeated extraction should instead use one next_token loop with explicit state."
+    },
+    {
+      "location": "WP_HTML_Processor::get_modifiable_text() text-extraction guidance",
+      "problem": "The docs explain #text filtering and special elements well, but ordinary text-content extraction could state more explicitly that descendant attributes such as img alt and comments do not contribute.",
+      "suggestion": "Add a general DOM-style textContent note: concatenate only descendant #text tokens; attributes, comments, processing instructions, and special-element opener text are excluded unless the caller explicitly opts into them."
+    }
+  ]
+}

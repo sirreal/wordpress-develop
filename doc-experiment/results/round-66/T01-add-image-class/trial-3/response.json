@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` to scan the HTML linearly, matching only real `img` tag openers with case-insensitive tag-name matching, so comments and tag-like text are ignored. For each match, `add_class( 'wp-image' )` appends the class without disturbing existing classes, and `get_updated_html()` returns the original bytes with only those attribute edits applied.",
+  "confidence": 98
+}

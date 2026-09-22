@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for a flat tag scan, which is sufficient because the task only needs the last `H2` opener by document order. It repeatedly finds `H2` tags with `next_tag()`, moves a single bookmark with `set_bookmark()` to remember the most recent match, seeks back to that final match with `seek()`, adds the class via `add_class()`, and returns the edited HTML with `get_updated_html()`.",
+  "confidence": 95
+}

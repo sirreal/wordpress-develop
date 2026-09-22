@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_fragment() to parse the HTML and locate the first TABLE element. It then uses next_token() to iterate through all tokens within the table, using get_current_depth() to know when it has exited the table. The implementation tracks when entering and exiting cells (TD/TH tags) and rows (TR tags), collecting text content from #text nodes using get_modifiable_text() which automatically handles character reference decoding. By monitoring depth and token types, it naturally handles omitted closing tags as the HTML specification requires.",
+  "confidence": 42
+}

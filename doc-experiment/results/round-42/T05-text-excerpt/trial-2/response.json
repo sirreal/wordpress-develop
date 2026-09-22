@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the HTML fragment with tree awareness, then walks all tokens with `next_token()`, appending decoded text from ordinary `#text` tokens and from `TITLE`/`TEXTAREA` opening tags via `get_modifiable_text()`, while excluding raw-text elements like `SCRIPT` and `STYLE`. It truncates incrementally with `mb_strlen()` and `mb_substr()` in UTF-8 so the result never splits a multi-byte character.",
+  "confidence": 91
+}

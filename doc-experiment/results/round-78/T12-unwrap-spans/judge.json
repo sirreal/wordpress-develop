@@ -1,0 +1,45 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the right class (`WP_HTML_Processor::create_fragment()`), documented methods only, and the intended token-serialization pattern: walk with `next_token()`, skip `SPAN` tokens, append `serialize_token()`. It also handled virtual closing tokens for unclosed spans. Minor deduction: on processor creation failure or parser error it returns raw input, which the docs warn is neither normalized nor the accumulated rewrite."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 75,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor and only documented methods (`create_fragment`, `normalize`, `next_token`, `get_token_type`, `get_tag`, `is_tag_closer`, `serialize_token`, `get_last_error`). The API misuse was semantic: it kept a span-depth counter and skipped every token while inside a span, which prunes the span subtree instead of unwrapping only the start/end tag tokens. This contradicts the documented `serialize_token()` wrapper-removal pattern."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Used the right processor, documented APIs only, and the canonical token rewrite pattern: skip `SPAN` tag tokens and serialize everything else. Minor deduction: fallback to `normalize( $html )` after a rewrite would discard emitted changes if reached, though it is isolated to error handling."
+    }
+  ],
+  "failure_analysis": "Only trial-2 failed hidden cases. The common misconception was interpreting “remove every element” as “skip the whole subtree rooted at that element.” In `simple`, `attributes-discarded`, `adjacent-spans`, and `span-with-block-content`, the candidate skipped text, inline tags, and void tags that were descendants of `SPAN`, producing empty or content-missing output. In `nested-spans`, the depth counter amplified the same mistake by suppressing all nested contents. In `unclosed-span`, the HTML Processor did provide a virtual closing token as documented, but the candidate kept suppressing contents until that virtual closer, so the text before end-of-input was deleted.\n\nThe relevant documentation did include the key pattern under `html-processor.md` / `serialize_token()`: walking every token and concatenating `serialize_token()` reconstructs normalized HTML, and the example “Remove every SUP element but keep its contents” skips only matching tag tokens. That passage should have been enough for trials 1 and 3. The doc weakness is that nearby wording like “skip tokens to remove them” and the separate depth/subtree recipes do not explicitly contrast unwrapping a wrapper with pruning an element subtree. Trial-2 appears to combine those two ideas incorrectly.",
+  "doc_gaps": [
+    {
+      "location": "html-processor.md `serialize_token()`",
+      "problem": "The section gives a correct wrapper-removal example, but it does not explicitly distinguish “unwrap an element” from “remove an element and all descendants.” The phrase “skip tokens to remove them” can be overgeneralized into depth-based subtree skipping.",
+      "suggestion": "Add a short contrast: to unwrap an element, skip only that element’s opener and closer tokens and continue serializing descendants; to prune a subtree, record depth or breadcrumbs and skip descendants until the boundary."
+    },
+    {
+      "location": "html-processor.md `next_token()` subtree/depth recipes",
+      "problem": "Depth-based walking is documented for subtree scans, but there is no warning that using an `inside_target` flag to gate serializer output will delete descendants.",
+      "suggestion": "Add a serializer-specific caution near the depth examples: depth bounds are for scanning or subtree pruning; for wrapper removal, child text and child elements remain later tokens and should still be serialized."
+    },
+    {
+      "location": "html-processor.md Overview future-direction bullets",
+      "problem": "The overview says future support may include “Unwrapping a tag by removing its parent,” which can imply unwrapping is not currently possible, even though token serialization can perform stream-level wrapper removal.",
+      "suggestion": "Clarify that high-level node-editing helpers are future work, but token-by-token serialization can already implement filters such as dropping selected start/end tag tokens while preserving their contents."
+    },
+    {
+      "location": "html-processor.md rewrite fallback guidance",
+      "problem": "Candidates used raw input or `normalize( $html )` as error fallbacks after a rewrite. The docs explain the consequences, but examples for string-returning rewrites do not show a normalized-output contract with a concrete fallback policy.",
+      "suggestion": "Add a general string-returning rewrite example that chooses and names a fallback policy, emphasizing that raw input and `normalize( $html )` discard token-loop edits and may violate contracts requiring rewritten normalized output."
+    }
+  ]
+}

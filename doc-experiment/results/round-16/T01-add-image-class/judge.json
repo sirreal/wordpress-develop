@@ -1,0 +1,24 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Verbatim reference implementation. Correct processor (Tag Processor) for a flat single-attribute task; tree/breadcrumb machinery would be over-engineering. Idiomatic token walk: while(next_tag('IMG')){add_class('wp-image')} then get_updated_html(). next_tag() string form documented at html-tag-processor.md:59; add_class at :2225; get_updated_html at :2291. All three documented. Explanation correctly cites the documented case-insensitive matching (:937) and 'only real HTML tags can match / never matched or modified' (:939) for the comment edge case. 8/8 pass including uppercase-tag, inside-comment-ignored, unquoted-attributes, incomplete-tag-at-end. No hallucinations, no _doing_it_wrong."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Same logic as trial-1 but uses the array query form next_tag(array('tag_name'=>'img')), explicitly documented at html-tag-processor.md:58 and in the signature at :930/:952. Slightly more verbose but equally idiomatic and arguably the canonical documented form. add_class and get_updated_html both documented. Explanation accurately describes byte-for-byte preservation (matches get_updated_html doc :2299) and comment handling. 8/8 pass. No hallucinations."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Identical implementation to trial-2 (array query form). All methods documented and used idiomatically. Explanation correctly states add_class appends without modifying existing classes (matches :2233 'appended after them; existing classes are never removed, reordered, or re-spaced') and byte-for-byte preservation. 8/8 pass. No hallucinations, no _doing_it_wrong."
+    }
+  ],
+  "failure_analysis": "No failures across any trial: all three trials passed all 8 hidden cases (24/24 case executions). All three converged on the reference implementation (Tag Processor + next_tag/add_class/get_updated_html), differing only in trial-1 using the string query form next_tag('img') vs trials 2-3 using the array form next_tag(array('tag_name'=>'img')). Both forms are first-class documented (html-tag-processor.md:58-59), so there is no quality difference.\\n\\nWhat the docs did well, by edge case:\\n- uppercase-tag (<IMG>): next_tag() docblock line 937 states explicitly 'Tag-name matching is ASCII case-insensitive: a query of `img` matches `<IMG>`... and the source document's original casing is preserved in the output.' Subjects quoted this; it directly produced the expected '<IMG class=...>' with preserved casing.\\n- inside-comment-ignored: next_tag() docblock line 939 states 'Only real HTML tags can match. Tag-like text inside comments... is text, not tags, and is never matched or modified.' All three subjects cited this near-verbatim. No subject was tempted to special-case comments.\\n- existing-classes: add_class() docblock line 2233 precisely covers append-without-reorder: 'the new name is appended after them; existing classes are never removed, reordered, or re-spaced.' Matches the 'photo large wp-image' expectation exactly.\\n- incomplete-tag-at-end: next_tag() docblock line 941 documents truncated input: 'A document that ends in the middle of a tag (truncated input) pauses the processor: the incomplete tag is never matched, so it is never modified.' The truncated '<img src=\\\"a.jpg' was correctly left untouched without subjects needing to reason about it.\\n- unquoted-attributes: handled implicitly because add_class only rewrites the class attribute; get_updated_html() docblock line 2299 guarantees 'Every byte the updates did not touch is returned exactly as it appeared.' The unquoted src=a.jpg width=10 survived byte-for-byte.\\n\\nNo near-misses in the explanations: every justification subjects gave maps to a real documented passage. Self-reported confidence (92-95) was well-calibrated. This is a smoke-role basic task and the documentation provided complete, correctly-cited coverage of every probed edge case.",
+  "doc_gaps": []
+}

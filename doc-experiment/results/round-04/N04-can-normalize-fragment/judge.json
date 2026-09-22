@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 99,
+      "hallucinated_methods": [],
+      "notes": "create_fragment plus serialize, both null-checked. Passed 7/7."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "normalize with null check, matches reference. Passed 7/7."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "normalize with null check, matches reference. Passed 7/7."
+    }
+  ],
+  "failure_analysis": "All three trials passed 7/7.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor serialize and normalize return docblocks",
+      "problem": "Documented as returning null on unsupported markup, but neither mentions the same path also raises an E_USER_WARNING via wp_trigger_error. A caller building a boolean can-normalize check gets an unexpected log warning with no doc signal it is expected.",
+      "suggestion": "State in the Returns notes that on unsupported markup the method returns null and also raises an E_USER_WARNING describing the parse error, so intentional detection callers should expect and may suppress it; the warning means unsupported input, not API misuse."
+    },
+    {
+      "location": "WP_HTML_Processor Supported elements section, lines 82 to 89",
+      "problem": "Explains the null return but does not point to a warning-free way to test normalizability for a boolean result; get_last_error is documented elsewhere and not linked here.",
+      "suggestion": "Cross-reference get_last_error and get_unsupported_exception as the silent alternative: create a fragment, drive it, read get_last_error to detect the unsupported error without the warning-emitting null return."
+    },
+    {
+      "location": "WP_HTML_Processor normalize docblock, lines 901 to 951",
+      "problem": "normalize is create_fragment then serialize with no null guard, so it would fatal if create_fragment returned null. The docblock never says when create_fragment returns null versus the supported defaults where it never does.",
+      "suggestion": "Note that for the only supported config, BODY context and UTF-8, create_fragment never returns null so normalize will not fatal; it returns null only for unsupported context or encoding, indicating when an explicit guard is needed."
+    }
+  ]
+}

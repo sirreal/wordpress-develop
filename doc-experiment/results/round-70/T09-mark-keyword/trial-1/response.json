@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` for BODY-fragment parsing and normalized serialization, then walked tokens with `next_token()` and wrapped only ordinary `#text` tokens whose decoded `get_modifiable_text()` contains the keyword. Each token is emitted with `serialize_token()`, which preserves normalization, and I fall back to normalization if the processor cannot complete cleanly.",
+  "confidence": 92
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the HTML Processor\u2019s fragment parser and token walk to stay structure-aware, then collected only `#text` tokens inside each matched `A` element. Attribute values come from `get_attribute('href')`, which the docs say returns decoded strings and `true` for boolean attributes, so I only accept string hrefs and exclude boolean/no-value anchors.",
+  "confidence": 89
+}

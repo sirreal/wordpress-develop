@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() for body-fragment, structure-aware text extraction. All HTML API calls are documented: next_token(), get_token_type(), get_current_depth(), get_modifiable_text(), is_tag_closer(), and get_tag(). The one-pass state machine follows the documented token-walking/depth-boundary pattern, collects only #text tokens, handles decoded entities, empty headings, virtual/implied closers, and null processor creation. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used a documented one-pass next_token() walk. All HTML API calls are documented: next_token(), get_token_type(), get_token_name(), is_tag_closer(), and get_modifiable_text(). The closer-driven flush mirrors the documented repeated-region token-walking recipe, and get_modifiable_text() is only read from #text tokens. The extra class_exists() guard is harmless PHP, not API hallucination. No _doing_it_wrong records."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Correctly chose WP_HTML_Processor::create_fragment() and used a single token walk with recorded heading depth. All HTML API calls are documented: next_token(), get_current_depth(), get_token_type(), get_modifiable_text(), is_tag_closer(), and get_tag(). It follows the documented subtree-depth and #text-only extraction patterns, handles decoded text, empty headings, implied/virtual heading closure, and null processor creation. No _doing_it_wrong records."
+    }
+  ],
+  "failure_analysis": "All trials passed all 7 frozen cases, and execution.json reported no _doing_it_wrong entries. There are no failed hidden cases to attribute to documentation gaps. The rendered docs did well on the exact concepts this task required: the Tag Processor 'Which processor should I use?' section directs structure-aware text collection to WP_HTML_Processor; WP_HTML_Processor Usage shows create_fragment() for body fragments; 'Recipe: collect DOM-style text from a subtree' says to walk with the HTML Processor and append only #text tokens; next_token() explains split text nodes, virtual closers, and the single-cursor state-machine pattern; get_current_depth() explains the >= subtree boundary; and get_modifiable_text() explains decoded #text versus raw/special-element text. The only near-miss is conceptual rather than functional: trial 2 used the closer-driven repeated-region pattern instead of a depth guard. That is documented as reliable, but the docs could make the boundary-choice rule more explicit for readers moving between arbitrary subtree scans and exact-element state machines.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() and 'Recipe: collect DOM-style text from a subtree'",
+      "problem": "The docs show both depth-bounded subtree walks and closer-driven repeated-region walks, but the decision rule between them is implicit.",
+      "suggestion": "Add a short 'Choosing a boundary' note: use recorded depth or breadcrumbs for arbitrary ancestor subtree scans; use closer-driven flushing when a one-pass state machine is tracking specific opened elements and their reported explicit or virtual closers."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth()",
+      "problem": "Virtual and implied closers are described, but readers must infer their exact token stream shape from prose.",
+      "suggestion": "Add a compact token trace for an omitted or EOF-generated closing tag showing get_token_type(), get_token_name(), is_tag_closer(), and get_current_depth()."
+    },
+    {
+      "location": "WP_HTML_Processor::get_tag() / get_token_name()",
+      "problem": "Both methods are documented, but the preferred distinction for element-name matching is spread across separate method sections.",
+      "suggestion": "Cross-reference them directly: after get_token_type() === '#tag', get_tag() is the element-name helper; get_token_name() is the generic DOM nodeName helper and also returns uppercase tag names for tag tokens."
+    }
+  ]
+}

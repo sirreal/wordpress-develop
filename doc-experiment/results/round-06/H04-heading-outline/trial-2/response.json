@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment with full structural awareness. It iterates through all tags using next_tag(), filters for heading elements (H1-H6) using regex matching, extracts the heading level from the tag name, then walks through tokens inside each heading using next_token() while tracking current depth relative to the heading's depth. It collects all text content via get_modifiable_text() from #text tokens until the depth indicates we've exited the heading element.",
+  "confidence": 60
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "Uses WP_HTML_Processor to parse the HTML fragment and identify document structure through breadcrumbs. Iterates through all P tags using next_tag(), checks if BLOCKQUOTE appears in the breadcrumb ancestor chain using in_array(), and adds the \"quoted\" class with add_class() when found. Returns the modified HTML via get_updated_html().",
+  "confidence": 85
+}

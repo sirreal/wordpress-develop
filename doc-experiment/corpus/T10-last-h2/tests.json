@@ -1,0 +1,55 @@
+{
+    "id": "T10-last-h2",
+    "title": "Mark the last section heading",
+    "difficulty": "advanced",
+    "split": "train",
+    "role": "core",
+    "commonness": "medium",
+    "concept": "traversal",
+    "processor": "tag",
+    "function": "mark_last_h2",
+    "cases": [
+        {
+            "id": "two-headings",
+            "args": [
+                "<h2>One</h2><p>a</p><h2>Two</h2><p>b</p>"
+            ],
+            "expected": "<h2>One</h2><p>a</p><h2 class=\"final-section\">Two</h2><p>b</p>"
+        },
+        {
+            "id": "single-heading",
+            "args": [
+                "<h2>Only</h2>"
+            ],
+            "expected": "<h2 class=\"final-section\">Only</h2>"
+        },
+        {
+            "id": "no-headings-unchanged",
+            "args": [
+                "<p>nothing</p>"
+            ],
+            "expected": "<p>nothing</p>"
+        },
+        {
+            "id": "many-headings",
+            "args": [
+                "<h2>1</h2><h2>2</h2><h2>3</h2><h2>4</h2><h2>5</h2><h2>6</h2><h2>7</h2><h2>8</h2><h2>9</h2><h2>10</h2><h2>11</h2><h2>12</h2>"
+            ],
+            "expected": "<h2>1</h2><h2>2</h2><h2>3</h2><h2>4</h2><h2>5</h2><h2>6</h2><h2>7</h2><h2>8</h2><h2>9</h2><h2>10</h2><h2>11</h2><h2 class=\"final-section\">12</h2>"
+        },
+        {
+            "id": "comment-h2-not-counted",
+            "args": [
+                "<h2>Real</h2><!-- <h2>fake</h2> -->"
+            ],
+            "expected": "<h2 class=\"final-section\">Real</h2><!-- <h2>fake</h2> -->"
+        },
+        {
+            "id": "existing-class",
+            "args": [
+                "<h2 class=\"intro\">A</h2><h2 class=\"outro\">B</h2>"
+            ],
+            "expected": "<h2 class=\"intro\">A</h2><h2 class=\"outro final-section\">B</h2>"
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the body fragment structurally, finds the first `TABLE` with `next_tag()`, then walks that table subtree with a single `next_token()` loop bounded by `get_current_depth()`. It builds rows from `TR` open/close events, collects cell contents from `TD`/`TH`, appends decoded text from `#text` tokens via `get_modifiable_text()`, and also includes special-element text carried on opener tokens (`SCRIPT`, `STYLE`, `TEXTAREA`, `TITLE`) as documented by the HTML API.",
+  "confidence": 87
+}

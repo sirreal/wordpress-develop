@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Tag_Processor to scan through the HTML document and find each IMG tag (case-insensitive matching). For each matched IMG tag, it adds the 'wp-image' class using the add_class() method, which safely appends to existing classes without modifying anything else. Finally, it returns the modified HTML with all changes applied via get_updated_html(), which preserves everything byte-for-byte except for the modifications made.",
+  "confidence": 95
+}

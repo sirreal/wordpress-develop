@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the fragment in BODY context, then walked tokens with next_token() until the first opening H1 was found. From there I accumulated only #text tokens via get_modifiable_text() while the current depth stayed within that H1 subtree, which preserves nested-element text and returns an empty string when the H1 contains no text nodes.",
+  "confidence": 96
+}

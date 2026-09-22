@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML into tokens, then iterates with next_token() to find all text nodes ('#text' token type). For each text node, get_modifiable_text() provides decoded text content. UTF-8 codepoint counting via mb_strlen() and mb_substr() ensures proper truncation without cutting multi-byte characters. Text nodes are concatenated in document order while respecting the max_codepoints limit.",
+  "confidence": 78
+}

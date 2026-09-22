@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Tag_Processor with next_token() for linear scanning since WP_HTML_Processor explicitly does not support elements inside a TABLE. The implementation: (1) scans forward to find the first TABLE opening tag, (2) then iterates tokens tracking state \u2014 whether we're inside a TR (current_row array) and inside a TD/TH (current_cell_text string), (3) accumulates text from #text tokens via get_modifiable_text() when inside a cell (which returns decoded character references for text nodes), (4) handles implicit tag closures by finalizing the current cell/row when a new TR or TD/TH opener is encountered, and (5) stops on </table>. TBODY/THEAD/TFOOT wrappers are ignored since we only track TR/TD/TH. Optional closing tags are handled by treating openers as implicit closers of the previous sibling.",
+  "confidence": 62
+}

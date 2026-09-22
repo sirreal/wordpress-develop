@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function normalizes the input HTML first using WP_HTML_Processor::serialize(), then parses the normalized HTML to identify text nodes whose decoded text contains the keyword. It rebuilds the normalized HTML by walking through both the token stream and the HTML string in parallel, inserting <mark> tags around text segments that correspond to matching text tokens. Finally, it parses the modified HTML once more and serializes to ensure the final output is properly normalized.",
+  "confidence": 50
+}

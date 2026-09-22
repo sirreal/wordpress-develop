@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used a literal HTML template so the `img` attributes are emitted in the required `src`, then `alt` order, and replaced the placeholder figcaption text with `set_modifiable_text()` so all special characters are encoded by the documented HTML API instead of manual escaping.",
+  "confidence": 96
+}

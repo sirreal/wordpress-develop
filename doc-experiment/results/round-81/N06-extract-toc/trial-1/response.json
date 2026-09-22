@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the body fragment with structural awareness, then walked tokens with next_token() while tracking heading opener depth. For each H1-H6 opener, I accumulated only #text token content via get_modifiable_text() until the processor moved above that heading\u2019s depth, which preserves nested markup text and includes empty headings as empty strings.",
+  "confidence": 92
+}

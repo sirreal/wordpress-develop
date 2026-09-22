@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` to parse the BODY fragment, then rewrites the normalized output token by token with `next_token()` and `serialize_token()`. Each opening `P` token is buffered until the next token proves whether it was truly empty; if the next relevant token is that paragraph\u2019s closing tag with no intervening content, both tokens are skipped, otherwise the buffered opener is emitted. The function returns the original HTML unchanged if the processor cannot fully process the fragment, detected via `get_last_error()` or `paused_at_incomplete_token()`.",
+  "confidence": 88
+}

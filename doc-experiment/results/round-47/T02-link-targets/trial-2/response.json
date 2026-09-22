@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Tag_Processor` for flat, byte-preserving attribute edits: it scans each `A` tag with `next_tag( 'A' )`, checks `get_attribute( 'href' )` so both empty-string and valueless `href` count as present, overwrites or adds `target` via `set_attribute( 'target', '_blank' )`, and returns the modified document with `get_updated_html()`.",
+  "confidence": 97
+}

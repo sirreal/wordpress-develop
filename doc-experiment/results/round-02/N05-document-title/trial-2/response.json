@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The function uses WP_HTML_Processor::create_full_parser() to parse the complete HTML document, then iterates through tokens with next_token() until it finds a TITLE token. When found, it retrieves the decoded text content using get_modifiable_text() which automatically decodes character references per HTML5 spec. Returns null if no TITLE element exists or parser fails, or the decoded text (including empty string for empty TITLE elements).",
+  "confidence": 88
+}

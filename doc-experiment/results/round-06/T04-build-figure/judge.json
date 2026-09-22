@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 93,
+      "hallucinated_methods": [],
+      "notes": "Correct processor (Tag Processor) for flat attribute + text edits, matching the docs' 'Which processor should I use?' guidance. Every method called (next_tag, set_attribute, next_token, get_token_type, set_modifiable_text, get_updated_html) is documented; no hallucinated API, no _doing_it_wrong. Reproduces the 'Building markup from a template' pattern correctly and all 6 cases pass, including every encoding edge case (ampersand, quotes-in-alt, angle brackets, script-not-parsed, unicode) handled by the documented auto-encoding of set_attribute/set_modifiable_text. Slightly less idiomatic than trials 2/3: inserts a redundant next_tag('figcaption') before the token walk. Verified this is harmless (next_token lands on the placeholder text node inside figcaption either way), but it shows marginally weaker grasp that the bare token-walk already reaches the correct first #text node. Self-reported confidence 75, lower than the cleaner trials despite identical correctness."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Effectively the reference solution. Correct processor choice, all methods documented, no hallucinated API, no _doing_it_wrong. Idiomatic: builds the literal template with empty src/alt attributes (preserving written order) plus a '.' placeholder text node, sets attributes via set_attribute, walks tokens to the first #text and replaces via set_modifiable_text, reads back with get_updated_html. All 6 cases pass; encoding/edge cases covered by the documented automatic-encoding contract. Explanation correctly attributes encoding to set_attribute/set_modifiable_text and order-preservation to template authoring. Highest confidence (92), well-calibrated."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Equivalent to trial-2 and the reference. Correct Tag Processor usage, all methods documented, no hallucinated API, no _doing_it_wrong. Idiomatic template-fill: empty placeholder attributes in src-then-alt order, placeholder text node, set_attribute + token-walk + set_modifiable_text + get_updated_html. Does not guard next_tag('img') return value (calls set_attribute unconditionally) but on this known template the tag is always present, so no defect. All 6 cases pass; all encoding edge cases handled by documented auto-encoding. Explanation is accurate and complete; confidence 92, well-calibrated."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed 6/6 with zero _doing_it_wrong records. The documentation succeeded decisively because the task maps almost one-to-one onto the 'Building markup from a template' section of html-tag-processor.md (lines 158-182), which states the two governing rules (include attributes with empty values so updates preserve written order; include placeholder text so a #text node exists for set_modifiable_text) and then shows a near-identical worked example (template -> next_tag -> set_attribute x2 -> next_token loop matching '#text' -> set_modifiable_text -> get_updated_html). All three subjects transcribed this pattern. The encoding edge cases (ampersand, double-quotes in alt, angle brackets, the not-parsed <script> caption, unicode) were all handled implicitly because the docs repeatedly assert that set_attribute and set_modifiable_text accept plain unescaped values and encode them as needed (get_attribute heading lines 1480-1481; set_modifiable_text heading lines 1839/1911-1914; the template section's 'every value safely encoded' comment). No subject attempted manual escaping, so no double-encoding occurred. Attribute order was guaranteed by the docs' explicit warning that ADDED attributes are sorted by name rather than placed in call order (line 162), which is why all three pre-seeded src and alt in the template instead of adding them.\\n\\nNear-misses worth noting: (1) Trial-1 inserted a redundant next_tag('figcaption') before the token walk. It happens to be safe because next_token then advances onto the placeholder text node inside the figcaption, but the docs' template example does not show combining next_tag with a subsequent token walk, so the subject was extrapolating. The example's unguarded 'walk to the first #text' works only because the template author controls the markup; nothing in the docs states this precondition, so a subject applying the pattern to a template with leading text (e.g. text inside <figure> before <img>) could grab the wrong node. (2) Trials 1 and 3 do not check the next_tag return value before calling set_attribute; the template example also omits this guard, so the docs implicitly model unguarded calls on known-good templates.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Tag_Processor — 'Building markup from a template' section (html-tag-processor.md lines 158-182)",
+      "problem": "The example walks tokens to 'the first #text node' with a bare next_token loop, relying on the unstated precondition that the template author placed exactly one (or the desired-first) text node. It does not warn that in a template with multiple text nodes — e.g. text before the target element, or whitespace between tags — the first #text encountered may not be the intended one. Subjects extrapolating the pattern (trial-1 added next_tag before the walk to disambiguate) had to guess at how to target a specific element's text.",
+      "suggestion": "Add one sentence noting that next_token visits every text node in document order, so to target the text of a specific element either keep the template free of other text nodes or first next_tag() to that element's opener and then walk to its #text. This generalizes the 'which text node' question without encoding this task's answer."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::next_tag (html-tag-processor.md lines 927-957) and the template example",
+      "problem": "Both the next_tag heading and the 'Building markup from a template' example model calling set_attribute/set_modifiable_text without first checking that next_tag returned true (the example guards it; trials 1 and 3 dropped the guard and still passed only because the template is hardcoded). The docs never state what set_attribute does when no tag is matched, leaving subjects to assume unguarded calls are always safe.",
+      "suggestion": "State explicitly in set_attribute's docblock what happens when called while not matched on a tag opener (no-op, or _doing_it_wrong), so subjects know whether the return-value guard shown in examples is decorative or load-bearing. This is a general robustness fact, not task-specific."
+    },
+    {
+      "location": "WP_HTML_Tag_Processor::set_modifiable_text (html-tag-processor.md line 1854+)",
+      "problem": "The template-building workflow depends on set_modifiable_text replacing the text of a #text token, but the dedicated heading example pairs it with next_token/get_token_type matching '#text' without cross-referencing the 'empty element has no text node' caveat from the template section (line 164). A subject reading only the method heading would not learn that an empty element offers no #text token to replace, which is the single most common failure mode for this kind of task.",
+      "suggestion": "In the set_modifiable_text docblock, add a short note (or @see to the template section) that an element with no existing text content exposes no #text token, so a placeholder character must be present in the template for replacement to have a target."
+    }
+  ]
+}

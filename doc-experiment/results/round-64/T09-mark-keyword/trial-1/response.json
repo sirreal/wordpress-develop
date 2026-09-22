@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment, then walked tokens with `next_token()`. For each ordinary `#text` token, I checked the decoded text from `get_modifiable_text()` for the keyword and wrapped the token\u2019s normalized serialization from `serialize_token()` in `<mark>`, leaving non-text tokens untouched and relying on the processor for normalized output.",
+  "confidence": 92
+}

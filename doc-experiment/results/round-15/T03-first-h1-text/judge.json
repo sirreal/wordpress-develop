@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Correct processor: WP_HTML_Processor (structure matters for nested-text collection). Every method exists in the docs: create_fragment, next_tag('H1') string form (doc line 118), get_current_depth (876), next_token (607), get_token_type/'#text' (299), get_modifiable_text (1826). Idiomatic depth-bounded subtree walk using the documented break form `< $h1_depth` (the doc's exact recipe, html-processor.md:935). Relies correctly on get_modifiable_text returning already-decoded UTF-8 (line 1838) and on #text accumulation across multiple tokens (line 621). 8/8 pass. Only deduction: omits the create_fragment null guard that the reference includes (create_fragment is documented as returning static|null, line 352); harmless for these valid BODY-context inputs but a documented edge case left unhandled."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Functionally identical approach to trial-1 but uses the array query form next_tag(array('tag_name'=>'H1')), which is documented in both files (e.g. tag-processor.md:58, html-processor.md:593). Same documented break-form depth guard `< $h1_depth`. All methods verified present; no _doing_it_wrong/trigger_error. 8/8 pass. Same single deduction as trial-1: no create_fragment null check despite the documented static|null return."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Closest to the canonical reference: single while-loop with the inline guard `next_token() && get_current_depth() >= $depth`, matching the doc's recommended >= subtree-walk verbatim (html-processor.md:925, 935) and the reference.php structure. Array next_tag query form, all methods documented, no misuse records. Highest self-reported confidence (92) and well-justified. 8/8 pass. Same lone deduction: create_fragment null guard omitted."
+    }
+  ],
+  "failure_analysis": "No hidden cases failed: all three trials passed all 8 cases (simple, nested-markup, entities-decoded, no-h1-null, image-only-empty-string, first-of-two, nested-in-div, unclosed-h1) with no _doing_it_wrong or trigger_error records. The documentation is the cause of this uniform success rather than any failure. The two key risk points of this task were both pre-empted by precise doc passages:\\n\\n1. The `>=` vs `>` subtree-walk guard. The single most common error here would be ending the walk at the first child element's closer (e.g. `</em>` in `<h1>A <em>B</em> C</h1>`), which would drop the trailing ' C' and fail nested-markup and nested-in-div. The `get_current_depth()` heading (html-processor.md:884-889, 935) spells this out explicitly: a child closer reports a depth EQUAL to the matched ancestor's opener, 'which is precisely why a subtree walk's guard must be >= ... a > guard exits at the first child closer and drops everything after it,' and gives the break-form equivalent `< $depth`. All three trials adopted exactly one of these two endorsed forms, so none tripped.\\n\\n2. Decoding of character references (entities-decoded case: `Fish &amp; Chips &mdash;` => `Fish & Chips —`). The `get_modifiable_text()` heading (line 1838) states the return is 'already decoded ... &amp; is returned as & . Do not decode the returned string again,' and gives a `'Fish & Chips'` example (line 1846). All three subjects cited this and correctly avoided double-decoding.\\n\\nThe empty-string-vs-null distinction (image-only-empty-string returns '' not null; no-h1-null returns null) was handled by the natural control flow — null only on a failed next_tag, '' when the walk collects no #text — aided by get_modifiable_text's documented 'returns an empty string' for tokens without modifiable text (line 1832/1836) and the #text-accumulation note (line 621). The unclosed-h1 case (`<h1>Runs to <em>the end`) worked because the HTML Processor synthesizes implied closers and the depth-bounded walk runs to document end; no subject needed special handling, consistent with the docs' framing of implied/virtual closing tags.\\n\\nNear-miss in the explanations: none of the three subjects mentioned that create_fragment can return null (documented static|null, line 352), and all omitted the guard the reference includes. Their explanations assert a non-null processor implicitly. For these always-valid fragment inputs this never surfaced, but it is the one place all three diverged from the reference's defensive contract.\\n\\nNotably the docs contain a near-isomorphic worked recipe — the UL/LI 'collect an element's text' example (html-processor.md:654-680 and 922-935) — which is structurally the same as this H1 task. That worked example, more than any single sentence, drove the uniform 8/8 outcome.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::create_fragment() (html-processor.md:349-352)",
+      "problem": "The signature shows the return type static|null, but the surrounding prose and every code example assign the result and immediately call methods on it without a null check. None of the three subjects guarded against null, diverging from the canonical reference which does. The conditions under which create_fragment returns null (e.g. unsupported context, invalid encoding) are not stated near the factory, so subjects had no cue that the guard matters.",
+      "suggestion": "Add one sentence to the create_fragment description naming when it returns null and showing the idiomatic guard, e.g. 'Returns null when the fragment cannot be parsed in the requested context; always check for null before use: `$p = WP_HTML_Processor::create_fragment( $html ); if ( null === $p ) { return; }`'. This generalizes to every entry-point usage without encoding any specific task."
+    },
+    {
+      "location": "next_tag() $query parameter (html-tag-processor.md:952 and html-processor.md:579-593)",
+      "problem": "Within a single rendered file the string form `next_tag('DIV')` appears only in one inline example (line 118) while the parameter table documents the array form; the equivalence of `next_tag('H1')` and `next_tag(array('tag_name'=>'H1'))` is never stated outright. Subjects split between the two forms by guesswork (trial-1 string, trials 2/3 array) rather than from a documented statement that they are equivalent. No failures resulted, but the ambiguity is real.",
+      "suggestion": "In the next_tag $query description, add an explicit note that a bare string is shorthand for the tag_name query: 'Passing a string is equivalent to array( \"tag_name\" => $string ); next_tag( \"H1\" ) and next_tag( array( \"tag_name\" => \"H1\" ) ) behave identically.'"
+    },
+    {
+      "location": "get_modifiable_text() (html-tag-processor.md:1826-1849) and the #text-collection recipe (html-processor.md:621-623)",
+      "problem": "The decoded-text and empty-string-on-no-text semantics are documented well, but the rule that an element's text content equals the concatenation of decoded #text descendant tokens (and that markup/void children like IMG contribute nothing) is only implied by scattered notes (line 299 '#text nodes whose entire token IS the modifiable text', line 621 'accumulate text while walking'). A reader must assemble the 'element text content = sum of nested #text, decoded' rule from three locations.",
+      "suggestion": "Add a short consolidated 'Collecting an element's text content' note (near line 621) stating the complete recipe in one place: record the opener's depth, walk with next_token under a `>= $depth` guard, append get_modifiable_text() for every #text token, and note that elements producing no #text (IMG and other void/empty elements) naturally contribute the empty string. Reference, do not duplicate, the SCRIPT/STYLE/TITLE/TEXTAREA exception already at line 623."
+    }
+  ]
+}

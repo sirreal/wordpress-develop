@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() and documented token APIs: next_token(), get_token_type(), is_tag_closer(), get_tag(), get_current_depth(), and get_modifiable_text(). Correctly chose the structural processor, guarded create_fragment() returning null, accumulated only #text tokens, and relied on decoded get_modifiable_text(). Minor near-miss: it uses an outer next_token() loop with an inner bounded next_token() walk for repeated headings, while the docs prefer single-loop state for repeated regions; it is still safe for these heading boundaries because virtual/real closers are visited."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 98,
+      "hallucinated_methods": [],
+      "notes": "Same documented API pattern as trial-1, with an extra PHP class_exists() guard that is not an HTML API call. No undocumented method use and no _doing_it_wrong records. Correctly handles uppercase tag names, empty headings, decoded entities, and implied heading closes. Minor idiom deduction for the nested next_token() walk despite the one-cursor warning for repeated-region extraction."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Used WP_HTML_Processor::create_fragment() with a single next_token() state machine, matching the docs' recommended repeated-region pattern. All HTML API calls are documented. It tracks heading depth, appends only ordinary #text tokens through decoded get_modifiable_text(), flushes on depth drop, and handles empty/unclosed headings naturally."
+    }
+  ],
+  "failure_analysis": "No hidden/frozen case failed across the three trials: each execution.json reports 7/7 passing cases and no _doing_it_wrong or trigger_error records. The docs did well by clearly steering subjects to WP_HTML_Processor for structural work, body fragments via create_fragment(), token walking via next_token(), subtree bounds via get_current_depth() with >=, and decoded ordinary text via get_token_type() === '#text' plus get_modifiable_text(). The implied-heading-close case was also supported by the next_token() documentation explaining that the HTML Processor visits closers for implicitly closed elements. The main near-miss is conceptual rather than functional: two trials used nested next_token() loops for repeated extraction even though the docs warn that a single cursor can make nested walks skip boundaries. The examples contain both single-subtree bounded walks and a single-loop repeated-region state machine, but the safe boundary between those patterns could be sharper.",
+  "doc_gaps": [
+    {
+      "location": "WP_HTML_Processor::next_token() / one-cursor warning",
+      "problem": "The docs warn against nested next_token() loops for repeated regions, but nearby examples also show bounded subtree walks. Subjects can blur when an inner walk is acceptable and when it risks skipping the next region boundary.",
+      "suggestion": "Add a short 'repeated subtree extraction' note contrasting valid patterns: use next_tag() to find each opener followed by a bounded inner subtree walk, or use one next_token() loop with explicit state; avoid an outer next_token() loop whose inner scan consumes a boundary the outer loop still expects to handle."
+    },
+    {
+      "location": "WP_HTML_Processor::get_current_depth()",
+      "problem": "The depth contract is documented thoroughly, but the examples focus on explicit nesting. The important behavior for malformed/common HTML is that implicitly closed elements also produce virtual closers that end a depth-bounded walk.",
+      "suggestion": "Add a generic example of an element implicitly closed by a later sibling, showing the virtual closer's lower depth and explaining that this is reliable for tree boundaries but not proof that source bytes were complete."
+    },
+    {
+      "location": "WP_HTML_Processor text-extraction recipe / get_modifiable_text()",
+      "problem": "The docs explain decoded text and special-element exceptions, but the common 'text content' contract could be easier to apply if it explicitly stated that concatenating #text tokens preserves source whitespace and does not synthesize spaces around inline markup.",
+      "suggestion": "Add one sentence to the subtree text recipe: ordinary text extraction concatenates decoded #text tokens exactly as parsed; it does not insert separator spaces for tags, and any whitespace normalization is a caller-level policy."
+    }
+  ]
+}

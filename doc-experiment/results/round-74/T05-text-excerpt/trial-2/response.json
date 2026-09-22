@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to walk the fragment in body context and appended only ordinary #text tokens plus TITLE/TEXTAREA opener text via get_modifiable_text(), which the docs say is the correct opt-in path for those special elements. I then truncated the decoded UTF-8 text with mb_strlen()/mb_substr() so the result never cuts through a Unicode code point.",
+  "confidence": 93
+}

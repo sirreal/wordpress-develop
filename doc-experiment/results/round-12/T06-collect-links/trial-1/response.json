@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor::create_fragment() to parse the HTML with full structural awareness. It loops through A tags using next_tag(), skipping closers. For each A tag with an href attribute, it collects the decoded attribute value. It then uses next_token() to walk all tokens within the A element, accumulating text from all #text nodes (character references are automatically decoded by get_modifiable_text()). The loop terminates when the current depth drops below the A element's depth, indicating we've exited the element. Results are returned in document order as an array of associative arrays with 'href' and 'text' keys.",
+  "confidence": 75
+}

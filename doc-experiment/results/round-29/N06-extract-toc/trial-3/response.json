@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` and a single `next_token()` pass so headings are collected in document order without nested cursor loops. It tracks heading openers/closers with `get_token_type()`, `get_tag()`, and `is_tag_closer()`, appends descendant text from `#text` tokens via `get_modifiable_text()`, and also includes text carried on special text-bearing element tokens like `TEXTAREA`, `TITLE`, `SCRIPT`, and `STYLE` when they occur inside a heading.",
+  "confidence": 83
+}

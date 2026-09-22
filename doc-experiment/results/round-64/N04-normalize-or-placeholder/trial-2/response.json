@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the documented `WP_HTML_Processor::normalize()` fragment serializer, which normalizes body-context HTML and returns `null` when it cannot normalize. The function returns the exact fallback `<p>Unsupported HTML</p>` only in that failure case, otherwise it returns the normalized HTML unchanged.",
+  "confidence": 98
+}

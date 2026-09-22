@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "This uses `WP_HTML_Processor::create_fragment()` because collecting a link\u2019s text is a tree-aware task. It walks the fragment once with `next_token()`, starts a record on each `A` opener whose `get_attribute( 'href' )` returns a string (excluding missing and boolean `href`), appends only `#text` token content via `get_modifiable_text()`, and finalizes each record on the corresponding `A` closer. It fails closed with an empty array if fragment creation fails, parsing aborts (`get_last_error()`), or the input ends mid-token (`paused_at_incomplete_token()`).",
+  "confidence": 88
+}

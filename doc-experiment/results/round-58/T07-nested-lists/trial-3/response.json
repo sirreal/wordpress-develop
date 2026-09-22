@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() for body-fragment parsing, then walked tokens with next_token() so I could inspect structural breadcrumbs via get_breadcrumbs() and only mark opener tokens for UL/OL elements that already had a UL or OL ancestor. The class is added with add_class(), and the final fragment is returned with get_updated_html() so untouched bytes stay preserved.",
+  "confidence": 93
+}

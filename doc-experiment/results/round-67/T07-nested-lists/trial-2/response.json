@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used the tree-aware `WP_HTML_Processor::create_fragment()` API so ancestor relationships are available, then walked tags with `next_tag()` visiting closers to keep parser state aligned. For each opening `UL` or `OL`, I checked `get_breadcrumbs()` for any earlier `UL`/`OL` in the path and applied `add_class( 'nested-list' )`, finally returning `get_updated_html()` to preserve untouched bytes exactly.",
+  "confidence": 94
+}

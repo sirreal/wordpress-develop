@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "The implementation uses WP_HTML_Processor to parse the HTML fragment and locate the first H1 element. It then walks through all tokens within the H1 (using depth tracking to stay within the element) and accumulates text from all #text tokens. The get_modifiable_text() method automatically decodes character references (as documented), so character references like &amp; are returned as & without any additional decoding needed. Returns null if no H1 exists, otherwise returns the text content (which could be an empty string for H1 elements with no text).",
+  "confidence": 92
+}

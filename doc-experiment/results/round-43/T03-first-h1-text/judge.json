@@ -1,0 +1,40 @@
+{
+  "trials": [
+    {
+      "trial_id": "trial-1",
+      "adherence": 96,
+      "hallucinated_methods": [],
+      "notes": "Used the correct tree-aware `WP_HTML_Processor::create_fragment()` path, depth-bounded `next_token()` walk, `#text` guard, and decoded `get_modifiable_text()`. All called API methods are present in the supplied markdown and execution recorded no `_doing_it_wrong`. Small adherence penalty: it opted into special-element opener text for SCRIPT/STYLE/TEXTAREA/TITLE/NOEMBED/NOFRAMES/XMP, which is documented but broader than the task's plain text-node contract and could include raw non-heading text in untested inputs."
+    },
+    {
+      "trial_id": "trial-2",
+      "adherence": 97,
+      "hallucinated_methods": [],
+      "notes": "Correct processor choice and essentially the documented subtree text recipe. `create_fragment`, `next_tag`, `get_current_depth`, `next_token`, `get_token_type`, `get_modifiable_text`, `is_tag_closer`, and `get_tag` are all documented; no `_doing_it_wrong` records. Minor penalty for the same unnecessary special-element branch, though this one limits itself to the four elements explicitly called out in the HTML Processor docs."
+    },
+    {
+      "trial_id": "trial-3",
+      "adherence": 100,
+      "hallucinated_methods": [],
+      "notes": "Matches the canonical documented pattern: create an HTML Processor fragment, find `H1`, record opener depth, walk tokens while depth remains in the subtree, append only `#text` token `get_modifiable_text()`. Handles decoded text, empty headings, no H1, nested markup, and end-of-input virtual closers without undocumented API use."
+    }
+  ],
+  "failure_analysis": "All trials passed all frozen cases, 8/8 each, and none produced `_doing_it_wrong` records. The docs did well on the core path: the 'Which processor should I use?' guidance points text/subtree work to `WP_HTML_Processor`; the 'Recipe: collect DOM-style text from a subtree' example is almost exactly this task; `get_current_depth()` explains why the guard must be `>=`; `next_token()` explains virtual closers for malformed or unclosed input; and `get_modifiable_text()` clearly says returned `#text` content is already decoded. The main near-miss is special elements. Trials 1 and 2 inferred that special element opener text should be included inside the H1 because the docs explain that SCRIPT/STYLE/TITLE/TEXTAREA carry text on the opener token. That behavior is documented, but the broader docs also say ordinary subtree text should append only `#text` tokens unless the caller explicitly opts into special-element content. The hidden cases did not exercise this distinction, so it did not become a functional failure.",
+  "doc_gaps": [
+    {
+      "location": "`WP_HTML_Processor` overview, 'Recipe: collect DOM-style text from a subtree' plus `next_token()` special-element note",
+      "problem": "The docs contain both the correct ordinary subtree-text recipe and a nearby special-element exception. Test subjects over-applied the exception for a generic heading-text task.",
+      "suggestion": "Add a short decision table distinguishing ordinary text-node extraction, DOM-like textContent, and special-element content extraction. State which token types to include for each policy and when SCRIPT/STYLE raw text should be excluded."
+    },
+    {
+      "location": "`WP_HTML_Processor::get_modifiable_text()`",
+      "problem": "`get_modifiable_text()` is easy to read as 'text content' for any token, even though comments and special element openers are not ordinary text nodes.",
+      "suggestion": "Repeat in the method contract that non-`#text` modifiable text is opt-in data, not a text-node match. Recommend checking `get_token_type() === '#text'` for ordinary extracted text, with explicit tag whitelists only for caller-requested special content."
+    },
+    {
+      "location": "Special self-contained elements docs across Tag Processor and HTML Processor",
+      "problem": "The exact special-element set is split across sections, and candidates differed on whether to include deprecated rawtext elements such as NOEMBED/NOFRAMES/XMP.",
+      "suggestion": "Centralize the list of tokens whose text is carried on opener tokens for HTML Processor walks, including whether each returns decoded or raw text, and link to it from both `next_token()` and `get_modifiable_text()`."
+    }
+  ]
+}

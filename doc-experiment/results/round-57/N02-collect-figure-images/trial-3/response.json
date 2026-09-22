@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used `WP_HTML_Processor::create_fragment()` to parse the body fragment with tree awareness, then walked tokens with `next_token()` while tracking open `FIGURE` elements by depth. For each non-closing `IMG` token encountered while inside at least one figure, I read the decoded `src` with `get_attribute()` and skipped missing or empty values.",
+  "confidence": 92
+}

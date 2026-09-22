@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "explanation": "I used WP_HTML_Processor::create_fragment() to parse the input as a BODY fragment, then walked tokens with next_token() and rebuilt the output with serialize_token(). Only ordinary #text tokens are checked with get_modifiable_text() using a case-sensitive substring match, and matching text nodes are wrapped in <mark> while all other tokens serialize normally, yielding normalized HTML with implied tags and canonical quoting/encoding.",
+  "confidence": 93
+}
