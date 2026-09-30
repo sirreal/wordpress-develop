@@ -1261,6 +1261,15 @@ class WP_HTML_Tag_Processor {
 			return null;
 		}
 
+		if ( false !== strpbrk( $wanted_class, " \t\f\r\n" ) ) {
+			_doing_it_wrong(
+				__METHOD__,
+				__( 'A class name cannot contain ASCII whitespace.' ),
+				'7.1.0'
+			);
+			return false;
+		}
+
 		$case_insensitive = self::QUIRKS_MODE === $this->compat_mode;
 
 		$wanted_length = strlen( $wanted_class );
@@ -4807,6 +4816,17 @@ class WP_HTML_Tag_Processor {
 	/**
 	 * Adds a new class name to the currently matched tag.
 	 *
+	 * Whitespace in `$class_name` is preserved verbatim. This may result
+	 * in multiple class names being added to the element's class list.
+	 *
+	 * Examples:
+	 *
+	 *     $p->add_class( 'wp-block' );
+	 *     // Adds one class: "wp-block".
+	 *
+	 *     $p->add_class( 'wp-block alignwide' );
+	 *     // Adds two classes: "wp-block" and "alignwide".
+	 *
 	 * @since 6.2.0
 	 *
 	 * @param string $class_name The class name to add.
@@ -4850,6 +4870,7 @@ class WP_HTML_Tag_Processor {
 	 * Removes a class name from the currently matched tag.
 	 *
 	 * @since 6.2.0
+	 * @since 7.1.0 Returns false when `$class_name` contains ASCII whitespace.
 	 *
 	 * @param string $class_name The class name to remove.
 	 * @return bool Whether the class was set to be removed.
@@ -4859,6 +4880,15 @@ class WP_HTML_Tag_Processor {
 			self::STATE_MATCHED_TAG !== $this->parser_state ||
 			$this->is_closing_tag
 		) {
+			return false;
+		}
+
+		if ( false !== strpbrk( $class_name, " \t\f\r\n" ) ) {
+			_doing_it_wrong(
+				__METHOD__,
+				__( 'A class name cannot contain ASCII whitespace.' ),
+				'7.1.0'
+			);
 			return false;
 		}
 
