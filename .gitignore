@@ -16,6 +16,7 @@ wp-tests-config.php
 /tests/phpunit/data/.trac-ticket-cache*
 /tests/qunit/compiled.html
 /tests/performance/**/*.test.results.json
+/tests/performance/html-api/corpus/real/
 /src/.wp-tests-version
 /node_modules
 /.github/docs-playground-preview/node_modules
