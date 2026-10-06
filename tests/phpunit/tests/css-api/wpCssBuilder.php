@@ -107,7 +107,7 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 	/**
 	 * Tests WP_CSS_Builder::ident() serializes CSS identifiers.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 *
 	 * @dataProvider data_ident
 	 *

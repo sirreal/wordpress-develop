@@ -4,13 +4,13 @@
  *
  * @package WordPress
  * @subpackage CSS-API
- * @since {WP_VERSION}
+ * @since 7.2.0
  */
 
 /**
  * Serializes decoded values for safe interpolation into CSS source.
  *
- * @since {WP_VERSION}
+ * @since 7.2.0
  */
 abstract class WP_CSS_Builder {
 	/**
@@ -24,7 +24,7 @@ abstract class WP_CSS_Builder {
 	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
 	 * @see https://www.w3.org/TR/css-syntax-3/#would-start-an-identifier
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * An empty string serializes to an empty string. Callers that require an
 	 * ident token must reject an empty value.
@@ -112,7 +112,7 @@ abstract class WP_CSS_Builder {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#escaping
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @param string $value Decoded string value to encode as a quoted CSS string.
 	 * @return string Serialized quoted CSS string text.

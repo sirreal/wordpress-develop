@@ -18,9 +18,9 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Provides the test cases from the @rmenke/css-processor-test test corpus.
+	 * Provides the test cases derived from the @rmenke/css-tokenizer-tests corpus (MIT).
 	 *
-	 * @see https://github.com/romainmenke/css-processor-tests/
+	 * @see https://github.com/romainmenke/css-tokenizer-tests/
 	 * @return array
 	 */
 	public static function corpus_provider(): array {
@@ -73,7 +73,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-newline in a string token contributes nothing to the value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 * @dataProvider data_string_backslash_newline
 	 */
 	public function test_string_backslash_newline( string $css, string $expected_value ): void {
@@ -101,7 +101,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-EOF in a string token contributes nothing to the value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 */
 	public function test_string_backslash_eof(): void {
 		$processor = WP_CSS_Token_Processor::create( "'string\\" );
@@ -114,7 +114,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-newline in an unquoted URL produces a bad-url token.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 * @dataProvider data_url_backslash_newline
 	 */
 	public function test_url_backslash_newline( string $css ): void {
@@ -141,7 +141,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-EOF in an unquoted URL produces U+FFFD in the value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 */
 	public function test_url_backslash_eof(): void {
 		$processor = WP_CSS_Token_Processor::create( 'url(string\\' );
@@ -154,7 +154,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-newline stops an ident sequence.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 * @dataProvider data_ident_backslash_newline
 	 */
 	public function test_ident_backslash_newline( string $css ): void {
@@ -182,7 +182,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that backslash-EOF in an ident produces U+FFFD in the value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 */
 	public function test_ident_backslash_eof(): void {
 		$processor = WP_CSS_Token_Processor::create( 'abc\\' );
@@ -195,7 +195,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Bad string tokens have no associated value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 */
 	public function test_bad_string_token_value_is_null(): void {
 		$processor = WP_CSS_Token_Processor::create( "'str\ning'" );
@@ -208,7 +208,7 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	/**
 	 * Tests that hash tokens expose the proper type flag.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 * @dataProvider data_hash_tokens_expose_type_flags
 	 */
 	public function test_hash_tokens_expose_type_flags( string $css, array $expected_tokens ): void {
@@ -2591,7 +2591,7 @@ CSS;
 	/**
 	 * Tests that repeated updates to one token keep only the latest value.
 	 *
-	 * @ticket 62653
+	 * @ticket 65738
 	 *
 	 * @dataProvider data_repeated_token_value_updates
 	 */

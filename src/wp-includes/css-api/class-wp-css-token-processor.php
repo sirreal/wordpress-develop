@@ -4,7 +4,7 @@
  *
  * @package WordPress
  * @subpackage CSS-API
- * @since {WP_VERSION}
+ * @since 7.2.0
  */
 
 /**
@@ -83,7 +83,7 @@
  *         }
  *     }
  *
- * @since {WP_VERSION}
+ * @since 7.2.0
  *
  * @see https://www.w3.org/TR/css-syntax-3/#tokenization
  */
@@ -319,7 +319,7 @@ class WP_CSS_Token_Processor {
 	 *
 	 * Do not instantiate directly. Use WP_CSS_Token_Processor::create() instead.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @param string $css         CSS source to tokenize.
 	 */
@@ -337,7 +337,7 @@ class WP_CSS_Token_Processor {
 	 *
 	 * - The only supported document encoding is `UTF-8`, which is the default value.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @param string $css      CSS source to tokenize.
 	 * @param string $encoding Text encoding of the document; must be default of 'UTF-8'.
@@ -358,7 +358,7 @@ class WP_CSS_Token_Processor {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-token
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return bool Whether a token was found.
 	 */
@@ -637,7 +637,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the current token type.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string|null
 	 * @phpstan-return self::TOKEN_*|null
@@ -657,7 +657,7 @@ class WP_CSS_Token_Processor {
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#consume-number
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string|null
 	 * @phpstan-return 'id'|'unrestricted'|'integer'|'number'|null
@@ -677,7 +677,7 @@ class WP_CSS_Token_Processor {
 	 * This is different from get_token_value() which returns the semantic value
 	 * (e.g., for strings: content without quotes; for numbers: numeric value).
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string|null
 	 */
@@ -699,7 +699,7 @@ class WP_CSS_Token_Processor {
 	 * Returns the exact bytes from the source without any normalization.
 	 * This preserves original line endings (\r\n, \r, \f) and null bytes.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string|null
 	 */
@@ -725,7 +725,7 @@ class WP_CSS_Token_Processor {
 	 * - For strings/URLs: the decoded string value
 	 * - For other tokens: null
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @see https://www.w3.org/TR/css-syntax-3/#token-value
 	 * @return string|null
@@ -819,7 +819,7 @@ class WP_CSS_Token_Processor {
 	 *
 	 * Only meaningful for URL and STRING tokens. Returns false for all other token types.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return bool Whether the current token value starts with "data:" (case-insensitive).
 	 */
@@ -845,7 +845,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the token start at.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return int|null
 	 */
@@ -856,7 +856,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the token length.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return int|null
 	 */
@@ -867,7 +867,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the unit for dimension tokens.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string|null
 	 */
@@ -878,7 +878,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the byte at where the token value starts (for STRING and URL tokens).
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return int|null
 	 */
@@ -889,7 +889,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Gets the byte length of the token value (for STRING and URL tokens).
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return int|null
 	 */
@@ -919,7 +919,7 @@ class WP_CSS_Token_Processor {
 	 *     echo $processor->get_updated_css();
 	 *     // Outputs: background: url("new.jpg");
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @param string $new_value New decoded URL or string value.
 	 * @return bool Whether the value was successfully updated.
@@ -950,7 +950,7 @@ class WP_CSS_Token_Processor {
 	/**
 	 * Queues a lexical update, replacing an earlier update for the same range.
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @param int    $start  Byte offset at which to start the replacement.
 	 * @param int    $length Number of bytes to replace.
@@ -988,7 +988,7 @@ class WP_CSS_Token_Processor {
 	 *     echo $processor->get_updated_css();
 	 *     // Outputs: background: url("new.jpg");
 	 *
-	 * @since {WP_VERSION}
+	 * @since 7.2.0
 	 *
 	 * @return string The modified CSS.
 	 */
