@@ -2890,7 +2890,7 @@ EOF;
 				'color:url( "http://example.com/invalid.gif" );',
 			),
 
-			// Mismatched quotes: the string runs to the end of the input.
+			// Mismatched quotes: the input ends inside the string.
 			array(
 				'background-image: url( "http://example.com/valid.gif\' );',
 				'',
@@ -2938,7 +2938,7 @@ EOF;
 				'',
 			),
 
-			// No closing `"`: the string runs to the end of the input.
+			// No closing `"`: the input ends inside the string.
 			array(
 				'background-image: url( "http://example.com );',
 				'',
