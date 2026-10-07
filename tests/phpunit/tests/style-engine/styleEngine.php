@@ -635,7 +635,7 @@ class Tests_wpStyleEngine extends WP_UnitTestCase {
 				),
 				'options'         => array(),
 				'expected_output' => array(
-					'css'          => "background-image:linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%), url('https://example.com/image.jpg');",
+					'css'          => 'background-image:linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%), url("https://example.com/image.jpg");',
 					'declarations' => array(
 						'background-image' => "linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%), url('https://example.com/image.jpg')",
 					),
@@ -657,7 +657,7 @@ class Tests_wpStyleEngine extends WP_UnitTestCase {
 				),
 				'options'         => array(),
 				'expected_output' => array(
-					'css'          => "background-image:url('https://example.com/image.jpg');background-position:center;background-repeat:no-repeat;background-size:cover;background-attachment:fixed;",
+					'css'          => 'background-image:url("https://example.com/image.jpg");background-position:center;background-repeat:no-repeat;background-size:cover;background-attachment:fixed;',
 					'declarations' => array(
 						'background-image'      => "url('https://example.com/image.jpg')",
 						'background-position'   => 'center',
