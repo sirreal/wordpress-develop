@@ -278,7 +278,6 @@ require ABSPATH . WPINC . '/html-api/class-wp-html-token.php';
 require ABSPATH . WPINC . '/html-api/class-wp-html-stack-event.php';
 require ABSPATH . WPINC . '/html-api/class-wp-html-processor-state.php';
 require ABSPATH . WPINC . '/html-api/class-wp-html-processor.php';
-require ABSPATH . WPINC . '/css-api/safecss-filter-attr-prototype.php';
 require ABSPATH . WPINC . '/css-api/class-wp-css-token-processor.php';
 require ABSPATH . WPINC . '/html-api/class-wp-html-style-attribute-processor.php';
 require ABSPATH . WPINC . '/class-wp-block-processor.php';
