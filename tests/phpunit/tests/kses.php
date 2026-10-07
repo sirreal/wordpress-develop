@@ -1610,35 +1610,35 @@ EOF;
 				'css'      => 'margin-top: calc(var(--wp-var1) * 3 + 2em)',
 				'expected' => 'margin-top:calc(var(--wp-var1) * 3 + 2em);',
 			),
-			// A function left open at the end of the input is closed, as CSS closes it.
+			// A function left open at the end of the input is rejected, as the legacy implementation rejected it.
 			array(
 				'css'      => 'width: min(3em + 10px',
-				'expected' => 'width:min(3em + 10px);',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'width: max(3em + 10px',
-				'expected' => 'width:max(3em + 10px);',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'width: minmax(3em + 10px',
-				'expected' => 'width:minmax(3em + 10px);',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'width: calc(3em + 10px',
-				'expected' => 'width:calc(3em + 10px);',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'width: var(--wp-var1',
-				'expected' => 'width:var(--wp-var1);',
+				'expected' => '',
 			),
-			// Nested blocks left open at the end of the input are all closed.
+			// Nested blocks left open at the end of the input are rejected.
 			array(
 				'css'      => 'width: calc(3em + (10px * 2)',
-				'expected' => 'width:calc(3em + (10px * 2));',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'background-color: var(--wp-var, var(--wp-var-fallback, pink)',
-				'expected' => 'background-color:var(--wp-var, var(--wp-var-fallback, pink));',
+				'expected' => '',
 			),
 			// A bare `( )` block at the top level of a standard property is rejected.
 			array(
@@ -1702,10 +1702,10 @@ EOF;
 				'css'      => 'aspect-ratio: expression( 16 / 9 );',
 				'expected' => '',
 			),
-			// The `;` is inside the open function, so it is part of the value.
+			// The `;` is inside the open function, so it is part of the value; the open function is rejected.
 			array(
 				'css'      => 'aspect-ratio: calc( 16 / 9;',
-				'expected' => 'aspect-ratio:calc( 16 / 9;);',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'aspect-ratio: calc( 16 / 9 );',
@@ -1730,10 +1730,10 @@ EOF;
 				'css'      => 'grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr))',
 				'expected' => 'grid-template-columns:repeat(auto-fill, minmax(min(12rem, 100%), 1fr));',
 			),
-			// Open at the end of the input: closed.
+			// Open at the end of the input: rejected.
 			array(
 				'css'      => 'grid-template-columns: repeat(4, minmax(0, 1fr)',
-				'expected' => 'grid-template-columns:repeat(4, minmax(0, 1fr));',
+				'expected' => '',
 			),
 			// Contains a function not on the allowlist.
 			array(
