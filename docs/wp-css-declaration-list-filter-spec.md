@@ -257,7 +257,9 @@ providers and classifies each difference.
 Tests outside kses changed for the value serialization only: single-quoted
 `url('...')` becomes `url("...")` in `tests/phpunit/tests/style-engine/styleEngine.php`
 and `tests/phpunit/tests/block-supports/wpRenderBackgroundSupport.php`, and
-`margin-top: 2px` becomes `margin-top:2px` in `tests/phpunit/tests/blocks/supportedStyles.php`.
+`margin-top: 2px` becomes `margin-top:2px` in `tests/phpunit/tests/blocks/supportedStyles.php`,
+and `style` attributes filtered through `wp_kses()` take the `prop:value;` form in
+`tests/phpunit/tests/icons/wpIconsRegistry.php` and `tests/phpunit/tests/post/output.php`.
 One Style Engine test asserted legacy policy: that `safecss_filter_attr_allow_css`
 fires and that `url()` is dropped on `line-height`. It now asserts the new
 output.

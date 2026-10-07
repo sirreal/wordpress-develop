@@ -345,11 +345,11 @@ class Tests_Icons_WpIconsRegistry extends WP_UnitTestCase {
 			),
 			'allows stroke attributes and style on svg'    => array(
 				'input'    => '<svg style="fill: none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" vector-effect="non-scaling-stroke"><path d="M0 0" /></svg>',
-				'expected' => '<svg style="fill: none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" vector-effect="non-scaling-stroke"><path d="M0 0" /></svg>',
+				'expected' => '<svg style="fill:none;" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" vector-effect="non-scaling-stroke"><path d="M0 0" /></svg>',
 			),
 			'allows clip rule, opacity and stroke on path' => array(
 				'input'    => '<svg><path d="M0 0" fill-rule="evenodd" clip-rule="evenodd" opacity="0.4" style="fill: none" stroke="currentColor" vector-effect="non-scaling-stroke" /></svg>',
-				'expected' => '<svg><path d="M0 0" fill-rule="evenodd" clip-rule="evenodd" opacity="0.4" style="fill: none" stroke="currentColor" vector-effect="non-scaling-stroke" /></svg>',
+				'expected' => '<svg><path d="M0 0" fill-rule="evenodd" clip-rule="evenodd" opacity="0.4" style="fill:none;" stroke="currentColor" vector-effect="non-scaling-stroke" /></svg>',
 			),
 			'allows clip rule and stroke on polygon'       => array(
 				'input'    => '<svg><polygon points="0,0 1,1" clip-rule="evenodd" stroke="currentColor" vector-effect="non-scaling-stroke" /></svg>',
