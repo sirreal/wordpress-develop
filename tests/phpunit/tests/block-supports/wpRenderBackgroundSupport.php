@@ -120,6 +120,68 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that background styles are appended to an existing style attribute
+	 * without splitting declarations whose values contain semicolons.
+	 *
+	 * @ticket 65738
+	 *
+	 * @covers ::wp_render_background_support
+	 */
+	public function test_background_styles_are_appended_to_existing_style_attribute() {
+		$this->test_block_name = 'test/background-appended-to-existing-style';
+		register_block_type(
+			$this->test_block_name,
+			array(
+				'api_version' => 2,
+				'attributes'  => array(
+					'style' => array(
+						'type' => 'object',
+					),
+				),
+				'supports'    => array(
+					'background' => array(
+						'backgroundImage' => true,
+					),
+				),
+			)
+		);
+
+		$actual = wp_render_background_support(
+			'<div class="wp-block-test" style="color: red; mask-image: url(\'https://example.com/mask.png;v=1\')">Content</div>',
+			array(
+				'blockName' => $this->test_block_name,
+				'attrs'     => array(
+					'style' => array(
+						'background' => array(
+							'backgroundImage' => array(
+								'url' => 'https://example.com/image.jpg',
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$tags = new WP_HTML_Tag_Processor( $actual );
+		$this->assertTrue( $tags->next_tag(), 'Wrapper should be found.' );
+
+		$style = $tags->get_attribute( 'style' );
+		$this->assertSame(
+			"color: red; mask-image: url('https://example.com/mask.png;v=1'); background-image: url('https://example.com/image.jpg'); background-size: cover;",
+			$style,
+			'Existing declarations should be preserved and the background styles appended.'
+		);
+
+		$declarations = WP_HTML_Style_Attribute_Processor::create( $style );
+		$names        = array();
+		while ( $declarations->next_declaration() ) {
+			$names[] = $declarations->get_property_name();
+		}
+
+		$this->assertSame( array( 'color', 'mask-image', 'background-image', 'background-size' ), $names, 'Merged style should parse into the expected declarations.' );
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return array
@@ -137,7 +199,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 						'url' => 'https://example.com/image.jpg',
 					),
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background image style with contain, position, attachment, and repeat is applied' => array(
@@ -154,7 +216,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 					'backgroundSize'       => 'contain',
 					'backgroundAttachment' => 'fixed',
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:url(&apos;https://example.com/image.jpg&apos;);background-position:50% 50%;background-repeat:no-repeat;background-size:contain;background-attachment:fixed;">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: url(&apos;https://example.com/image.jpg&apos;); background-position: 50% 50%; background-repeat: no-repeat; background-size: contain; background-attachment: fixed;">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background image style is appended if a style attribute already exists' => array(
@@ -168,7 +230,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 						'url' => 'https://example.com/image.jpg',
 					),
 				),
-				'expected_wrapper'    => '<div class="wp-block-test has-background" style="color: red;background-image:url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="wp-block-test has-background" style="color: red; background-image: url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div class="wp-block-test" style="color: red">Content</div>',
 			),
 			'background image style is appended if a style attribute containing multiple styles already exists' => array(
@@ -182,7 +244,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 						'url' => 'https://example.com/image.jpg',
 					),
 				),
-				'expected_wrapper'    => '<div class="wp-block-test has-background" style="color: red;font-size: 15px;background-image:url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="wp-block-test has-background" style="color: red;font-size: 15px; background-image: url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div class="wp-block-test" style="color: red;font-size: 15px;">Content</div>',
 			),
 			'background image style is appended if a boolean style attribute already exists' => array(
@@ -197,7 +259,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 						'source' => 'file',
 					),
 				),
-				'expected_wrapper'    => '<div class="has-background" classname="wp-block-test" style="background-image:url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" classname="wp-block-test" style="background-image: url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div classname="wp-block-test" style>Content</div>',
 			),
 			'background gradient style is applied'   => array(
@@ -209,7 +271,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 				'background_style'    => array(
 					'gradient' => 'linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%)',
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%);">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%);">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background gradient style is not applied if the block does not support it' => array(
@@ -233,7 +295,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 				'background_style'    => array(
 					'gradient' => 'var:preset|gradient|vivid-cyan-blue',
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:var(--wp--preset--gradient--vivid-cyan-blue);">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: var(--wp--preset--gradient--vivid-cyan-blue);">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background gradient and image combined' => array(
@@ -249,7 +311,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 					),
 					'gradient'        => 'linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%)',
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%), url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: linear-gradient(135deg,rgb(255,0,0) 0%,rgb(0,0,255) 100%), url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background gradient with hsl colors and image combined' => array(
@@ -265,7 +327,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 					),
 					'gradient'        => 'linear-gradient(135deg,hsl(0,100%,50%) 0%,hsl(240,100%,50%) 100%)',
 				),
-				'expected_wrapper'    => '<div class="has-background" style="background-image:linear-gradient(135deg,hsl(0,100%,50%) 0%,hsl(240,100%,50%) 100%), url(&apos;https://example.com/image.jpg&apos;);background-size:cover;">Content</div>',
+				'expected_wrapper'    => '<div class="has-background" style="background-image: linear-gradient(135deg,hsl(0,100%,50%) 0%,hsl(240,100%,50%) 100%), url(&apos;https://example.com/image.jpg&apos;); background-size: cover;">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'background image style is not applied if the block does not support background image' => array(
