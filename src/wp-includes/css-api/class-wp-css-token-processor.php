@@ -293,6 +293,17 @@ class WP_CSS_Token_Processor {
 	private $token_unit = null;
 
 	/**
+	 * Whether the current token ended at its closing delimiter.
+	 *
+	 * Comment, string, url and bad-url tokens end at `*\/`, the matching quote
+	 * or `)`. When the input ends first, the token is complete but this flag
+	 * is false. Every other token type is always terminated.
+	 *
+	 * @var bool
+	 */
+	private $token_is_terminated = true;
+
+	/**
 	 * Constructor for the CSS processor.
 	 *
 	 * Do not instantiate directly. Use WP_CSS_Token_Processor::create() instead.
@@ -363,8 +374,14 @@ class WP_CSS_Token_Processor {
 			$this->token_starts_at       = $this->at;
 			$this->token_value_starts_at = $this->at;
 
-			$end                      = strpos( $this->css, '*/', $this->at + 2 );
-			$this->at                 = false !== $end ? $end + 2 : $this->length;
+			$end = strpos( $this->css, '*/', $this->at + 2 );
+			if ( false === $end ) {
+				// The comment runs to the end of the input.
+				$this->token_is_terminated = false;
+				$this->at                  = $this->length;
+			} else {
+				$this->at = $end + 2;
+			}
 			$this->token_length       = $this->at - $this->token_starts_at;
 			$this->token_value_length = $this->token_length - 4;
 			return true;
@@ -826,6 +843,34 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
+	 * Reports whether the current token ended at its closing delimiter.
+	 *
+	 * Comment, string, url and bad-url tokens have a closing delimiter: `*\/`,
+	 * the matching quote, or `)`. When the input ends before the delimiter,
+	 * the tokenizer still returns the token, and this method returns false.
+	 * It returns true for every other token type, which have no closing
+	 * delimiter, and false before the first call to next_token().
+	 *
+	 * Example:
+	 *
+	 *     $processor = WP_CSS_Token_Processor::create( '"abc' );
+	 *     $processor->next_token();
+	 *     $processor->get_token_type();      // 'string-token'
+	 *     $processor->is_token_terminated(); // false
+	 *
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-comment
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-string-token
+	 * @see https://www.w3.org/TR/css-syntax-3/#consume-url-token
+	 *
+	 * @since 7.2.0
+	 *
+	 * @return bool Whether the current token ended at its closing delimiter.
+	 */
+	public function is_token_terminated(): bool {
+		return null !== $this->token_type && $this->token_is_terminated;
+	}
+
+	/**
 	 * Serializes a plain PHP string as CSS identifier text.
 	 *
 	 * Characters not valid in CSS identifiers are hex-escaped. This uses
@@ -977,6 +1022,7 @@ class WP_CSS_Token_Processor {
 		$this->token_length          = null;
 		$this->token_value           = false;
 		$this->token_unit            = null;
+		$this->token_is_terminated   = true;
 		$this->token_value_starts_at = null;
 		$this->token_value_length    = null;
 	}
@@ -1084,6 +1130,7 @@ class WP_CSS_Token_Processor {
 		// EOF
 		// This is a parse error. Return the <string-token>.
 		$this->token_type            = self::TOKEN_STRING;
+		$this->token_is_terminated   = false;
 		$this->token_length          = $this->at - $this->token_starts_at;
 		$this->token_value_starts_at = $value_starts_at;
 		$this->token_value_length    = $this->at - $value_starts_at;
@@ -1321,6 +1368,7 @@ class WP_CSS_Token_Processor {
 				if ( $this->at >= $this->length ) {
 					// EOF is a parse error, but we return the <url-token> anyway.
 					$this->token_type            = self::TOKEN_URL;
+					$this->token_is_terminated   = false;
 					$this->token_length          = $this->at - $this->token_starts_at;
 					$this->token_value_starts_at = $value_starts_at;
 					$this->token_value_length    = $value_ends_at - $value_starts_at;
@@ -1398,6 +1446,7 @@ class WP_CSS_Token_Processor {
 		// EOF
 		// This is a parse error. Return the <url-token>.
 		$this->token_type            = self::TOKEN_URL;
+		$this->token_is_terminated   = false;
 		$this->token_length          = $this->at - $this->token_starts_at;
 		$this->token_value_starts_at = $value_starts_at;
 		$this->token_value_length    = $this->at - $value_starts_at;
@@ -1415,6 +1464,9 @@ class WP_CSS_Token_Processor {
 	 * @return bool
 	 */
 	private function consume_remnants_of_bad_url(): bool {
+		// Set to true when a `)` ends the token.
+		$this->token_is_terminated = false;
+
 		while ( $this->at < $this->length ) {
 			$this->at += strcspn( $this->css, ')\\', $this->at );
 
@@ -1431,6 +1483,7 @@ class WP_CSS_Token_Processor {
 				}
 			} elseif ( ')' === $this->css[ $this->at ] ) {
 				++$this->at;
+				$this->token_is_terminated = true;
 				break;
 			}
 		}

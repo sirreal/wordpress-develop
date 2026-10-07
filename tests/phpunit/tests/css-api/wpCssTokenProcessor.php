@@ -206,6 +206,82 @@ class Tests_CssApi_WpCssTokenProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that is_token_terminated() reports whether the last token ended at its closing delimiter.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_token_terminated
+	 */
+	public function test_is_token_terminated( string $css, string $expected_type, bool $expected ): void {
+		$processor = WP_CSS_Token_Processor::create( $css );
+
+		$this->assertFalse( $processor->is_token_terminated(), 'Before the first token there is nothing to report.' );
+
+		$type = null;
+		while ( $processor->next_token() ) {
+			$type       = $processor->get_token_type();
+			$terminated = $processor->is_token_terminated();
+		}
+
+		$this->assertSame( $expected_type, $type, 'The last token type did not match.' );
+		$this->assertSame( $expected, $terminated, 'The last token termination flag did not match.' );
+	}
+
+	/**
+	 * Data provider for test_is_token_terminated().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_token_terminated(): array {
+		return array(
+			'comment terminated'                 => array( '/* a */', WP_CSS_Token_Processor::TOKEN_COMMENT, true ),
+			'comment empty terminated'           => array( '/**/', WP_CSS_Token_Processor::TOKEN_COMMENT, true ),
+			'comment unterminated'               => array( '/* a', WP_CSS_Token_Processor::TOKEN_COMMENT, false ),
+			'comment "/*/" unterminated'         => array( '/*/', WP_CSS_Token_Processor::TOKEN_COMMENT, false ),
+			'comment terminated at end of input' => array( 'a /**/', WP_CSS_Token_Processor::TOKEN_COMMENT, true ),
+			'string terminated'                  => array( '"a"', WP_CSS_Token_Processor::TOKEN_STRING, true ),
+			'string escaped backslash'           => array( '"a\\\\"', WP_CSS_Token_Processor::TOKEN_STRING, true ),
+			'string unterminated'                => array( '"a', WP_CSS_Token_Processor::TOKEN_STRING, false ),
+			'string escape consumed the quote'   => array( '"a\\"', WP_CSS_Token_Processor::TOKEN_STRING, false ),
+			'string lone quote'                  => array( '"', WP_CSS_Token_Processor::TOKEN_STRING, false ),
+			'string single quoted terminated'    => array( "a 'b'", WP_CSS_Token_Processor::TOKEN_STRING, true ),
+			'string single quoted unterminated'  => array( "a 'b", WP_CSS_Token_Processor::TOKEN_STRING, false ),
+			'url terminated'                     => array( 'url(a)', WP_CSS_Token_Processor::TOKEN_URL, true ),
+			'url escaped backslash'              => array( 'url(a\\\\)', WP_CSS_Token_Processor::TOKEN_URL, true ),
+			'url unterminated'                   => array( 'url(a', WP_CSS_Token_Processor::TOKEN_URL, false ),
+			'url escape consumed the paren'      => array( 'url(a\\)', WP_CSS_Token_Processor::TOKEN_URL, false ),
+			'url trailing whitespace'            => array( 'url(a ', WP_CSS_Token_Processor::TOKEN_URL, false ),
+			'url whitespace then paren'          => array( 'url(a )', WP_CSS_Token_Processor::TOKEN_URL, true ),
+			'url empty unterminated'             => array( 'url(', WP_CSS_Token_Processor::TOKEN_URL, false ),
+			'bad url terminated'                 => array( 'url(a b)', WP_CSS_Token_Processor::TOKEN_BAD_URL, true ),
+			'bad url unterminated'               => array( 'url(a b', WP_CSS_Token_Processor::TOKEN_BAD_URL, false ),
+			'ident at end of input'              => array( 'color: red', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'ident backslash at end of input'    => array( 'abc\\', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'function at end of input'           => array( 'calc(', WP_CSS_Token_Processor::TOKEN_FUNCTION, true ),
+		);
+	}
+
+	/**
+	 * Tests that is_token_terminated() is reset for the token after an unterminated one.
+	 *
+	 * @ticket 65738
+	 */
+	public function test_is_token_terminated_resets_between_tokens(): void {
+		$processor = WP_CSS_Token_Processor::create( "'a\nb" );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_BAD_STRING, $processor->get_token_type() );
+		$this->assertTrue( $processor->is_token_terminated() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_WHITESPACE, $processor->get_token_type() );
+		$this->assertTrue( $processor->is_token_terminated() );
+
+		$this->assertTrue( $processor->next_token() );
+		$this->assertSame( WP_CSS_Token_Processor::TOKEN_IDENT, $processor->get_token_type() );
+		$this->assertTrue( $processor->is_token_terminated() );
+	}
+
+	/**
 	 * Tests that hash tokens expose the proper type flag.
 	 *
 	 * @ticket 65738
