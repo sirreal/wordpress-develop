@@ -793,34 +793,6 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Determines whether the current token is a data URI.
-	 *
-	 * Only meaningful for URL and STRING tokens. Returns false for all other token types.
-	 *
-	 * @since 7.2.0
-	 *
-	 * @return bool Whether the current token value starts with "data:" (case-insensitive).
-	 */
-	public function is_data_uri(): bool {
-		if ( null === $this->token_value_starts_at || null === $this->token_value_length ) {
-			return false;
-		}
-
-		if ( $this->token_value_length < 5 ) {
-			return false;
-		}
-
-		$offset = $this->token_value_starts_at;
-		return (
-			( 'd' === $this->css[ $offset ] || 'D' === $this->css[ $offset ] ) &&
-			( 'a' === $this->css[ $offset + 1 ] || 'A' === $this->css[ $offset + 1 ] ) &&
-			( 't' === $this->css[ $offset + 2 ] || 'T' === $this->css[ $offset + 2 ] ) &&
-			( 'a' === $this->css[ $offset + 3 ] || 'A' === $this->css[ $offset + 3 ] ) &&
-			':' === $this->css[ $offset + 4 ]
-		);
-	}
-
-	/**
 	 * Gets the token start at.
 	 *
 	 * @since 7.2.0
@@ -851,28 +823,6 @@ class WP_CSS_Token_Processor {
 	 */
 	public function get_token_unit(): ?string {
 		return $this->token_unit;
-	}
-
-	/**
-	 * Gets the byte at where the token value starts (for STRING and URL tokens).
-	 *
-	 * @since 7.2.0
-	 *
-	 * @return int|null
-	 */
-	public function get_token_value_start(): ?int {
-		return $this->token_value_starts_at;
-	}
-
-	/**
-	 * Gets the byte length of the token value (for STRING and URL tokens).
-	 *
-	 * @since 7.2.0
-	 *
-	 * @return int|null
-	 */
-	public function get_token_value_length(): ?int {
-		return $this->token_value_length;
 	}
 
 	/**
