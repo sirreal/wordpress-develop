@@ -1,20 +1,20 @@
 <?php
 
 /**
- * Tests for the WP_CSS_Builder class.
+ * Tests for WP_CSS_Token_Processor string and identifier serialization.
  *
  * @group css-api
  *
- * @coversDefaultClass WP_CSS_Builder
+ * @coversDefaultClass WP_CSS_Token_Processor
  */
-class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
+class Tests_CssApi_WpCssTokenProcessor_Serialize extends WP_UnitTestCase {
 	/**
 	 * @dataProvider data_string_escaping
 	 *
-	 * @covers ::string
+	 * @covers ::serialize_string
 	 */
 	public function test_string_escaping( string $input, string $expected ): void {
-		$this->assertSame( $expected, WP_CSS_Builder::string( $input ) );
+		$this->assertSame( $expected, WP_CSS_Token_Processor::serialize_string( $input ) );
 
 		/**
 		 * Ensure that a single, equivalent CSS string is produced.
@@ -24,7 +24,7 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 		 *
 		 * @see https://www.w3.org/TR/css-syntax-3/#input-preprocessing
 		 */
-		$processor = WP_CSS_Token_Processor::create( WP_CSS_Builder::string( $input ) );
+		$processor = WP_CSS_Token_Processor::create( WP_CSS_Token_Processor::serialize_string( $input ) );
 		$processor->next_token();
 		$this->assertSame( WP_CSS_Token_Processor::TOKEN_STRING, $processor->get_token_type() );
 		$expected_decoded_value = strtr(
@@ -83,38 +83,38 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 	/**
 	 * Tests the example from the class docblock.
 	 *
-	 * @covers ::string
+	 * @covers ::serialize_string
 	 */
 	public function test_docblock_example(): void {
 		$value    = 'CSS & a "<style>" tag\'s strings';
 		$expected = '"CSS \26  a \22 \3C style\3E \22  tag\27 s strings"';
 
-		$this->assertSame( $expected, WP_CSS_Builder::string( $value ) );
+		$this->assertSame( $expected, WP_CSS_Token_Processor::serialize_string( $value ) );
 	}
 
 	/**
 	 * Tests a string containing mixed newline types.
 	 *
-	 * @covers ::string
+	 * @covers ::serialize_string
 	 */
 	public function test_mixed_newlines(): void {
 		$input    = "line1\nline2\rline3\r\nline4\fline5";
 		$expected = '"line1\A line2\A line3\A line4\A line5"';
 
-		$this->assertSame( $expected, WP_CSS_Builder::string( $input ) );
+		$this->assertSame( $expected, WP_CSS_Token_Processor::serialize_string( $input ) );
 	}
 
 	/**
-	 * Tests WP_CSS_Builder::ident() serializes CSS identifiers.
+	 * Tests WP_CSS_Token_Processor::serialize_ident() serializes CSS identifiers.
 	 *
 	 * @ticket 65738
 	 *
 	 * @dataProvider data_ident
 	 *
-	 * @covers ::ident
+	 * @covers ::serialize_ident
 	 */
 	public function test_ident( string $input, string $expected ): void {
-		$serialized = WP_CSS_Builder::ident( $input );
+		$serialized = WP_CSS_Token_Processor::serialize_ident( $input );
 		$this->assertSame( $expected, $serialized );
 
 		$processor = WP_CSS_Token_Processor::create( $serialized );
@@ -140,7 +140,7 @@ class Tests_CssApi_WpCssBuilder extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Data provider for ident() tests.
+	 * Data provider for serialize_ident() tests.
 	 */
 	public static function data_ident(): Generator {
 		yield 'Empty identifier' => array( '', '' );
