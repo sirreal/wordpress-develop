@@ -56,18 +56,6 @@
  *     // Outputs:
  *     // width: 10px;
  *
- * Rewriting a URL while keeping the rest of the stylesheet intact:
- *
- *     $css = 'background: url(old.jpg) center / cover;';
- *     $processor = WP_CSS_Token_Processor::create( $css );
- *     while ( $processor->next_token() ) {
- *         if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
- *             $processor->set_value( 'uploads/new.jpg' );
- *         }
- *     }
- *     $result = $processor->get_updated_css();
- *     // background: url("uploads/new.jpg") center / cover;
- *
  * Gathering diagnostics with byte offsets:
  *
  *     $css = "color: red;\ncolor: re\nd;";
@@ -303,16 +291,6 @@ class WP_CSS_Token_Processor {
 	 * @var string|null
 	 */
 	private $token_unit = null;
-
-	/**
-	 * Lexical replacements to apply to input CSS document.
-	 *
-	 * Tracks modifications to be applied to the CSS, such as changing URL values.
-	 * Each entry is an associative array with 'start', 'length', and 'text' keys.
-	 *
-	 * @var array[]
-	 */
-	private $lexical_updates = array();
 
 	/**
 	 * Constructor for the CSS processor.
@@ -1037,130 +1015,6 @@ class WP_CSS_Token_Processor {
 			)
 		);
 		return "\"{$escaped}\"";
-	}
-
-	/**
-	 * Sets the value of the current URL or string token.
-	 *
-	 * The new decoded value is serialized as a quoted CSS string. For a URL
-	 * token, only the value inside `url()` is replaced, converting an unquoted
-	 * URL such as `url(old.jpg)` to `url("new.jpg")`.
-	 *
-	 * Repeated calls for the same current token supersede the previous update.
-	 * Attempting to set the value on another token type returns false.
-	 *
-	 * Example:
-	 *
-	 *     $css = 'background: url(old.jpg);';
-	 *     $processor = WP_CSS_Token_Processor::create( $css );
-	 *     while ( $processor->next_token() ) {
-	 *         if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
-	 *             $processor->set_token_value( 'new.jpg' );
-	 *         }
-	 *     }
-	 *     echo $processor->get_updated_css();
-	 *     // Outputs: background: url("new.jpg");
-	 *
-	 * @since 7.2.0
-	 *
-	 * @param string $new_value New decoded URL or string value.
-	 * @return bool Whether the value was successfully updated.
-	 */
-	public function set_token_value( string $new_value ): bool {
-		// Only URL and string tokens are currently supported.
-		switch ( $this->token_type ) {
-			case self::TOKEN_URL:
-				$this->queue_lexical_update(
-					$this->token_value_starts_at,
-					$this->token_value_length,
-					self::serialize_string( $new_value )
-				);
-				return true;
-			case self::TOKEN_STRING:
-				$this->queue_lexical_update(
-					$this->token_starts_at,
-					$this->token_length,
-					self::serialize_string( $new_value )
-				);
-				return true;
-			default:
-				_doing_it_wrong( __METHOD__, 'set_token_value() only supports URL and string tokens. Got token type: ' . $this->token_type, '1.0.0' );
-				return false;
-		}
-	}
-
-	/**
-	 * Queues a lexical update, replacing an earlier update for the same range.
-	 *
-	 * @since 7.2.0
-	 *
-	 * @param int    $start  Byte offset at which to start the replacement.
-	 * @param int    $length Number of bytes to replace.
-	 * @param string $text   Replacement text.
-	 */
-	private function queue_lexical_update( int $start, int $length, string $text ): void {
-		foreach ( $this->lexical_updates as $index => $update ) {
-			if ( $update['start'] === $start && $update['length'] === $length ) {
-				unset( $this->lexical_updates[ $index ] );
-			}
-		}
-
-		$this->lexical_updates[] = array(
-			'start'  => $start,
-			'length' => $length,
-			'text'   => $text,
-		);
-	}
-
-	/**
-	 * Returns the CSS with all modifications applied.
-	 *
-	 * This method applies all queued lexical updates and returns the modified CSS.
-	 * If no modifications were made, returns the original CSS.
-	 *
-	 * Example:
-	 *
-	 *     $css = 'background: url(old.jpg);';
-	 *     $processor = WP_CSS_Token_Processor::create( $css );
-	 *     while ( $processor->next_token() ) {
-	 *         if ( WP_CSS_Token_Processor::TOKEN_URL === $processor->get_token_type() ) {
-	 *             $processor->set_token_value( 'new.jpg' );
-	 *         }
-	 *     }
-	 *     echo $processor->get_updated_css();
-	 *     // Outputs: background: url("new.jpg");
-	 *
-	 * @since 7.2.0
-	 *
-	 * @return string The modified CSS.
-	 */
-	public function get_updated_css(): string {
-		if ( empty( $this->lexical_updates ) ) {
-			return $this->css;
-		}
-
-		// Sort updates by start position in ascending order.
-		usort(
-			$this->lexical_updates,
-			function ( $a, $b ) {
-				return $a['start'] - $b['start'];
-			}
-		);
-
-		// Build the output by concatenating original CSS fragments with replacements.
-		$bytes_already_copied = 0;
-		$output               = '';
-
-		foreach ( $this->lexical_updates as $update ) {
-			$output              .= substr( $this->css, $bytes_already_copied, $update['start'] - $bytes_already_copied );
-			$output              .= $update['text'];
-			$bytes_already_copied = $update['start'] + $update['length'];
-		}
-
-		// Copy remaining CSS after last update.
-		$output .= substr( $this->css, $bytes_already_copied );
-
-		return $output;
 	}
 
 	/**
