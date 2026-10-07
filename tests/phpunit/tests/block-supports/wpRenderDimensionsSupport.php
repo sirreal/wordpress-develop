@@ -115,6 +115,66 @@ class Tests_Block_Supports_WpRenderDimensionsSupport extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that dimensions styles are appended to an existing style attribute
+	 * without splitting declarations whose values contain semicolons.
+	 *
+	 * @ticket 65738
+	 *
+	 * @covers ::wp_render_dimensions_support
+	 */
+	public function test_dimensions_styles_are_appended_to_existing_style_attribute() {
+		$this->test_block_name = 'test/dimensions-appended-to-existing-style';
+		register_block_type(
+			$this->test_block_name,
+			array(
+				'api_version' => 2,
+				'attributes'  => array(
+					'style' => array(
+						'type' => 'object',
+					),
+				),
+				'supports'    => array(
+					'dimensions' => array(
+						'aspectRatio' => true,
+					),
+				),
+			)
+		);
+
+		$actual = wp_render_dimensions_support(
+			'<div class="wp-block-test" style="color: red; font-family: &quot;Semi;Colon&quot;">Content</div>',
+			array(
+				'blockName' => $this->test_block_name,
+				'attrs'     => array(
+					'style' => array(
+						'dimensions' => array(
+							'aspectRatio' => '16/9',
+						),
+					),
+				),
+			)
+		);
+
+		$tags = new WP_HTML_Tag_Processor( $actual );
+		$this->assertTrue( $tags->next_tag(), 'Wrapper should be found.' );
+
+		$style = $tags->get_attribute( 'style' );
+		$this->assertSame(
+			'color: red; font-family: "Semi;Colon"; aspect-ratio: 16/9; height: unset; min-height: unset;',
+			$style,
+			'Existing declarations should be preserved and the dimensions styles appended.'
+		);
+
+		$declarations = WP_HTML_Style_Attribute_Processor::create( $style );
+		$names        = array();
+		while ( $declarations->next_declaration() ) {
+			$names[] = $declarations->get_property_name();
+		}
+
+		$this->assertSame( array( 'color', 'font-family', 'aspect-ratio', 'height', 'min-height' ), $names, 'Merged style should parse into the expected declarations.' );
+	}
+
+	/**
 	 * Data provider.
 	 *
 	 * @return array
@@ -130,7 +190,7 @@ class Tests_Block_Supports_WpRenderDimensionsSupport extends WP_UnitTestCase {
 				'dimensions_style'    => array(
 					'aspectRatio' => '16/9',
 				),
-				'expected_wrapper'    => '<div class="has-aspect-ratio" style="aspect-ratio:16/9;height:unset;min-height:unset;">Content</div>',
+				'expected_wrapper'    => '<div class="has-aspect-ratio" style="aspect-ratio: 16/9; height: unset; min-height: unset;">Content</div>',
 				'wrapper'             => '<div>Content</div>',
 			),
 			'dimensions style is appended if a style attribute already exists' => array(
@@ -142,7 +202,7 @@ class Tests_Block_Supports_WpRenderDimensionsSupport extends WP_UnitTestCase {
 				'dimensions_style'    => array(
 					'aspectRatio' => '16/9',
 				),
-				'expected_wrapper'    => '<div class="wp-block-test has-aspect-ratio" style="color:red;aspect-ratio:16/9;height:unset;min-height:unset;">Content</div>',
+				'expected_wrapper'    => '<div class="wp-block-test has-aspect-ratio" style="color:red; aspect-ratio: 16/9; height: unset; min-height: unset;">Content</div>',
 				'wrapper'             => '<div class="wp-block-test" style="color:red;">Content</div>',
 			),
 			'aspect ratio style is unset if block has min-height set' => array(
@@ -154,7 +214,7 @@ class Tests_Block_Supports_WpRenderDimensionsSupport extends WP_UnitTestCase {
 				'dimensions_style'    => array(
 					'minHeight' => '100px',
 				),
-				'expected_wrapper'    => '<div style="min-height:100px;aspect-ratio:unset;">Content</div>',
+				'expected_wrapper'    => '<div style="min-height:100px; aspect-ratio: unset;">Content</div>',
 				'wrapper'             => '<div style="min-height:100px">Content</div>',
 			),
 			'aspect ratio style is not applied if the block does not support aspect ratio' => array(
@@ -212,7 +272,7 @@ class Tests_Block_Supports_WpRenderDimensionsSupport extends WP_UnitTestCase {
 			)
 		);
 
-		$this->assertStringNotContainsString( 'height:unset', $actual );
-		$this->assertStringNotContainsString( 'min-height:unset', $actual );
+		$this->assertStringNotContainsString( 'height: unset', $actual );
+		$this->assertStringNotContainsString( 'min-height: unset', $actual );
 	}
 }
