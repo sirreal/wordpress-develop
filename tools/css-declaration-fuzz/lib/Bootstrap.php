@@ -16,7 +16,6 @@ class Bootstrap {
 			'src/wp-includes/compat-utf8.php',
 			'src/wp-includes/utf8.php',
 			'src/wp-includes/html-api/class-wp-html-decoder.php',
-			'src/wp-includes/css-api/class-wp-css-builder.php',
 			'src/wp-includes/css-api/class-wp-css-token-processor.php',
 			'src/wp-includes/html-api/class-wp-html-style-attribute-processor.php',
 		);

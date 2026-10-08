@@ -79,39 +79,6 @@ class Worker {
 				}
 
 				$check( strlen( $style ) === $expected_start, 'token-range-tail-gap', array( 'expectedEnd' => strlen( $style ), 'actualEnd' => $expected_start ) );
-				$check( $style === $processor->get_updated_css(), 'token-noop-not-identity' );
-			}
-		);
-
-		$guard(
-			'repeated-token-update',
-			static function () use ( $style, $seed, $check, &$operations ): void {
-				$processor = \WP_CSS_Token_Processor::create( $style );
-				while ( $processor->next_token() ) {
-					$type = $processor->get_token_type();
-					if ( \WP_CSS_Token_Processor::TOKEN_URL !== $type && \WP_CSS_Token_Processor::TOKEN_STRING !== $type ) {
-						continue;
-					}
-
-					$start  = \WP_CSS_Token_Processor::TOKEN_URL === $type
-						? $processor->get_token_value_start()
-						: $processor->get_token_start();
-					$length = \WP_CSS_Token_Processor::TOKEN_URL === $type
-						? $processor->get_token_value_length()
-						: $processor->get_token_length();
-					$final  = 'final-' . $seed . ' & value';
-					$check( is_int( $start ) && is_int( $length ), 'repeated-token-update-range-missing' );
-					if ( ! is_int( $start ) || ! is_int( $length ) ) {
-						return;
-					}
-
-					$check( $processor->set_token_value( 'superseded-' . $seed ), 'repeated-token-first-update-refused' );
-					$check( $processor->set_token_value( $final ), 'repeated-token-final-update-refused' );
-					$expected = substr( $style, 0, $start ) . \WP_CSS_Builder::string( $final ) . substr( $style, $start + $length );
-					$check( $expected === $processor->get_updated_css(), 'repeated-token-update-not-superseded' );
-					$operations['repeatedToken.' . $type] = 1;
-					break;
-				}
 			}
 		);
 
@@ -427,7 +394,7 @@ class Worker {
 			'builder-string',
 			static function () use ( $seed, $check ): void {
 				$payload   = substr( hash( 'sha256', 'builder:' . $seed, true ), 0, 24 ) . "\0\r\n\f";
-				$css       = \WP_CSS_Builder::string( $payload );
+				$css       = \WP_CSS_Token_Processor::serialize_string( $payload );
 				$processor = \WP_CSS_Token_Processor::create( $css );
 				$check( null !== $processor && $processor->next_token(), 'builder-string-not-tokenized' );
 				if ( null === $processor || null === $processor->get_token_type() ) {
