@@ -1953,7 +1953,7 @@ EOF;
 	}
 
 	/**
-	 * Tests the legacy implementation of safecss_filter_attr() through the `safecss_filter_attr_use_legacy` filter.
+	 * Tests the legacy implementation of safecss_filter_attr() through the `wp_kses_force_legacy_css_parser` filter.
 	 *
 	 * @ticket 65738
 	 *
@@ -1963,9 +1963,9 @@ EOF;
 	 * @param string $expected Expected string of CSS rules.
 	 */
 	public function test_safecss_filter_attr_legacy( $css, $expected ) {
-		add_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		add_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 		$actual = safecss_filter_attr( $css );
-		remove_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		remove_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 
 		$this->assertSame( $expected, $actual );
 	}
@@ -2957,9 +2957,9 @@ EOF;
 	 * @param string $expected The sanitized style attribute.
 	 */
 	public function test_kses_style_attr_with_url_legacy( $input, $expected ) {
-		add_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		add_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 		$actual = safecss_filter_attr( $input );
-		remove_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		remove_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 
 		$this->assertSame( $expected, $actual );
 	}
@@ -3109,11 +3109,11 @@ EOF;
 	 */
 	public function test_safecss_filter_attr_filtered( $css, $expected ) {
 		// The filter is applied by the legacy implementation only.
-		add_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		add_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 		add_filter( 'safecss_filter_attr_allow_css', '__return_true' );
 		$actual = safecss_filter_attr( $css );
 		remove_filter( 'safecss_filter_attr_allow_css', '__return_true' );
-		remove_filter( 'safecss_filter_attr_use_legacy', '__return_true' );
+		remove_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
 
 		$this->assertSame( $expected, $actual );
 	}
