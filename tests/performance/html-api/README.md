@@ -145,6 +145,18 @@ php tests/performance/html-api/compare.php before.json after.json
 
 The head tree of each file is used, matched by document id and parser. Prefer a live A/B when both checkouts are available.
 
+## Checking that a change keeps behavior
+
+A faster parser is only useful if it parses the same way. `difftrace.php` compares a head checkout with a base checkout:
+
+```
+php tests/performance/html-api/difftrace.php --base ~/a8c/wordpress-develop/trunk --head .
+```
+
+For the Tag Processor it loads both checkouts' `class-wp-html-tag-processor.php` into one process under renamed classes (the other HTML API files come from base), walks each input six ways (`next_token()`, `next_tag()`, `next_tag()` visiting closers, `next_tag()` with queries, with attribute, class and text modifications, and with bookmarks and seeks), applies the same action to both, and compares the return value, every public accessor and every `_doing_it_wrong()` call after every step, then the final `get_updated_html()`. For the HTML Processor it runs each checkout in its own process and compares a hash of the token stream (type, name, breadcrumbs, namespace, attributes, modifiable text, final error) per input, and shows the first differing token for up to five inputs.
+
+The inputs are the real corpus, the synthetic shapes at 5 KB and 100 KB, about 250 hand-written edge cases with every prefix of each (which exercises incomplete input), and 20,000 mutated slices of the corpus (`--mutations`). A run takes about a minute and a half and exits 1 when anything differs. Removing `\r` from the whitespace skipped around `=`, or the `XMP` case from the special-element switch, each produce hundreds of differing inputs.
+
 ## Timed runs take a lock
 
 Two timed runs at once slow each other and corrupt both results. `bench.php` holds an exclusive lock on `/tmp/wp-html-api-bench.lock` from the first worker to the report, and waits, saying so on stderr, while another run holds it. Run any other timing or profiling through the same lock:
@@ -159,6 +171,7 @@ php tests/performance/html-api/with-lock.php php -d extension=excimer.so profile
 - `worker.php`: a subprocess that loads one checkout's HTML API and runs timed jobs read as JSON lines on stdin, answering on stdout.
 - `compare.php`: compares two `--save` files.
 - `with-lock.php`: runs a command while holding the benchmark lock.
+- `difftrace.php`: checks that a head checkout parses every input the same way as a base checkout.
 - `fetch-corpus.php`: restores `corpus/real/` from `corpus/manifest.json`.
 - `lib/class-benchmark-bootstrap.php`: loads the HTML API from a checkout root with stubs for the WordPress functions it calls.
 - `lib/class-benchmark-synthetic.php`: the shape generator.
