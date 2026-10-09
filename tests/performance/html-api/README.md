@@ -53,7 +53,8 @@ Options (`--name value` or `--name=value`):
 | `--filter <text>` | none | Keep ids containing the text, or matching it when written as `/regex/`. |
 | `--samples <n>` | 10 | Timed samples per document, parser and tree, per round. |
 | `--min-sample-ms <n>` | 25 | Each sample runs enough parses to last at least this long on the slower tree. |
-| `--warmup <n>` | 2 | Untimed parses before sampling. |
+| `--warmup <n>` | 2; 10 with `--jit` | Untimed parses before sampling. |
+| `--warmup-ms <n>` | 0; 200 with `--jit` | Keep warming up until this much time has passed as well. |
 | `--rounds <n>` | 4 | Repeat the whole run with a fresh pair of worker processes each time; see below. |
 | `--format table\|markdown\|json` | `table` | Report format. |
 | `--save <file>` | none | Write the full JSON (every sample, config, environment) whatever the format. |
@@ -64,8 +65,8 @@ Progress goes to stderr, one line per document and parser; the report goes to st
 
 ## How a run proceeds
 
-1. `bench.php` starts one worker per tree (`php [ini flags] worker.php --checkout <root>`). Both workers stay alive for the whole run.
-2. For each document and parser: the document is loaded into both workers; each runs `--warmup` untimed parses; each runs one calibration parse, and the slower of the two sets the number of parses per sample so that a sample lasts at least `--min-sample-ms`.
+1. `bench.php` takes the benchmark lock (see below), then starts one worker per tree (`php [ini flags] worker.php --checkout <root>`). Both workers stay alive for the whole round. A worker with a profiler extension loaded (Xdebug, Excimer, SPX, XHProf and similar) stops the run.
+2. Each round runs the (document, parser) pairs in a shuffled order, seeded from `--seed` and the round number; both trees use the same order. For each pair: the document is loaded into both workers if it is not already; each runs at least `--warmup` untimed parses for at least `--warmup-ms`; each runs one calibration parse, and the slower of the two sets the number of parses per sample so that a sample lasts at least `--min-sample-ms`.
 3. The samples are taken alternating between trees, and the tree that goes first alternates each sample (A B, B A, A B, ...). Each sample calls `gc_collect_cycles()` first, then times its parses with `hrtime( true )`.
 4. The per-sample measure is nanoseconds per parse. Per document, parser and tree: median, min, mean, standard deviation, coefficient of variation (CV), MB/s and tokens/s from the median.
 
@@ -88,6 +89,10 @@ With one round (`--rounds 1`), the interval is a bootstrap: 2000 times, draw hea
 The bootstrap only sees the spread between samples of one process. Two PHP processes running identical code do not run at identical speed: memory layout and scheduling give each process its own offset, which on this machine is 0.3% to 1% and which is constant for the life of the process, so interleaving cannot cancel it. When the samples are tight (CV around 0.3%), the one-round interval is narrower than that offset, and an A/A run returns `faster` or `slower` on some rows at the 0.5% level.
 
 `--rounds N` with N of 2 or more (the default is 4) starts a fresh pair of workers for each round and repeats the whole schedule. Each round then has its own ratio of medians per document, and the interval is a t-interval over the per-round log ratios (N minus 1 degrees of freedom); the overall interval is a t-interval over the per-round geometric means. The point estimate becomes the geometric mean of the per-round ratios, and the per-tree columns show the mean of the per-round medians. With 3 rounds the interval covers changes of about 2%; with 5 rounds about 1%. Use rounds when the claim is below a few percent.
+
+### The tracing JIT
+
+With `--jit`, a process compiles traces for the code paths it runs first, and those traces set the speed of everything it runs afterwards. On this corpus, a process that parsed wordpress.org's home page first ran it and every later document 10% to 16% slower than a process that started with a Wikipedia article or RFC 9110. That is why each round shuffles its order: rounds then differ in history, and the interval over rounds includes the effect. The HTML Processor needs about six parses before its traces settle, against three for the Tag Processor, which is why `--jit` raises the warmup. The saved JSON records each round's order under `orders`.
 
 ### A/A validation
 
@@ -140,15 +145,25 @@ php tests/performance/html-api/compare.php before.json after.json
 
 The head tree of each file is used, matched by document id and parser. Prefer a live A/B when both checkouts are available.
 
+## Timed runs take a lock
+
+Two timed runs at once slow each other and corrupt both results. `bench.php` holds an exclusive lock on `/tmp/wp-html-api-bench.lock` from the first worker to the report, and waits, saying so on stderr, while another run holds it. Run any other timing or profiling through the same lock:
+
+```
+php tests/performance/html-api/with-lock.php php -d extension=excimer.so profile-script.php
+```
+
 ## Files
 
 - `bench.php`: the orchestrator.
 - `worker.php`: a subprocess that loads one checkout's HTML API and runs timed jobs read as JSON lines on stdin, answering on stdout.
 - `compare.php`: compares two `--save` files.
+- `with-lock.php`: runs a command while holding the benchmark lock.
 - `fetch-corpus.php`: restores `corpus/real/` from `corpus/manifest.json`.
 - `lib/class-benchmark-bootstrap.php`: loads the HTML API from a checkout root with stubs for the WordPress functions it calls.
 - `lib/class-benchmark-synthetic.php`: the shape generator.
 - `lib/class-benchmark-stats.php`: median, bootstrap, t-interval, geometric mean, formatting.
 - `lib/class-benchmark-report.php`: table, markdown and JSON output.
+- `lib/class-benchmark-lock.php`: the lock shared by `bench.php` and `with-lock.php`.
 
 `bench.php` and `compare.php` need PHP 8.1 or newer; the workers run on whatever `--php` names, as long as the checkout's HTML API loads there.

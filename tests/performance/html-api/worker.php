@@ -148,6 +148,18 @@ function benchmark_worker_git_head( string $checkout ): ?string {
 }
 
 /**
+ * Lists loaded extensions that hook execution to profile or trace it.
+ *
+ * They change timings, so bench.php refuses to run a worker that has any.
+ *
+ * @return string[] Extension names.
+ */
+function benchmark_worker_profilers(): array {
+	$names = array( 'xdebug', 'excimer', 'spx', 'tideways_xhprof', 'tideways', 'xhprof', 'blackfire', 'pcov', 'memprof', 'meminfo', 'opentelemetry', 'newrelic', 'ddtrace' );
+	return array_values( array_filter( $names, 'extension_loaded' ) );
+}
+
+/**
  * Reports the JIT mode actually in effect, or null when the JIT is off.
  *
  * @param bool $opcache_enabled Whether opcache is enabled for this process.
@@ -204,12 +216,13 @@ while ( false !== ( $line = fgets( STDIN ) ) ) {
 				$opcache_enabled = extension_loaded( 'Zend OPcache' ) && filter_var( ini_get( 'opcache.enable_cli' ), FILTER_VALIDATE_BOOLEAN ) && filter_var( ini_get( 'opcache.enable' ), FILTER_VALIDATE_BOOLEAN );
 				benchmark_worker_reply(
 					array(
-						'ok'       => true,
-						'php'      => PHP_VERSION,
-						'opcache'  => $opcache_enabled,
-						'jit'      => benchmark_worker_jit_mode( $opcache_enabled ),
-						'checkout' => false === realpath( $checkout ) ? $checkout : realpath( $checkout ),
-						'head'     => benchmark_worker_git_head( $checkout ),
+						'ok'        => true,
+						'php'       => PHP_VERSION,
+						'opcache'   => $opcache_enabled,
+						'jit'       => benchmark_worker_jit_mode( $opcache_enabled ),
+						'profilers' => benchmark_worker_profilers(),
+						'checkout'  => false === realpath( $checkout ) ? $checkout : realpath( $checkout ),
+						'head'      => benchmark_worker_git_head( $checkout ),
 					)
 				);
 				break;
@@ -234,6 +247,29 @@ while ( false !== ( $line = fgets( STDIN ) ) ) {
 						'ok'    => true,
 						'id'    => $request['id'],
 						'bytes' => strlen( $html ),
+					)
+				);
+				break;
+
+			case 'warmup':
+				// Untimed parses: at least `iterations`, and for at least `min_ms` milliseconds,
+				// so that the tracing JIT has compiled the hot paths before sampling.
+				if ( ! isset( $request['id'], $documents[ $request['id'] ] ) ) {
+					throw new InvalidArgumentException( 'unknown document id' );
+				}
+				$html     = $documents[ $request['id'] ];
+				$parse    = benchmark_worker_parser( (string) ( $request['parser'] ?? '' ) );
+				$min      = max( 0, (int) ( $request['iterations'] ?? 0 ) );
+				$until_ns = hrtime( true ) + (int) ( max( 0, (float) ( $request['min_ms'] ?? 0 ) ) * 1e6 );
+				$parses   = 0;
+				while ( $parses < $min || hrtime( true ) < $until_ns ) {
+					$parse( $html );
+					++$parses;
+				}
+				benchmark_worker_reply(
+					array(
+						'ok'     => true,
+						'parses' => $parses,
 					)
 				);
 				break;
