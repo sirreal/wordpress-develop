@@ -95,7 +95,7 @@ foreach ( array( 'php', 'opcache', 'jit' ) as $key ) {
 		$notes[] = sprintf( 'The runs differ in %s: base %s, head %s.', $key, json_encode( $base_result['trees']['head'][ $key ] ?? null ), json_encode( $head_result['trees']['head'][ $key ] ?? null ) );
 	}
 }
-foreach ( array( 'samples', 'min_sample_ms', 'warmup', 'rounds', 'synthetic_size' ) as $key ) {
+foreach ( array( 'samples', 'min_sample_ms', 'warmup', 'warmup_ms', 'rounds', 'synthetic_size' ) as $key ) {
 	if ( ( $base_result['config'][ $key ] ?? null ) !== ( $head_result['config'][ $key ] ?? null ) ) {
 		$notes[] = sprintf( 'The runs differ in %s: base %s, head %s.', $key, json_encode( $base_result['config'][ $key ] ?? null ), json_encode( $head_result['config'][ $key ] ?? null ) );
 	}

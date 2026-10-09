@@ -19,6 +19,7 @@ if ( PHP_VERSION_ID < 80100 ) {
 
 require_once __DIR__ . '/lib/class-benchmark-stats.php';
 require_once __DIR__ . '/lib/class-benchmark-report.php';
+require_once __DIR__ . '/lib/class-benchmark-lock.php';
 
 /**
  * Prints a message to stderr and exits.
@@ -42,7 +43,7 @@ function benchmark_fail( string $message, int $code = 1 ): void {
 function benchmark_parse_options( array $argv ): array {
 	$flags      = array( 'opcache', 'no-opcache', 'jit', 'synthetic', 'no-synthetic', 'no-corpus', 'include-optional', 'quiet', 'list', 'help' );
 	$repeatable = array( 'corpus' );
-	$valued     = array( 'head', 'base', 'php', 'php-args', 'parser', 'synthetic-size', 'seed', 'filter', 'samples', 'min-sample-ms', 'warmup', 'rounds', 'format', 'save' );
+	$valued     = array( 'head', 'base', 'php', 'php-args', 'parser', 'synthetic-size', 'seed', 'filter', 'samples', 'min-sample-ms', 'warmup', 'warmup-ms', 'rounds', 'format', 'save' );
 
 	$options = array( 'corpus' => array() );
 	$count   = count( $argv );
@@ -111,7 +112,8 @@ Usage: php bench.php [options]
   --filter <substring|/regex/>  Restrict document ids.
   --samples <n>            Timed samples per document, parser and tree, per round (default: 10).
   --min-sample-ms <n>      Minimum duration of one sample (default: 25).
-  --warmup <n>             Untimed parses before sampling (default: 2).
+  --warmup <n>             Untimed parses before sampling (default: 2; 10 with --jit).
+  --warmup-ms <n>          Keep warming up for at least this long (default: 0; 200 with --jit).
   --rounds <n>             Repeat the whole run with a fresh pair of workers each time (default: 4).
                            Each PHP process runs the same code at a slightly different speed; more
                            rounds turn that per-process offset into measured variance.
@@ -534,6 +536,9 @@ function benchmark_start_workers( array $config, array $worker_args, int $round 
 	$workers = array();
 	foreach ( $labels as $label ) {
 		$workers[ $label ] = new Benchmark_Worker( $label, $config[ $label ], $config['php'], $worker_args );
+		if ( ! empty( $workers[ $label ]->hello['profilers'] ) ) {
+			benchmark_fail( "The {$label} worker has profiler extensions loaded, which change timings: " . implode( ', ', $workers[ $label ]->hello['profilers'] ) . '. Run the benchmark without them.' );
+		}
 	}
 	return $workers;
 }
@@ -545,130 +550,179 @@ function benchmark_start_workers( array $config, array $worker_args, int $round 
  * @param array              $documents Documents.
  * @param Benchmark_Worker[] $workers   Workers keyed by label.
  * @param string[]           $parsers   Parser ids.
+ * @param array[]            $order     Jobs in run order, from benchmark_round_order().
  * @param int                $round     Round number, from 1.
  * @return array Raw rows keyed by "id\0parser": id, parser, bytes, iterations, trees => label => samples_ns, tokens, bailed, peak_bytes, peak_alloc_bytes.
  */
-function benchmark_run_round( array $config, array $documents, array $workers, array $parsers, int $round ): array {
+function benchmark_run_round( array $config, array $documents, array $workers, array $parsers, array $order, int $round ): array {
 	$labels     = array_keys( $workers );
 	$is_ab      = isset( $workers['base'] );
 	$rows       = array();
+	$loaded     = array();
 	$temp_files = array();
 	$total      = count( $documents ) * count( $parsers );
 	$done       = 0;
 	$prefix     = $config['rounds'] > 1 ? sprintf( '[round %d/%d] ', $round, $config['rounds'] ) : '';
 
-	foreach ( $documents as $document ) {
-		foreach ( $workers as $worker ) {
-			benchmark_load_document( $worker, $document, $temp_files );
+	foreach ( $order as $job ) {
+		$document = $documents[ $job['document'] ];
+		$parser   = $job['parser'];
+		$id       = $document['id'];
+		++$done;
+
+		if ( ! isset( $loaded[ $id ] ) ) {
+			foreach ( $workers as $worker ) {
+				benchmark_load_document( $worker, $document, $temp_files );
+			}
+			$loaded[ $id ] = true;
 		}
 
-		foreach ( $parsers as $parser ) {
-			++$done;
-			$id = $document['id'];
-
-			// Warm up.
-			if ( $config['warmup'] > 0 ) {
-				foreach ( $workers as $worker ) {
-					$worker->request(
-						array(
-							'op'         => 'run',
-							'id'         => $id,
-							'parser'     => $parser,
-							'iterations' => $config['warmup'],
-						)
-					);
-				}
-			}
-
-			// Calibrate: one parse per tree, iterations from the slower tree.
-			$slowest_ns = 0;
+		// Warm up.
+		if ( $config['warmup'] > 0 || $config['warmup_ms'] > 0 ) {
 			foreach ( $workers as $worker ) {
-				$reply      = $worker->request(
+				$worker->request(
 					array(
-						'op'     => 'calibrate',
-						'id'     => $id,
-						'parser' => $parser,
+						'op'         => 'warmup',
+						'id'         => $id,
+						'parser'     => $parser,
+						'iterations' => $config['warmup'],
+						'min_ms'     => $config['warmup_ms'],
 					)
 				);
-				$slowest_ns = max( $slowest_ns, (int) $reply['ns'] );
 			}
-			$iterations = max( 1, (int) ceil( ( $config['min_sample_ms'] * 1e6 ) / max( 1, $slowest_ns ) ) );
-
-			// Sample with ABBA interleaving.
-			$trees = array();
-			foreach ( $labels as $label ) {
-				$trees[ $label ] = array(
-					'samples_ns'       => array(),
-					'tokens'           => 0,
-					'bailed'           => null,
-					'peak_bytes'       => 0,
-					'peak_alloc_bytes' => 0,
-				);
-			}
-			for ( $sample = 1; $sample <= $config['samples']; $sample++ ) {
-				$order = $labels;
-				if ( 0 === $sample % 2 ) {
-					$order = array_reverse( $order );
-				}
-				foreach ( $order as $label ) {
-					$reply = $workers[ $label ]->request(
-						array(
-							'op'         => 'run',
-							'id'         => $id,
-							'parser'     => $parser,
-							'iterations' => $iterations,
-						)
-					);
-
-					$trees[ $label ]['samples_ns'][]     = (int) $reply['ns'] / $iterations;
-					$trees[ $label ]['tokens']           = (int) $reply['tokens'];
-					$trees[ $label ]['bailed']           = $reply['bailed'];
-					$trees[ $label ]['peak_bytes']       = max( $trees[ $label ]['peak_bytes'], (int) $reply['peak_bytes'] );
-					$trees[ $label ]['peak_alloc_bytes'] = max( $trees[ $label ]['peak_alloc_bytes'], (int) ( $reply['peak_alloc_bytes'] ?? 0 ) );
-				}
-			}
-
-			$rows[ "{$id}\0{$parser}" ] = array(
-				'id'         => $id,
-				'parser'     => $parser,
-				'bytes'      => $document['bytes'],
-				'iterations' => $iterations,
-				'trees'      => $trees,
-			);
-
-			$status = sprintf( '%s[%d/%d] %s %s: %d x %d parses', $prefix, $done, $total, $id, $parser, $config['samples'], $iterations );
-			if ( $is_ab ) {
-				$base_median = Benchmark_Stats::median( $trees['base']['samples_ns'] );
-				$head_median = Benchmark_Stats::median( $trees['head']['samples_ns'] );
-				$status     .= sprintf(
-					', base %s ms, head %s ms, %s',
-					Benchmark_Stats::format_ms( $base_median ),
-					Benchmark_Stats::format_ms( $head_median ),
-					Benchmark_Stats::format_pct( ( $head_median / $base_median - 1.0 ) * 100.0 )
-				);
-			} else {
-				$stats   = Benchmark_Stats::summarize( $trees['head']['samples_ns'], $document['bytes'], $trees['head']['tokens'] );
-				$status .= sprintf(
-					', median %s ms, %s MB/s, CV %s',
-					Benchmark_Stats::format_ms( $stats['median_ns'] ),
-					Benchmark_Stats::format_rate( $stats['mb_per_s'] ),
-					Benchmark_Stats::format_cv( $stats['cv'] )
-				);
-			}
-			foreach ( $labels as $label ) {
-				if ( null !== $trees[ $label ]['bailed'] ) {
-					$status .= " [{$label} bailed]";
-				}
-			}
-			benchmark_progress( $status );
 		}
+
+		// Calibrate: one parse per tree, iterations from the slower tree.
+		$slowest_ns = 0;
+		foreach ( $workers as $worker ) {
+			$reply      = $worker->request(
+				array(
+					'op'     => 'calibrate',
+					'id'     => $id,
+					'parser' => $parser,
+				)
+			);
+			$slowest_ns = max( $slowest_ns, (int) $reply['ns'] );
+		}
+		$iterations = max( 1, (int) ceil( ( $config['min_sample_ms'] * 1e6 ) / max( 1, $slowest_ns ) ) );
+
+		// Sample with ABBA interleaving.
+		$trees = array();
+		foreach ( $labels as $label ) {
+			$trees[ $label ] = array(
+				'samples_ns'       => array(),
+				'tokens'           => 0,
+				'bailed'           => null,
+				'peak_bytes'       => 0,
+				'peak_alloc_bytes' => 0,
+			);
+		}
+		for ( $sample = 1; $sample <= $config['samples']; $sample++ ) {
+			$order = $labels;
+			if ( 0 === $sample % 2 ) {
+				$order = array_reverse( $order );
+			}
+			foreach ( $order as $label ) {
+				$reply = $workers[ $label ]->request(
+					array(
+						'op'         => 'run',
+						'id'         => $id,
+						'parser'     => $parser,
+						'iterations' => $iterations,
+					)
+				);
+
+				$trees[ $label ]['samples_ns'][]     = (int) $reply['ns'] / $iterations;
+				$trees[ $label ]['tokens']           = (int) $reply['tokens'];
+				$trees[ $label ]['bailed']           = $reply['bailed'];
+				$trees[ $label ]['peak_bytes']       = max( $trees[ $label ]['peak_bytes'], (int) $reply['peak_bytes'] );
+				$trees[ $label ]['peak_alloc_bytes'] = max( $trees[ $label ]['peak_alloc_bytes'], (int) ( $reply['peak_alloc_bytes'] ?? 0 ) );
+			}
+		}
+
+		$rows[ "{$id}\0{$parser}" ] = array(
+			'id'         => $id,
+			'parser'     => $parser,
+			'bytes'      => $document['bytes'],
+			'iterations' => $iterations,
+			'trees'      => $trees,
+		);
+
+		$status = sprintf( '%s[%d/%d] %s %s: %d x %d parses', $prefix, $done, $total, $id, $parser, $config['samples'], $iterations );
+		if ( $is_ab ) {
+			$base_median = Benchmark_Stats::median( $trees['base']['samples_ns'] );
+			$head_median = Benchmark_Stats::median( $trees['head']['samples_ns'] );
+			$status     .= sprintf(
+				', base %s ms, head %s ms, %s',
+				Benchmark_Stats::format_ms( $base_median ),
+				Benchmark_Stats::format_ms( $head_median ),
+				Benchmark_Stats::format_pct( ( $head_median / $base_median - 1.0 ) * 100.0 )
+			);
+		} else {
+			$stats   = Benchmark_Stats::summarize( $trees['head']['samples_ns'], $document['bytes'], $trees['head']['tokens'] );
+			$status .= sprintf(
+				', median %s ms, %s MB/s, CV %s',
+				Benchmark_Stats::format_ms( $stats['median_ns'] ),
+				Benchmark_Stats::format_rate( $stats['mb_per_s'] ),
+				Benchmark_Stats::format_cv( $stats['cv'] )
+			);
+		}
+		foreach ( $labels as $label ) {
+			if ( null !== $trees[ $label ]['bailed'] ) {
+				$status .= " [{$label} bailed]";
+			}
+		}
+		benchmark_progress( $status );
 	}
 
 	foreach ( $temp_files as $temp ) {
 		@unlink( $temp );
 	}
 
-	return $rows;
+	// Report rows in document order whatever order they ran in.
+	$ordered = array();
+	foreach ( $documents as $document ) {
+		foreach ( $parsers as $parser ) {
+			$key             = "{$document['id']}\0{$parser}";
+			$ordered[ $key ] = $rows[ $key ];
+		}
+	}
+	return $ordered;
+}
+
+/**
+ * Returns the order in which one round runs its (document, parser) jobs.
+ *
+ * Under the tracing JIT, the code paths a process compiles first change the
+ * speed of everything it runs afterwards, by 10% to 16% on this corpus. A
+ * fixed order would give every round the same history and keep that effect
+ * out of the interval, so each round shuffles the jobs, seeded from the seed
+ * and the round number. Both trees run the same order within a round.
+ *
+ * @param array    $documents Documents.
+ * @param string[] $parsers   Parser ids.
+ * @param int      $seed      Seed.
+ * @param int      $round     Round number, from 1.
+ * @return array[] Jobs: document => index into $documents, parser => parser id.
+ */
+function benchmark_round_order( array $documents, array $parsers, int $seed, int $round ): array {
+	$jobs = array();
+	foreach ( array_keys( $documents ) as $index ) {
+		foreach ( $parsers as $parser ) {
+			$jobs[] = array(
+				'document' => $index,
+				'parser'   => $parser,
+			);
+		}
+	}
+	mt_srand( crc32( "order {$seed} {$round}" ), MT_RAND_MT19937 );
+	for ( $i = count( $jobs ) - 1; $i > 0; $i-- ) {
+		$j          = mt_rand( 0, $i );
+		$swap       = $jobs[ $i ];
+		$jobs[ $i ] = $jobs[ $j ];
+		$jobs[ $j ] = $swap;
+	}
+	return $jobs;
 }
 
 /**
@@ -684,6 +738,7 @@ function benchmark_run( array $config, array $documents, array $worker_args ): a
 	$parsers    = 'both' === $config['parser'] ? array( 'tag', 'html' ) : array( $config['parser'] );
 	$trees_info = array();
 	$merged     = array();
+	$orders     = array();
 
 	for ( $round = 1; $round <= $config['rounds']; $round++ ) {
 		$workers = benchmark_start_workers( $config, $worker_args, $round );
@@ -704,7 +759,14 @@ function benchmark_run( array $config, array $documents, array $worker_args ): a
 			}
 		}
 
-		$rows = benchmark_run_round( $config, $documents, $workers, $parsers, $round );
+		$order    = benchmark_round_order( $documents, $parsers, $config['seed'], $round );
+		$rows     = benchmark_run_round( $config, $documents, $workers, $parsers, $order, $round );
+		$orders[] = array_map(
+			static function ( $job ) use ( $documents ) {
+				return $documents[ $job['document'] ]['id'] . ' ' . $job['parser'];
+			},
+			$order
+		);
 
 		foreach ( $workers as $worker ) {
 			$worker->quit();
@@ -767,6 +829,7 @@ function benchmark_run( array $config, array $documents, array $worker_args ): a
 			$documents
 		),
 		'results'   => $results,
+		'orders'    => $orders,
 		'summary'   => benchmark_summarize( $results, $labels, $is_ab, $config['seed'] ),
 		'notes'     => array(),
 	);
@@ -911,7 +974,8 @@ $config = array(
 	'include_optional' => isset( $options['include-optional'] ),
 	'samples'          => (int) ( $options['samples'] ?? 10 ),
 	'min_sample_ms'    => (int) ( $options['min-sample-ms'] ?? 25 ),
-	'warmup'           => (int) ( $options['warmup'] ?? 2 ),
+	'warmup'           => (int) ( $options['warmup'] ?? ( $jit ? 10 : 2 ) ),
+	'warmup_ms'        => (int) ( $options['warmup-ms'] ?? ( $jit ? 200 : 0 ) ),
 	'rounds'           => (int) ( $options['rounds'] ?? 4 ),
 	'format'           => $format,
 	'head'             => $head,
@@ -952,6 +1016,7 @@ if ( '' !== $config['php_args'] ) {
 	$worker_args = array_merge( $worker_args, preg_split( '/\s+/', trim( $config['php_args'] ) ) );
 }
 
+$lock   = Benchmark_Lock::acquire( 'bench.php ' . implode( ' ', array_slice( $argv, 1 ) ) );
 $result = benchmark_run( $config, $documents, $worker_args );
 
 if ( isset( $options['save'] ) ) {

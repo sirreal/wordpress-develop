@@ -93,10 +93,11 @@ class Benchmark_Report {
 			);
 		}
 		$lines[] = sprintf(
-			'Samples: %d per document, parser and tree; min sample %d ms; warmup %d; rounds %d (a fresh worker pair each); seed %d; bootstrap resamples %d',
+			'Samples: %d per document, parser and tree; min sample %d ms; warmup %d parses and %d ms; rounds %d (a fresh worker pair each, shuffled order); seed %d; bootstrap resamples %d',
 			$config['samples'],
 			$config['min_sample_ms'],
 			$config['warmup'],
+			$config['warmup_ms'] ?? 0,
 			$config['rounds'] ?? 1,
 			$config['seed'],
 			Benchmark_Stats::RESAMPLES
