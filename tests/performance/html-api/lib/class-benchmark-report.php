@@ -217,6 +217,18 @@ class Benchmark_Report {
 					$overall['documents'],
 					$overall['method'] ?? 'bootstrap'
 				);
+				if ( ! empty( $overall['round_geomeans'] ) ) {
+					// One slow round (a worker stuck on a slow core) widens the interval; show where it came from.
+					$lines[] = 'Per round: ' . implode(
+						' ',
+						array_map(
+							static function ( $ratio ) {
+								return Benchmark_Stats::format_pct( ( $ratio - 1.0 ) * 100.0 );
+							},
+							$overall['round_geomeans']
+						)
+					);
+				}
 			}
 		}
 
