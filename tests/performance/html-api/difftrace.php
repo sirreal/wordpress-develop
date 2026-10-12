@@ -252,6 +252,35 @@ function difftrace_edge_cases(): array {
 		'<p>' . str_repeat( ' ', 300 ) . '</p>',
 	);
 
+	// Special elements: case, near-miss names, NUL bytes, and leading newlines.
+	array_push(
+		$cases,
+		'<TITLE>a</title>',
+		'<titlex>y</titlex>',
+		"<listing>\nx</listing>",
+		"<LISTING>\r\nx",
+		'<svg><title>a</title></svg>',
+		'<textarea/>a</textarea>',
+		'</script>',
+		"<scri\0pt>x</script>",
+		"<title\0>x</title>",
+		"<t\xC4\xB1tle>x</title>",
+		'<IFRAME>x</iframe>',
+		'<NoEmBeD>x</noembed>',
+		'<NOFRAMES>x</noframes>',
+		'<Xmp>x</xmp>',
+		'<scripts>x</scripts>',
+		'<styles>x',
+		"<pre>\n\nx</pre>",
+		"<pre a=b>\nx</pre>",
+		"<textarea>\n\nx</textarea>",
+		'<p><xmp>b</xmp>c',
+		'<p><title>b</title>c',
+		'<table data-a=1><textarea>x</textarea>',
+		"<table><tr><td><pre><br><td>\ny</table>",
+		"<pre>\nx</pre><listing>\ny</listing>"
+	);
+
 	// Every whitespace byte at every place the tokenizer skips or ends on whitespace.
 	foreach ( array( ' ', "\t", "\f", "\r", "\n", "\r\n" ) as $ws ) {
 		$cases[] = "<a{$ws}b{$ws}={$ws}c{$ws}d{$ws}={$ws}\"e\"{$ws}f{$ws}={$ws}'g'{$ws}h{$ws}/{$ws}>";
@@ -438,13 +467,17 @@ function difftrace_tag_walk( string $id, string $html, string $walk, int $seed, 
 	$b = new WP_HTML_Tag_Processor_Head( $html );
 	mt_srand( crc32( "{$seed} {$id} {$walk}" ), MT_RAND_MT19937 );
 
-	$limit     = in_array( $walk, array( 'modify', 'bookmarks' ), true ) ? 20000 : PHP_INT_MAX;
+	$limit     = in_array( $walk, array( 'modify', 'bookmarks', 'mixed' ), true ) ? 20000 : PHP_INT_MAX;
 	$snapshot  = null;
 	$bookmarks = array();
 	$seeks     = 0;
 	for ( $step = 0; $step < $limit; $step++ ) {
 		$action = array( 'next_token' );
-		switch ( $walk ) {
+		$kind   = $walk;
+		if ( 'mixed' === $walk ) {
+			$kind = mt_rand( 0, 1 ) ? 'modify' : 'bookmarks';
+		}
+		switch ( $kind ) {
 			case 'tag':
 				$action = array( 'next_tag' );
 				break;
@@ -551,16 +584,39 @@ function difftrace_tag_walk( string $id, string $html, string $walk, int $seed, 
 /**
  * Serializes the HTML Processor's token stream for one input.
  *
- * @param string $html Input.
+ * With `$modify`, it also sets an attribute on some opening tags and calls
+ * get_updated_html() on some tokens (on every token of a small input, at most
+ * 20 times per input), which makes the processor parse the current token
+ * again, and records what those calls return.
+ *
+ * @param string $html   Input.
+ * @param bool   $modify Whether to modify while walking.
  * @return string[] One line per token, then the final state.
  */
-function difftrace_html_stream( string $html ): array {
+function difftrace_html_stream( string $html, bool $modify = false ): array {
 	$lines = array();
 	$p     = WP_HTML_Processor::create_full_parser( $html );
 	if ( null === $p ) {
 		return array( 'create_full_parser returned null' );
 	}
+	mt_srand( crc32( $html ), MT_RAND_MT19937 );
+	$flushes = 0;
+	// Small inputs set an attribute on half the opening tags and flush on every token, so that a flush
+	// lands on virtual tokens and after errors; large inputs do both rarely.
+	$small     = strlen( $html ) < 2000;
+	$set_below = $small ? 50 : 20;
 	while ( $p->next_token() ) {
+		if ( $modify ) {
+			// Flush before modifying, so that an update set on one token is still pending at the next.
+			$roll = mt_rand( 0, 99 );
+			if ( ( $small || ( $roll >= 20 && $roll < 25 ) ) && ++$flushes <= 20 ) {
+				// Each call copies and reparses the whole document; a cap keeps large inputs linear.
+				$lines[] = 'get_updated_html ' . sha1( $p->get_updated_html() );
+			}
+			if ( $roll < $set_below && '#tag' === $p->get_token_type() && ! $p->is_tag_closer() ) {
+				$lines[] = 'set_attribute ' . var_export( $p->set_attribute( 'data-x', 'y' ), true );
+			}
+		}
 		$attributes = array();
 		foreach ( (array) $p->get_attribute_names_with_prefix( '' ) as $name ) {
 			$attributes[] = $name . '=' . var_export( $p->get_attribute( $name ), true );
@@ -596,14 +652,8 @@ function difftrace_child( string $checkout, array $options, array $extra ): arra
 		array( PHP_BINARY, '-d', 'memory_limit=-1', __FILE__, '--seed', (string) $options['seed'], '--mutations', (string) $options['mutations'] ),
 		$extra
 	);
-	$process = proc_open(
-		$command,
-		array(
-			1 => array( 'pipe', 'w' ),
-			2 => STDERR,
-		),
-		$pipes
-	);
+	// Stderr is left out of the spec so the child inherits it: passing STDERR makes PHP seek the shared offset.
+	$process = proc_open( $command, array( 1 => array( 'pipe', 'w' ) ), $pipes );
 	$output  = stream_get_contents( $pipes[1] );
 	fclose( $pipes[1] );
 	if ( 0 !== proc_close( $process ) ) {
@@ -620,7 +670,7 @@ $seed    = (int) $options['seed'];
 if ( isset( $options['emit-html'] ) ) {
 	Benchmark_Bootstrap::load( $options['emit-html'] );
 	foreach ( difftrace_inputs( $seed, (int) $options['mutations'] ) as $id => $html ) {
-		echo $id, "\t", sha1( implode( "\n", difftrace_html_stream( $html ) ) ), "\n";
+		echo $id, "\t", sha1( implode( "\n", array_merge( difftrace_html_stream( $html ), array( 'modified' ), difftrace_html_stream( $html, true ) ) ) ), "\n";
 	}
 	exit( 0 );
 }
@@ -629,7 +679,7 @@ if ( isset( $options['emit-html-detail'] ) ) {
 	Benchmark_Bootstrap::load( $checkout );
 	foreach ( difftrace_inputs( $seed, (int) $options['mutations'] ) as $id => $html ) {
 		if ( $id === $wanted ) {
-			echo implode( "\n", difftrace_html_stream( $html ) ), "\n";
+			echo implode( "\n", array_merge( difftrace_html_stream( $html ), array( 'modified' ), difftrace_html_stream( $html, true ) ) ), "\n";
 			exit( 0 );
 		}
 	}
@@ -667,7 +717,7 @@ if ( ! isset( $options['html-only'] ) ) {
 	$shown  = 0;
 	foreach ( difftrace_inputs( $seed, (int) $options['mutations'] ) as $id => $html ) {
 		++$inputs;
-		foreach ( array( 'token', 'tag', 'closers', 'query', 'modify', 'bookmarks' ) as $walk ) {
+		foreach ( array( 'token', 'tag', 'closers', 'query', 'modify', 'bookmarks', 'mixed' ) as $walk ) {
 			$difference = difftrace_tag_walk( $id, $html, $walk, $seed, $steps );
 			if ( null === $difference ) {
 				continue;
@@ -684,7 +734,7 @@ if ( ! isset( $options['html-only'] ) ) {
 			}
 		}
 	}
-	printf( "Tag Processor: %d inputs, 6 walks each, %d steps compared, %d walks differ.\n", $inputs, $steps, $failures );
+	printf( "Tag Processor: %d inputs, 7 walks each, %d steps compared, %d walks differ.\n", $inputs, $steps, $failures );
 }
 
 if ( ! isset( $options['tag-only'] ) ) {

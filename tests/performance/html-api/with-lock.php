@@ -19,8 +19,10 @@ if ( empty( $command ) ) {
 	exit( 2 );
 }
 
-$lock    = Benchmark_Lock::acquire( 'with-lock.php ' . implode( ' ', $command ) );
-$process = proc_open( $command, array( STDIN, STDOUT, STDERR ), $pipes );
+$lock = Benchmark_Lock::acquire( 'with-lock.php ' . implode( ' ', $command ) );
+// An empty spec lets the child inherit stdin, stdout and stderr; passing STDOUT or STDERR makes
+// PHP seek a redirected file's shared offset, and the outputs then overwrite each other.
+$process = proc_open( $command, array(), $pipes );
 if ( false === $process ) {
 	fwrite( STDERR, 'with-lock.php: could not start ' . $command[0] . "\n" );
 	exit( 2 );
