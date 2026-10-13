@@ -1,0 +1,94 @@
+name: HTML API benchmark A/A
+
+# Measures the noise of tests/performance/html-api/bench.php on GitHub-hosted runners.
+# Both trees are the same checkout, so every difference the report shows is noise.
+# Each matrix job runs on its own runner, so the three runs per JIT setting also
+# show how much results vary between runners.
+on:
+  push:
+    branches:
+      - html-api/benchmark-ci-aa
+  workflow_dispatch:
+
+# Disable permissions for all available scopes by default.
+# Any needed permissions should be configured at the job level.
+permissions: {}
+
+jobs:
+  # Runs one A/A benchmark over the synthetic documents.
+  #
+  # Performs the following steps:
+  # - Checks out the repository.
+  # - Sets up PHP.
+  # - Logs the runner's CPU and PHP configuration.
+  # - Runs the A/A benchmark and writes the report to the job summary.
+  # - Uploads the full JSON result and the CPU description.
+  aa:
+    name: A/A, JIT ${{ matrix.jit }}, run ${{ matrix.run }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        jit: [ 'on', 'off' ]
+        run: [ 1, 2, 3 ]
+    defaults:
+      run:
+        shell: bash
+    env:
+      JIT: ${{ matrix.jit }}
+      RESULT: aa-jit-${{ matrix.jit }}-run-${{ matrix.run }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          show-progress: ${{ runner.debug == '1' && 'true' || 'false' }}
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Log runner information
+        run: |
+          mkdir -p "$RESULT"
+          lscpu | tee "$RESULT/lscpu.txt"
+          php --version
+          php -i | grep -E '^opcache\.(enable|enable_cli|jit|jit_buffer_size) '
+          {
+            echo '### Runner'
+            echo '```'
+            grep -E '^(Model name|CPU\(s\)):' "$RESULT/lscpu.txt"
+            php --version | head -n 1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The JIT-off run disables the JIT explicitly in case php.ini enables it.
+      - name: Run the A/A benchmark
+        run: |
+          if [ 'on' = "$JIT" ]; then
+            jit_args=( --jit )
+          else
+            jit_args=( '--php-args=-d opcache.jit=disable' )
+          fi
+          php tests/performance/html-api/bench.php \
+            --base . \
+            --head . \
+            --no-corpus \
+            "${jit_args[@]}" \
+            --format markdown \
+            --save "$RESULT/result.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the result
+        if: ${{ ! cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULT }}
+          path: ${{ env.RESULT }}
+          if-no-files-found: error
