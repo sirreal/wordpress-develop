@@ -2,8 +2,8 @@ name: HTML API benchmark A/A
 
 # Measures the noise of tests/performance/html-api/bench.php on GitHub-hosted runners.
 # Both trees are the same checkout, so every difference the report shows is noise.
-# Each matrix job runs on its own runner, so the three runs per JIT setting also
-# show how much results vary between runners.
+# Each job runs all of its A/A runs back to back on one runner, so differences
+# between the runs in a job are not differences between machines.
 on:
   push:
     branches:
@@ -15,31 +15,29 @@ on:
 permissions: {}
 
 jobs:
-  # Runs one A/A benchmark over the synthetic documents.
+  # Runs three A/A benchmarks with the tracing JIT and three without over the synthetic documents.
   #
   # Performs the following steps:
   # - Checks out the repository.
   # - Sets up PHP.
   # - Logs the runner's CPU and PHP configuration.
-  # - Runs the A/A benchmark and writes the report to the job summary.
-  # - Uploads the full JSON result and the CPU description.
+  # - Runs the A/A benchmarks, alternating JIT on and off, and writes the reports to the job summary.
+  # - Uploads the full JSON results and the CPU description.
   aa:
-    name: A/A, JIT ${{ matrix.jit }}, run ${{ matrix.run }}
-    runs-on: ubuntu-24.04
+    name: A/A on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        jit: [ 'on', 'off' ]
-        run: [ 1, 2, 3 ]
+        os: [ 'ubuntu-24.04', 'ubuntu-24.04-arm' ]
     defaults:
       run:
         shell: bash
     env:
-      JIT: ${{ matrix.jit }}
-      RESULT: aa-jit-${{ matrix.jit }}-run-${{ matrix.run }}
+      RESULT: aa-${{ matrix.os }}
 
     steps:
       - name: Checkout repository
@@ -68,24 +66,29 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The JIT-off run disables the JIT explicitly in case php.ini enables it.
-      - name: Run the A/A benchmark
+      # The JIT-off runs disable the JIT explicitly because setup-php's php.ini enables it.
+      - name: Run the A/A benchmarks
         run: |
-          if [ 'on' = "$JIT" ]; then
-            jit_args=( --jit )
-          else
-            jit_args=( '--php-args=-d opcache.jit=disable' )
-          fi
-          php tests/performance/html-api/bench.php \
-            --base . \
-            --head . \
-            --no-corpus \
-            "${jit_args[@]}" \
-            --format markdown \
-            --save "$RESULT/result.json" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          for run in 1 2 3; do
+            for jit in on off; do
+              if [ 'on' = "$jit" ]; then
+                jit_args=( --jit )
+              else
+                jit_args=( '--php-args=-d opcache.jit=disable' )
+              fi
+              echo "## JIT ${jit}, run ${run}" >> "$GITHUB_STEP_SUMMARY"
+              php tests/performance/html-api/bench.php \
+                --base . \
+                --head . \
+                --no-corpus \
+                "${jit_args[@]}" \
+                --format markdown \
+                --save "$RESULT/jit-${jit}-run-${run}.json" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+            done
+          done
 
-      - name: Upload the result
+      - name: Upload the results
         if: ${{ ! cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
