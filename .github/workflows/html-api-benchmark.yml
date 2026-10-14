@@ -36,10 +36,7 @@ permissions: {}
 
 jobs:
   # Compares the parsing speed of the HTML API in the pull request with its base.
-  #
-  # The arm64 runners gave the narrowest intervals in A/A runs. Twelve rounds of the
-  # synthetic documents with the tracing JIT resolve about 1% overall for the Tag Processor
-  # and 0.3% for the HTML Processor. The result is a report and does not fail the job.
+  # The result is a report and does not fail the job.
   #
   # Performs the following steps:
   # - Checks out the pull request and its base.
