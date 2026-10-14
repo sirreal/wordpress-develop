@@ -1,0 +1,113 @@
+name: HTML API Benchmark
+
+on:
+  pull_request:
+    branches:
+      - trunk
+    paths:
+      # The HTML API and the other files the benchmark loads.
+      - 'src/wp-includes/html-api/**'
+      - 'src/wp-includes/class-wp-token-map.php'
+      - 'src/wp-includes/compat.php'
+      - 'src/wp-includes/compat-utf8.php'
+      - 'src/wp-includes/utf8.php'
+      # The benchmark and this workflow.
+      - 'tests/performance/html-api/**'
+      - '.github/workflows/html-api-benchmark.yml'
+      - '!**.md'
+  # A manual run compares the commit with itself, which measures the benchmark's noise.
+  workflow_dispatch:
+
+# Cancels all previous workflow runs for pull requests that have not completed.
+concurrency:
+  # The concurrency group contains the workflow name and the branch name for pull requests
+  # or the commit hash for any other events.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+# Disable permissions for all available scopes by default.
+# Any needed permissions should be configured at the job level.
+permissions: {}
+
+jobs:
+  # Compares the parsing speed of the HTML API in the pull request with its base.
+  #
+  # The arm64 runners gave the narrowest intervals in A/A runs. Twelve rounds of the
+  # synthetic documents with the tracing JIT resolve about 1% overall for the Tag Processor
+  # and 0.3% for the HTML Processor. The result is a report and does not fail the job.
+  #
+  # Performs the following steps:
+  # - Checks out the pull request and its base.
+  # - Sets up PHP.
+  # - Logs the runner's CPU.
+  # - Runs the benchmark and writes the report to the job summary.
+  # - Uploads the full JSON result.
+  benchmark:
+    name: Compare parsing speed
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    if: |
+      github.repository == 'WordPress/wordpress-develop' || (
+        github.event_name == 'pull_request' && (
+          ! github.event.repository.private ||
+          ! github.event.pull_request.draft ||
+          contains( github.event.pull_request.labels.*.name, 'Draft Workflow Runs' )
+        )
+      )
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: head
+          show-progress: ${{ runner.debug == '1' && 'true' || 'false' }}
+          persist-credentials: false
+
+      - name: Checkout the base
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: base
+          show-progress: ${{ runner.debug == '1' && 'true' || 'false' }}
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Log runner information
+        run: |
+          lscpu
+          {
+            echo '```'
+            lscpu | grep -E '^Model name:'
+            php --version | head -n 1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the benchmark
+        run: |
+          php head/tests/performance/html-api/bench.php \
+            --base base \
+            --head head \
+            --no-corpus \
+            --jit \
+            --rounds 12 \
+            --format markdown \
+            --save html-api-benchmark.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the result
+        if: ${{ ! cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: html-api-benchmark
+          path: html-api-benchmark.json
+          if-no-files-found: error
