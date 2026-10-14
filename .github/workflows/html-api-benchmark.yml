@@ -17,6 +17,11 @@ on:
       - '!**.md'
   # A manual run compares the commit with itself, which measures the benchmark's noise.
   workflow_dispatch:
+  # Experiment only: workflow_dispatch needs the workflow on the default branch, so a push
+  # to this branch runs the same A/A.
+  push:
+    branches:
+      - html-api/benchmark-ci-aa
 
 # Cancels all previous workflow runs for pull requests that have not completed.
 concurrency:
@@ -49,7 +54,7 @@ jobs:
       contents: read
     timeout-minutes: 30
     if: |
-      github.repository == 'WordPress/wordpress-develop' || (
+      github.repository == 'WordPress/wordpress-develop' || github.event_name == 'push' || (
         github.event_name == 'pull_request' && (
           ! github.event.repository.private ||
           ! github.event.pull_request.draft ||
