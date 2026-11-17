@@ -130,4 +130,36 @@ class Tests_Theme_wpThemeJsonSelectorList extends WP_UnitTestCase {
 			),
 		);
 	}
+
+	/**
+	 * @dataProvider data_get_block_element_selectors_splits_top_level_commas
+	 *
+	 * @param string $root_selector Block root selector.
+	 * @param string $expected      Expected heading element selector.
+	 */
+	public function test_get_block_element_selectors_splits_top_level_commas( $root_selector, $expected ) {
+		$selectors = self::invoke_theme_json_method( 'get_block_element_selectors', $root_selector );
+
+		$this->assertSame( $expected, $selectors['h1'] );
+	}
+
+	/**
+	 * @return array<string, array{root_selector: string, expected: string}>
+	 */
+	public static function data_get_block_element_selectors_splits_top_level_commas() {
+		return array(
+			'selector list'                => array(
+				'root_selector' => '.wp-block-a,.wp-block-b',
+				'expected'      => '.wp-block-a h1,.wp-block-b h1',
+			),
+			'selector list in a function'  => array(
+				'root_selector' => ':is(.wp-block-a,.wp-block-b)',
+				'expected'      => ':is(.wp-block-a,.wp-block-b) h1',
+			),
+			'comma in an attribute string' => array(
+				'root_selector' => '[data-a="b,c"]',
+				'expected'      => '[data-a="b,c"] h1',
+			),
+		);
+	}
 }
