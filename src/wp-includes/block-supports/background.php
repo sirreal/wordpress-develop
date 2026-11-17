@@ -140,14 +140,17 @@ function wp_render_background_support( $block_content, $block ) {
 		$object_fit      = $background_styles['backgroundSize'];
 		$object_position = $background_styles['backgroundPosition'] ?? null;
 
-		$img_style = 'position:absolute;top:0;left:0;right:0;bottom:0;margin:0;padding:0;width:100%;height:100%;max-width:none;max-height:none;pointer-events:none;object-fit:' . esc_attr( $object_fit ) . ';';
-		if ( $object_position ) {
-			$img_style .= 'object-position:' . esc_attr( $object_position ) . ';';
+		$img_style = new WP_HTML_Style_Attribute_Processor( 'position:absolute;top:0;left:0;right:0;bottom:0;margin:0;padding:0;width:100%;height:100%;max-width:none;max-height:none;pointer-events:none;' );
+		$img_style->append_declaration( 'object-fit', $object_fit );
+
+		// A position that is not one CSS declaration value is left out.
+		if ( ! is_string( $object_position ) || ! $img_style->append_declaration( 'object-position', $object_position ) ) {
+			$object_position = null;
 		}
 
 		$img_attrs = array(
 			'class'           => 'wp-block__background-image',
-			'style'           => $img_style,
+			'style'           => $img_style->get_updated_style(),
 			'alt'             => '',
 			'aria-hidden'     => 'true',
 			'data-object-fit' => $object_fit,
@@ -163,22 +166,15 @@ function wp_render_background_support( $block_content, $block ) {
 		if ( $img_html ) {
 			$tags = new WP_HTML_Tag_Processor( $block_content );
 			if ( $tags->next_tag() ) {
-				$tag_name       = strtolower( $tags->get_tag() );
-				$existing_style = $tags->get_attribute( 'style' );
+				$tag_name      = strtolower( $tags->get_tag() );
+				$wrapper_style = new WP_HTML_Style_Attribute_Processor( $tags->get_attribute( 'style' ) );
 
-				if ( is_string( $existing_style ) && '' !== $existing_style ) {
-					$separator = str_ends_with( $existing_style, ';' ) ? '' : ';';
-					// Only add position:relative when there is no existing position rule.
-					if ( ! preg_match( '/(?:^|;)\s*position\s*:/', $existing_style ) ) {
-						$wrapper_style = $existing_style . $separator . 'position:relative;';
-					} else {
-						$wrapper_style = rtrim( $existing_style, ';' ) . ';';
-					}
-				} else {
-					$wrapper_style = 'position:relative;';
+				// An existing position declaration is kept.
+				if ( ! $wrapper_style->next_declaration( 'position' ) ) {
+					$wrapper_style->append_declaration( 'position', 'relative' );
 				}
 
-				$tags->set_attribute( 'style', $wrapper_style );
+				$tags->set_attribute( 'style', $wrapper_style->get_updated_style() );
 				$tags->add_class( 'has-background' );
 			}
 			$modified_content = $tags->get_updated_html();

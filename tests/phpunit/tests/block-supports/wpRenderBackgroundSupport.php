@@ -573,7 +573,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<img', $actual, 'no-repeat with contain should still inject an img element.' );
 		$this->assertStringNotContainsString( 'background-image:', $actual, 'Output should not contain background-image CSS.' );
 		$this->assertStringContainsString( 'has-background', $actual, 'Wrapper should have has-background class.' );
-		$this->assertStringContainsString( 'position:relative', $actual, 'Wrapper should have position:relative style.' );
+		$this->assertStringContainsString( 'position: relative', $actual, 'Wrapper should have position:relative style.' );
 
 		wp_delete_attachment( $attachment_id, true );
 	}
@@ -632,7 +632,7 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<img', $actual, 'Output should contain an img element.' );
 		$this->assertStringNotContainsString( 'background-image:', $actual, 'Output should not contain background-image CSS.' );
 		$this->assertStringContainsString( 'has-background', $actual, 'Wrapper should have has-background class.' );
-		$this->assertStringContainsString( 'position:relative', $actual, 'Wrapper should have position:relative style.' );
+		$this->assertStringContainsString( 'position: relative', $actual, 'Wrapper should have position:relative style.' );
 
 		wp_delete_attachment( $attachment_id, true );
 	}
