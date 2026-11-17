@@ -4210,19 +4210,19 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
 			 */
 			$allow_css = 0 === preg_match( '%[\\\(&=}]|/\*%', $css_test_string );
 
-			// Only allow a single angle for `rotate`, mirroring the style engine.
-			if ( $allow_css && $angle_attr ) {
-				$allow_css = WP_Style_Engine::is_angle( trim( $parts[1] ) );
-			}
-
-			// Only allow one or two lengths or percentages for `translate`, mirroring the style engine.
-			if ( $allow_css && $translate_attr ) {
+			/*
+			 * Only allow a single angle for `rotate`, and one or two lengths or
+			 * percentages for `translate`, mirroring the style engine.
+			 */
+			if ( $allow_css && ( $angle_attr || $translate_attr ) ) {
 				$processor = new WP_CSS_Token_Processor( trim( $parts[1] ) );
 				$tokens    = array();
 				while ( $processor->next_token() ) {
 					$tokens[] = $processor->get_token();
 				}
-				$allow_css = _safecss_filter_attr_is_translate_value( $tokens );
+				$allow_css = $angle_attr
+					? 1 === count( $tokens ) && $tokens[0]->is_angle()
+					: _safecss_filter_attr_is_translate_value( $tokens );
 			}
 
 			/**
@@ -4277,7 +4277,7 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
  *  - The value has no `&` delimiter at any depth. The output contains no
  *    `&`: other tokens escape it, and no property value uses a bare `&`.
  *  - The value has no `\` or control character delimiter at any depth.
- *  - A `rotate` value is a single angle, as WP_Style_Engine::is_angle()
+ *  - A `rotate` value is a single angle, as WP_CSS_Token::is_angle()
  *    checks, and a `translate` value one or two lengths or percentages
  *    separated by whitespace, as _safecss_filter_attr_is_translate_value()
  *    checks.
@@ -4339,7 +4339,7 @@ function _safecss_filter_attr_declarations( $css, $allowed_attr ) {
 		}
 
 		// Only allow a single angle for `rotate`, mirroring the style engine.
-		if ( 'rotate' === $name && ( 1 !== count( $tokens ) || ! WP_Style_Engine::is_angle( $tokens[0] ) ) ) {
+		if ( 'rotate' === $name && ( 1 !== count( $tokens ) || ! $tokens[0]->is_angle() ) ) {
 			continue;
 		}
 
@@ -4366,7 +4366,7 @@ function _safecss_filter_attr_declarations( $css, $allowed_attr ) {
  * @ignore
  * @internal
  *
- * @see WP_Style_Engine::is_length_percentage()
+ * @see WP_CSS_Token::is_length()
  *
  * @param WP_CSS_Token[] $tokens Value tokens, without leading or trailing whitespace.
  * @return bool Whether the tokens are an allowed `translate` value.
@@ -4385,7 +4385,11 @@ function _safecss_filter_attr_is_translate_value( $tokens ) {
 		}
 
 		// A second length must follow whitespace, and a third is not allowed.
-		if ( ! $after_space || ++$count > 2 || ! WP_Style_Engine::is_length_percentage( $token ) ) {
+		if (
+			! $after_space ||
+			++$count > 2 ||
+			! ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() )
+		) {
 			return false;
 		}
 		$after_space = false;

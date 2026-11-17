@@ -49,81 +49,6 @@ final class WP_Style_Engine {
 	const VALID_BACKGROUND_CLIP_VALUES = array( 'border-box', 'padding-box', 'content-box', 'text' );
 
 	/**
-	 * Angle units, lowercase.
-	 *
-	 * @since 7.3.0
-	 * @ignore
-	 *
-	 * @link https://www.w3.org/TR/css-values-4/#angles
-	 *
-	 * @var string[]
-	 */
-	private const ANGLE_UNITS = array( 'deg', 'grad', 'rad', 'turn' );
-
-	/**
-	 * Length units, lowercase.
-	 *
-	 * @since 7.3.0
-	 * @ignore
-	 *
-	 * @link https://www.w3.org/TR/css-values-4/#lengths
-	 * @link https://www.w3.org/TR/css-contain-3/#container-lengths
-	 *
-	 * @var string[]
-	 */
-	private const LENGTH_UNITS = array(
-		'px',
-		'cm',
-		'mm',
-		'q',
-		'in',
-		'pt',
-		'pc',
-		'em',
-		'rem',
-		'ex',
-		'rex',
-		'ch',
-		'rch',
-		'cap',
-		'rcap',
-		'ic',
-		'ric',
-		'lh',
-		'rlh',
-		'vw',
-		'vh',
-		'vi',
-		'vb',
-		'vmin',
-		'vmax',
-		'svw',
-		'svh',
-		'svi',
-		'svb',
-		'svmin',
-		'svmax',
-		'lvw',
-		'lvh',
-		'lvi',
-		'lvb',
-		'lvmin',
-		'lvmax',
-		'dvw',
-		'dvh',
-		'dvi',
-		'dvb',
-		'dvmin',
-		'dvmax',
-		'cqw',
-		'cqh',
-		'cqi',
-		'cqb',
-		'cqmin',
-		'cqmax',
-	);
-
-	/**
 	 * Style definitions that contain the instructions to parse/output valid Gutenberg styles from a block's attributes.
 	 *
 	 * For every style definition, the following properties are valid:
@@ -952,121 +877,6 @@ final class WP_Style_Engine {
 	}
 
 	/**
-	 * Checks whether a value is a single CSS angle.
-	 *
-	 * An angle is a dimension token with a `deg`, `grad`, `rad` or `turn`
-	 * unit in any ASCII case, or the number token `0`. A string must
-	 * tokenize as that one token, so whitespace, comments, lists and
-	 * functions such as `calc()` are rejected.
-	 *
-	 * Example:
-	 *
-	 *     WP_Style_Engine::is_angle( '-.5turn' ); // true
-	 *     WP_Style_Engine::is_angle( '1E2DEG' );  // true
-	 *     WP_Style_Engine::is_angle( '45' );      // false
-	 *     WP_Style_Engine::is_angle( ' 45deg' );  // false
-	 *
-	 * @since 7.3.0
-	 *
-	 * @link https://www.w3.org/TR/css-values-4/#angles
-	 *
-	 * @param mixed $value CSS text, or a token read by WP_CSS_Token_Processor.
-	 * @return bool Whether the value is a single angle.
-	 */
-	public static function is_angle( $value ): bool {
-		$token = static::get_single_token( $value );
-		if ( null === $token ) {
-			return false;
-		}
-
-		if ( WP_CSS_Token_Processor::TOKEN_DIMENSION === $token->get_type() ) {
-			return in_array( strtolower( (string) $token->get_unit() ), self::ANGLE_UNITS, true );
-		}
-
-		return static::is_zero( $token );
-	}
-
-	/**
-	 * Checks whether a value is a single CSS length or percentage.
-	 *
-	 * A length is a dimension token with a length unit in any ASCII case, or
-	 * the number token `0`. A percentage is a percentage token. A string must
-	 * tokenize as that one token, so whitespace, comments, lists and
-	 * functions such as `calc()` are rejected.
-	 *
-	 * Example:
-	 *
-	 *     WP_Style_Engine::is_length_percentage( '-50%' );  // true
-	 *     WP_Style_Engine::is_length_percentage( '10DVH' ); // true
-	 *     WP_Style_Engine::is_length_percentage( '10' );    // false
-	 *     WP_Style_Engine::is_length_percentage( '5deg' );  // false
-	 *
-	 * @since 7.3.0
-	 *
-	 * @link https://www.w3.org/TR/css-values-4/#typedef-length-percentage
-	 *
-	 * @param mixed $value CSS text, or a token read by WP_CSS_Token_Processor.
-	 * @return bool Whether the value is a single length or percentage.
-	 */
-	public static function is_length_percentage( $value ): bool {
-		$token = static::get_single_token( $value );
-		if ( null === $token ) {
-			return false;
-		}
-
-		switch ( $token->get_type() ) {
-			case WP_CSS_Token_Processor::TOKEN_PERCENTAGE:
-				return true;
-
-			case WP_CSS_Token_Processor::TOKEN_DIMENSION:
-				return in_array( strtolower( (string) $token->get_unit() ), self::LENGTH_UNITS, true );
-
-			default:
-				return static::is_zero( $token );
-		}
-	}
-
-	/**
-	 * Returns the token a value is, if it is exactly one token.
-	 *
-	 * @since 7.3.0
-	 * @ignore
-	 *
-	 * @param mixed $value CSS text, or a token read by WP_CSS_Token_Processor.
-	 * @return WP_CSS_Token|null The token, or null when the value is not a string of exactly one token or a token.
-	 */
-	private static function get_single_token( $value ): ?WP_CSS_Token {
-		if ( $value instanceof WP_CSS_Token ) {
-			return $value;
-		}
-
-		if ( ! is_string( $value ) ) {
-			return null;
-		}
-
-		$processor = new WP_CSS_Token_Processor( $value );
-		if ( ! $processor->next_token() ) {
-			return null;
-		}
-
-		$token = $processor->get_token();
-		return $processor->next_token() ? null : $token;
-	}
-
-	/**
-	 * Checks whether a token is the number `0`, which is accepted as a zero length or angle.
-	 *
-	 * @since 7.3.0
-	 * @ignore
-	 *
-	 * @param WP_CSS_Token $token Token.
-	 * @return bool Whether the token is the number `0`.
-	 */
-	private static function is_zero( WP_CSS_Token $token ): bool {
-		return WP_CSS_Token_Processor::TOKEN_NUMBER === $token->get_type() && '0' === $token->get_value();
-	}
-
-	/**
 	 * Style value parser that returns a CSS definition array for a property that takes a single angle.
 	 *
 	 * Lists, functions such as `calc()` or `var()`, and bare numbers are rejected.
@@ -1078,7 +888,8 @@ final class WP_Style_Engine {
 	 * @return array<string, string> An associative array of CSS definitions, mapping properties to values.
 	 */
 	protected static function get_angle_css_declarations( $style_value, $style_definition ) {
-		if ( ! static::is_angle( $style_value ) ) {
+		$token = _wp_style_engine_get_single_css_token( $style_value );
+		if ( null === $token || ! $token->is_angle() ) {
 			return array();
 		}
 
@@ -1106,7 +917,8 @@ final class WP_Style_Engine {
 		$axes = array();
 		foreach ( array( 'x', 'y' ) as $axis ) {
 			$axis_value = $style_value[ $axis ] ?? '0';
-			if ( ! is_string( $axis_value ) || ! static::is_length_percentage( $axis_value ) ) {
+			$token      = _wp_style_engine_get_single_css_token( $axis_value );
+			if ( null === $token || ! ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() ) ) {
 				return array();
 			}
 			$axes[] = $axis_value;
