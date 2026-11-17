@@ -364,6 +364,9 @@ class WP_Font_Face {
 	 *
 	 * @since 6.4.0
 	 * @since 7.2.0 Quotes each axis tag and separates the axes with commas.
+	 * @since 7.3.0 Escapes each axis tag and skips an axis whose tag or value is invalid.
+	 *
+	 * @link https://www.w3.org/TR/css-fonts-4/#font-variation-settings-def
 	 *
 	 * @param array $font_variation_settings Array of font variation settings, keyed by axis tag.
 	 * @return string The CSS.
@@ -372,9 +375,53 @@ class WP_Font_Face {
 		$variations = array();
 
 		foreach ( $font_variation_settings as $tag => $value ) {
-			$variations[] = sprintf( '"%s" %s', $tag, $value );
+			$tag    = (string) $tag;
+			$number = self::get_css_number( $value );
+
+			// An axis tag is four ASCII characters from U+0020 to U+007E.
+			if ( null === $number || 1 !== preg_match( '/\A[\x20-\x7E]{4}\z/', $tag ) ) {
+				continue;
+			}
+
+			$variations[] = WP_CSS_Builder::string( $tag ) . ' ' . $number;
 		}
 
 		return implode( ', ', $variations );
+	}
+
+	/**
+	 * Returns the CSS text of a value that is one CSS number.
+	 *
+	 * Whitespace around the number is removed. Any other token, such as a
+	 * unit, a function or a second number, makes the value invalid.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @param mixed $value Value to read.
+	 * @return string|null The number as CSS text, or null if the value is not one number.
+	 */
+	private static function get_css_number( $value ) {
+		if ( ! is_int( $value ) && ! is_float( $value ) && ! is_string( $value ) ) {
+			return null;
+		}
+
+		$processor = new WP_CSS_Token_Processor( (string) $value );
+		$number    = null;
+
+		while ( $processor->next_token() ) {
+			$type = $processor->get_token_type();
+
+			if ( WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ) {
+				continue;
+			}
+
+			if ( null !== $number || WP_CSS_Token_Processor::TOKEN_NUMBER !== $type ) {
+				return null;
+			}
+
+			$number = $processor->get_token()->get_value();
+		}
+
+		return $number;
 	}
 }
