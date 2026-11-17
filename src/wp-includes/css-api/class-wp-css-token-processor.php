@@ -1131,11 +1131,14 @@ class WP_CSS_Token_Processor {
 		// Consume an ident sequence, and let string be the result.
 		$ident_start = $this->at;
 		$this->consume_ident_sequence();
-		$string = self::decode_range( $this->css, $ident_start, $this->at - $ident_start );
 
 		// If string's value is an ASCII case-insensitive match for "url",
 		// and the next input code point is U+0028 LEFT PARENTHESIS (().
-		if ( 0 === strcasecmp( $string, 'url' ) && $this->at < $this->length && '(' === $this->css[ $this->at ] ) {
+		if (
+			$this->at < $this->length &&
+			'(' === $this->css[ $this->at ] &&
+			0 === strcasecmp( self::decode_range( $this->css, $ident_start, $this->at - $ident_start ), 'url' )
+		) {
 			// Consume it.
 			++$this->at;
 
