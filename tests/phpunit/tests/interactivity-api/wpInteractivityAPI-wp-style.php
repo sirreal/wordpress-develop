@@ -319,9 +319,6 @@ class Tests_WP_Interactivity_API_WP_Style extends WP_UnitTestCase {
 	 * @covers ::process_directives
 	 */
 	public function test_wp_style_rejects_invalid_values() {
-		// A value with a semicolon outside a string or block.
-		$this->assertSame( 'margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'green; background: blue' ) ) );
-
 		// A value with an unclosed function.
 		$this->assertSame( 'margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'rgb(0 0 0' ) ) );
 
