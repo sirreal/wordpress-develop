@@ -773,6 +773,21 @@ class Tests_Block_Supports_States extends WP_UnitTestCase {
 				'block_selector' => '.wp-block-list > li, .wp-block-list-item .inner',
 				'expected'       => '.wp-block-list > .wp-states-test:hover, .wp-states-test .inner:hover',
 			),
+			'comment before the combinator'          => array(
+				'block_name'     => 'core/list-item',
+				'block_selector' => '.wp-block-list/* x */> li',
+				'expected'       => '.wp-block-list/* x */> .wp-states-test:hover',
+			),
+			'nested block element with a class'      => array(
+				'block_name'     => 'core/list-item',
+				'block_selector' => '.wp-block-list > .a.wp-block-b',
+				'expected'       => '.wp-states-test > .a.wp-block-b:hover',
+			),
+			'nested block element with an escape'    => array(
+				'block_name'     => 'core/list-item',
+				'block_selector' => '.wp-block-list > .a\\ .wp-block-b',
+				'expected'       => '.wp-states-test > .a\\ .wp-block-b:hover',
+			),
 		);
 	}
 
