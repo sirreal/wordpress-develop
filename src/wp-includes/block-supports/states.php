@@ -431,12 +431,7 @@ function wp_get_block_state_element_selectors( $root_selector ) {
 				break;
 			}
 
-			$selector_prefix = "$block_selector ";
-			if ( ! str_contains( $element_selector, ',' ) ) {
-				$selectors[] = $selector_prefix . $element_selector;
-				continue;
-			}
-
+			$selector_prefix     = "$block_selector ";
 			$prepended_selectors = array();
 			foreach ( wp_split_selector_list( $element_selector ) as $selector ) {
 				$prepended_selectors[] = $selector_prefix . $selector;
@@ -577,7 +572,11 @@ function wp_get_block_state_unique_class( $block_name, $css_rules ) {
 /**
  * Splits a selector list by top-level commas.
  *
+ * Commas inside strings, comments, escapes, functions and blocks do not
+ * split the list. Each selector keeps its surrounding whitespace.
+ *
  * @since 7.1.0
+ * @since 7.3.0 Ignores commas inside strings, comments, escapes, brackets and braces.
  *
  * @param string $selector CSS selector list.
  * @return string[] Selectors.
@@ -587,30 +586,7 @@ function wp_split_selector_list( $selector ) {
 		return array( $selector );
 	}
 
-	$selectors         = array();
-	$current_selector  = '';
-	$parentheses_depth = 0;
-	$selector_length   = strlen( $selector );
-
-	for ( $i = 0; $i < $selector_length; $i++ ) {
-		$char = $selector[ $i ];
-
-		if ( '(' === $char ) {
-			++$parentheses_depth;
-		} elseif ( ')' === $char && $parentheses_depth > 0 ) {
-			--$parentheses_depth;
-		} elseif ( ',' === $char && 0 === $parentheses_depth ) {
-			$selectors[]      = $current_selector;
-			$current_selector = '';
-			continue;
-		}
-
-		$current_selector .= $char;
-	}
-
-	$selectors[] = $current_selector;
-
-	return $selectors;
+	return WP_CSS_Token_Processor::split_comma_separated_list( $selector );
 }
 
 /**

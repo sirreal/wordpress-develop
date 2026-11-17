@@ -646,6 +646,60 @@ class Tests_Block_Supports_States extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a comma inside an attribute selector string does not split the
+	 * selector when scoping a state selector to the block wrapper.
+	 *
+	 * @covers ::wp_build_state_selector
+	 *
+	 * @ticket 65669
+	 */
+	public function test_build_state_selector_does_not_split_attribute_string_comma() {
+		$actual = wp_build_state_selector(
+			'.wp-states-test',
+			'[data-label="Save, continue"]',
+			':hover'
+		);
+
+		$this->assertSame( '.wp-states-test:hover', $actual );
+	}
+
+	/**
+	 * Tests that a selector list splits only at top-level commas and that
+	 * each selector keeps its surrounding whitespace.
+	 *
+	 * @covers ::wp_split_selector_list
+	 *
+	 * @ticket 65669
+	 *
+	 * @dataProvider data_split_selector_list
+	 *
+	 * @param string   $selector Selector list.
+	 * @param string[] $expected Selectors.
+	 */
+	public function test_split_selector_list( $selector, $expected ) {
+		$this->assertSame( $expected, wp_split_selector_list( $selector ) );
+	}
+
+	/**
+	 * Data provider for test_split_selector_list().
+	 *
+	 * @return array<string, array{0: string, 1: string[]}>
+	 */
+	public static function data_split_selector_list() {
+		return array(
+			'empty'                        => array( '', array( '' ) ),
+			'one selector'                 => array( '.a', array( '.a' ) ),
+			'selector list'                => array( '.a, .b', array( '.a', ' .b' ) ),
+			'trailing comma'               => array( '.a,', array( '.a', '' ) ),
+			'comma in a function'          => array( ':is(a, b) img', array( ':is(a, b) img' ) ),
+			'comma in an attribute string' => array( 'a[title="x,y"]', array( 'a[title="x,y"]' ) ),
+			'escaped comma'                => array( '.a\\,b', array( '.a\\,b' ) ),
+			'comma in a comment'           => array( '.a/* x, y */', array( '.a/* x, y */' ) ),
+			'unquoted comma in brackets'   => array( '[a,b]', array( '[a,b]' ) ),
+		);
+	}
+
+	/**
 	 * Tests that a leading compound naming a different block is kept as an
 	 * ancestor, and the instance class goes on the block's own compound.
 	 *
