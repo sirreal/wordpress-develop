@@ -106,8 +106,8 @@ class Tests_WP_Interactivity_API_WP_Style extends WP_UnitTestCase {
 		// Adds missing trailing semicolon.
 		$this->assertSame( 'color:red;margin:5px; padding: 10px;', $this->style_after_directives( 'color:red;margin:5px', array( 'padding' => '10px' ) ) );
 
-		// Doesn't add double semicolons.
-		$this->assertSame( 'color:red;margin:5px; padding: 10px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'padding' => '10px;' ) ) );
+		// Ignores a value with a trailing semicolon, which is not one declaration value.
+		$this->assertSame( 'color:red;margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'padding' => '10px;' ) ) );
 
 		// Keeps empty declarations in the input.
 		$this->assertSame( 'color:red;;margin:5px;; padding: 10px;', $this->style_after_directives( 'color:red;;margin:5px;;', array( 'padding' => '10px' ) ) );
@@ -311,22 +311,34 @@ class Tests_WP_Interactivity_API_WP_Style extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Tests that the `data-wp-style` directive removes the property and adds
-	 * nothing when the new value is not a valid declaration value.
+	 * Tests that the `data-wp-style` directive ignores a value that is not one
+	 * valid declaration value and keeps the property's declarations.
 	 *
 	 * @ticket 63899
 	 *
 	 * @covers ::process_directives
 	 */
-	public function test_wp_style_rejects_invalid_values() {
+	public function test_wp_style_ignores_invalid_values() {
 		// A value with an unclosed function.
-		$this->assertSame( 'margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'rgb(0 0 0' ) ) );
+		$this->assertSame( 'color:red;margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'rgb(0 0 0' ) ) );
 
 		// A value with an !important priority.
-		$this->assertSame( 'margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'green !important' ) ) );
+		$this->assertSame( 'color:red;margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'green !important' ) ) );
 
 		// A value with a closing brace.
-		$this->assertSame( 'margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'green}' ) ) );
+		$this->assertSame( 'color:red;margin:5px;', $this->style_after_directives( 'color:red;margin:5px;', array( 'color' => 'green}' ) ) );
+
+		// An invalid value leaves the other entries on the element in effect.
+		$this->assertSame(
+			'margin:5px; color: blue;',
+			$this->style_after_directives(
+				'color:red;margin:5px;',
+				array(
+					'color'   => 'blue',
+					'padding' => '1px}',
+				)
+			)
+		);
 	}
 
 	/**

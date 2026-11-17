@@ -1480,13 +1480,14 @@ final class WP_Interactivity_API {
 	 *
 	 * The value is converted to a string:
 	 *
-	 * - A string is used without surrounding whitespace and trailing semicolons.
+	 * - A string is used without surrounding whitespace.
 	 * - `true` is `true`, and a number other than `0` is its string.
 	 * - An empty string, `0` and any other value remove the property.
 	 *
-	 * A value that is not one valid CSS declaration value, such as one with a
-	 * semicolon outside a string or block, or one ending in `!important`,
-	 * removes the property and appends nothing.
+	 * A string that is not one valid CSS declaration value, such as one with a
+	 * semicolon outside a string or block, or one ending in `!important`, is
+	 * ignored and the property keeps its declarations, as `style.setProperty()`
+	 * ignores it in the browser.
 	 *
 	 * @since 6.5.0
 	 * @since 7.3.0 Parses the style attribute value as CSS.
@@ -1513,7 +1514,14 @@ final class WP_Interactivity_API {
 				$value = $value ? (string) $value : '';
 			}
 
-			$values[ $entry['suffix'] ] = is_string( $value ) ? rtrim( trim( $value ), ';' ) : '';
+			$value = is_string( $value ) ? trim( $value ) : '';
+
+			// Only a value that can be written as one declaration replaces the property.
+			if ( '' !== $value && ! ( new WP_HTML_Style_Attribute_Processor( '' ) )->append_declaration( $entry['suffix'], $value ) ) {
+				continue;
+			}
+
+			$values[ $entry['suffix'] ] = $value;
 		}
 
 		if ( empty( $values ) ) {
