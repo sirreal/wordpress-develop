@@ -188,6 +188,49 @@ class Tests_CssApi_WpCssToken extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a token reports a `\` that starts an escape at the end of the input.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_ends_with_eof_escape
+	 *
+	 * @covers ::ends_with_eof_escape
+	 */
+	public function test_ends_with_eof_escape( string $css, string $expected_type, bool $expected ): void {
+		$processor = new WP_CSS_Token_Processor( $css );
+		$token     = null;
+		while ( $processor->next_token() ) {
+			$token = $processor->get_token();
+		}
+
+		$this->assertSame( $expected_type, $token->get_type(), 'The last token type did not match.' );
+		$this->assertSame( $expected, $token->ends_with_eof_escape() );
+	}
+
+	/**
+	 * Data provider for test_ends_with_eof_escape().
+	 *
+	 * @return array[]
+	 */
+	public static function data_ends_with_eof_escape(): array {
+		return array(
+			'ident with an escape at the end'    => array( 'Inter\\', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'ident of only an escape'            => array( '\\', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'ident with an escaped backslash'    => array( 'Inter\\\\', WP_CSS_Token_Processor::TOKEN_IDENT, false ),
+			'ident with three backslashes'       => array( 'Inter\\\\\\', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'ident after a hex escape'           => array( '\\5c\\', WP_CSS_Token_Processor::TOKEN_IDENT, true ),
+			'ident at the end without an escape' => array( 'a Inter', WP_CSS_Token_Processor::TOKEN_IDENT, false ),
+			'ident ending in an escaped space'   => array( 'Inter\\ ', WP_CSS_Token_Processor::TOKEN_IDENT, false ),
+			'hash'                               => array( '#a\\', WP_CSS_Token_Processor::TOKEN_HASH, true ),
+			'at-keyword'                         => array( '@a\\', WP_CSS_Token_Processor::TOKEN_AT_KEYWORD, true ),
+			'dimension'                          => array( '1a\\', WP_CSS_Token_Processor::TOKEN_DIMENSION, true ),
+			'string'                             => array( '"a\\', WP_CSS_Token_Processor::TOKEN_STRING, true ),
+			'string with an escaped backslash'   => array( '"a\\\\', WP_CSS_Token_Processor::TOKEN_STRING, false ),
+			'url'                                => array( 'url(a\\', WP_CSS_Token_Processor::TOKEN_URL, true ),
+			'comment ending in a backslash'      => array( '/* a \\', WP_CSS_Token_Processor::TOKEN_COMMENT, false ),
+		);
+	}
+
+	/**
 	 * Tests that whitespace and comment tokens are reported as such.
 	 *
 	 * @ticket 65738

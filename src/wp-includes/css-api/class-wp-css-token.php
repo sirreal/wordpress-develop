@@ -314,6 +314,54 @@ final class WP_CSS_Token {
 	}
 
 	/**
+	 * Reports whether the token ends with a `\` that starts an escape at the
+	 * end of the input.
+	 *
+	 * CSS Syntax 3 reads that `\` as a parse error. In an identifier or a url
+	 * it decodes to U+FFFD; in a string it decodes to nothing. An identifier
+	 * that ends this way is otherwise complete, and is_terminated() returns
+	 * true for it. A consumer that rejects input with parse errors can check
+	 * this method.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $processor = new WP_CSS_Token_Processor( 'Inter\\' );
+	 * $processor->next_token();
+	 * $token = $processor->get_token();
+	 * echo $token->get_value() . "\n";
+	 * var_dump( $token->ends_with_eof_escape() );
+	 * // Outputs:
+	 * // Inter�
+	 * // bool(true)
+	 * ```
+	 *
+	 * @since 7.3.0
+	 *
+	 * @link https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
+	 *
+	 * @return bool Whether the input ends with a `\` that starts an escape in this token.
+	 */
+	public function ends_with_eof_escape(): bool {
+		$end = $this->start + $this->length;
+		if (
+			WP_CSS_Token_Processor::TOKEN_COMMENT === $this->type ||
+			strlen( $this->css ) !== $end ||
+			'\\' !== $this->css[ $end - 1 ]
+		) {
+			return false;
+		}
+
+		// In a run of `\`, each second `\` is the character the one before it escapes.
+		$at = $end - 1;
+		while ( $at > $this->start && '\\' === $this->css[ $at - 1 ] ) {
+			--$at;
+		}
+
+		return 1 === ( $end - $at ) % 2;
+	}
+
+	/**
 	 * Reports whether the token is whitespace or a comment.
 	 *
 	 * CSS Syntax 3 discards comments while tokenizing, and most grammars
