@@ -3728,6 +3728,8 @@ function kses_init() {
  * @since 7.2.0 Added support for CSS anchor positioning properties and `text-shadow`.
  *              Added support for `background-clip`.
  * @since 7.3.0 Parses the declaration list with WP_HTML_Style_Attribute_Processor.
+ *              Added support for `rotate`, limited to a single angle, and `translate`,
+ *              limited to one or two lengths or percentages.
  *
  * @see 'wp_kses_force_legacy_css_parser' to opt-out of the new parser-based implementation.
  *
@@ -3960,6 +3962,8 @@ function safecss_filter_attr( $css, $deprecated = '' ) {
 
 		'transform',
 		'transform-origin',
+		'rotate',
+		'translate',
 
 		'pointer-events',
 		'visibility',
@@ -4103,6 +4107,8 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
 		$found           = false;
 		$url_attr        = false;
 		$gradient_attr   = false;
+		$angle_attr      = false;
+		$translate_attr  = false;
 		$is_custom_var   = false;
 
 		if ( ! str_contains( $css_item, ':' ) ) {
@@ -4118,9 +4124,11 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
 			}
 
 			if ( in_array( $css_selector, $allowed_attr, true ) ) {
-				$found         = true;
-				$url_attr      = in_array( $css_selector, $css_url_data_types, true );
-				$gradient_attr = in_array( $css_selector, $css_gradient_data_types, true );
+				$found          = true;
+				$url_attr       = in_array( $css_selector, $css_url_data_types, true );
+				$gradient_attr  = in_array( $css_selector, $css_gradient_data_types, true );
+				$angle_attr     = 'rotate' === $css_selector;
+				$translate_attr = 'translate' === $css_selector;
 			}
 
 			if ( $is_custom_var ) {
@@ -4202,6 +4210,22 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
 			 */
 			$allow_css = 0 === preg_match( '%[\\\(&=}]|/\*%', $css_test_string );
 
+			// Only allow a single angle for `rotate`, mirroring the style engine.
+			if ( $allow_css && $angle_attr ) {
+				$allow_css = 1 === preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, trim( $parts[1] ) );
+			}
+
+			// Only allow one or two lengths or percentages for `translate`, mirroring the style engine.
+			if ( $allow_css && $translate_attr ) {
+				$axes      = preg_split( '/\s+/', trim( $parts[1] ) );
+				$allow_css = count( $axes ) <= 2;
+				foreach ( $axes as $axis ) {
+					if ( $allow_css && 1 !== preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $axis ) ) {
+						$allow_css = false;
+					}
+				}
+			}
+
 			/**
 			 * Filters the check for unsafe CSS in `safecss_filter_attr`.
 			 *
@@ -4254,6 +4278,9 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
  *  - The value has no `&` delimiter at any depth. The output contains no
  *    `&`: other tokens escape it, and no property value uses a bare `&`.
  *  - The value has no `\` or control character delimiter at any depth.
+ *  - A `rotate` value is a single angle and a `translate` value one or two
+ *    lengths or percentages, as WP_Style_Engine::VALID_ANGLE_PATTERN and
+ *    WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN match them.
  *
  * Checks run on decoded values. Comments are dropped; an empty comment is
  * written only between two tokens that would otherwise read as other
@@ -4309,6 +4336,24 @@ function _safecss_filter_attr_declarations( $css, $allowed_attr ) {
 
 		if ( ! _safecss_filter_attr_value_is_allowed( $tokens, $allowed_protocols, $is_custom ) ) {
 			continue;
+		}
+
+		// Only allow a single angle for `rotate`, mirroring the style engine.
+		if ( 'rotate' === $name && 1 !== preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, WP_CSS_Token_Serializer::serialize( $tokens ) ) ) {
+			continue;
+		}
+
+		// Only allow one or two lengths or percentages for `translate`, mirroring the style engine.
+		if ( 'translate' === $name ) {
+			$axes = preg_split( '/\s+/', WP_CSS_Token_Serializer::serialize( $tokens ) );
+			if ( count( $axes ) > 2 ) {
+				continue;
+			}
+			foreach ( $axes as $axis ) {
+				if ( 1 !== preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $axis ) ) {
+					continue 2;
+				}
+			}
 		}
 
 		// The deprecated `safecss_filter_attr_allow_css` filter is applied by the legacy implementation only.
