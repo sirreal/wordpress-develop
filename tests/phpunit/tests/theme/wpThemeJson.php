@@ -3233,7 +3233,7 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 						'test/rotate-feature' => array(
 							'transform'  => array( 'rotate' => '0.25turn' ),
 							'@mobile'    => array(
-								'transform' => array( 'rotate' => '0' ),
+								'transform' => array( 'rotate' => '0deg' ),
 							),
 							'variations' => array(
 								'tilted' => array(
@@ -3269,7 +3269,7 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 		unregister_block_type( 'test/rotate-feature' );
 
 		$this->assertStringContainsString( ':root :where(.wp-block-test-rotate-feature img){rotate: 0.25turn;}', $css );
-		$this->assertStringContainsString( '@media (width <= 480px){:root :where(.wp-block-test-rotate-feature img){rotate: 0;}}', $css );
+		$this->assertStringContainsString( '@media (width <= 480px){:root :where(.wp-block-test-rotate-feature img){rotate: 0deg;}}', $css );
 		$this->assertStringContainsString( ':root :where(.wp-block-test-rotate-feature.is-style-tilted img){rotate: -5deg;}', $css );
 		$this->assertStringContainsString( ':root :where(.wp-block-button .wp-block-button__link:hover){rotate: 3deg;}', $css );
 		$this->assertStringContainsString( '@media (width <= 480px){:root :where(.wp-block-button .wp-block-button__link:hover){rotate: 6deg;}}', $css );
@@ -3311,6 +3311,7 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 	public function data_get_stylesheet_skips_invalid_rotate_values() {
 		return array(
 			'bare number' => array( '45' ),
+			'number 0'    => array( '0' ),
 			'calc()'      => array( 'calc(10deg + 5deg)' ),
 			'var()'       => array( 'var(--angle)' ),
 			'axis list'   => array( 'x 45deg' ),

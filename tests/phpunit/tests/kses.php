@@ -2027,7 +2027,7 @@ EOF;
 			),
 			array(
 				'css'      => 'rotate: 0',
-				'expected' => 'rotate: 0',
+				'expected' => '',
 			),
 			array(
 				'css'      => 'rotate: 45',

@@ -521,6 +521,7 @@ class Tests_Kses_SafecssFilterAttr extends WP_UnitTestCase {
 			'rotate with a comment in the number'        => array( 'rotate: 4/**/5deg', '', '' ),
 			'rotate with important'                      => array( 'rotate: 45deg !important', 'rotate: 45deg !important;', '' ),
 			'rotate with a space before the unit'        => array( 'rotate: 45 deg', '', '' ),
+			'rotate with the number 0'                   => array( 'rotate: 0', '', '' ),
 			'rotate with zero written 0.0'               => array( 'rotate: 0.0', '', '' ),
 			'translate with an uppercase unit'           => array( 'translate: 1PX 50%', 'translate: 1PX 50%;', 'translate: 1PX 50%' ),
 			'translate with an exponent'                 => array( 'translate: 1e1px', 'translate: 1e1px;', 'translate: 1e1px' ),
