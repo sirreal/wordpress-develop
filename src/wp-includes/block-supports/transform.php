@@ -60,7 +60,7 @@ function wp_fill_translate_axes( $translate, ...$fallbacks ) {
 		}
 		foreach ( $fallbacks as $fallback ) {
 			$value = is_array( $fallback ) ? ( $fallback[ $axis ] ?? null ) : null;
-			if ( is_string( $value ) && preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $value ) ) {
+			if ( WP_Style_Engine::is_length_percentage( $value ) ) {
 				$translate[ $axis ] = $value;
 				break;
 			}

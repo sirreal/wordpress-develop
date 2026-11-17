@@ -3292,7 +3292,7 @@ class WP_Theme_JSON {
 			}
 
 			// Mirrors the style engine, which outputs a single angle only.
-			if ( 'rotate' === $css_property && ( ! is_string( $value ) || ! preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, $value ) ) ) {
+			if ( 'rotate' === $css_property && ! WP_Style_Engine::is_angle( $value ) ) {
 				continue;
 			}
 

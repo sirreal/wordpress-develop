@@ -484,6 +484,64 @@ class Tests_Kses_SafecssFilterAttr extends WP_UnitTestCase {
 	}
 
 	/**
+	 * `rotate` keeps a single angle and `translate` one or two lengths or
+	 * percentages separated by whitespace, on both implementations.
+	 *
+	 * @ticket 66468
+	 * @ticket 66467
+	 * @dataProvider data_transform_values
+	 *
+	 * @covers ::_safecss_filter_attr_is_translate_value
+	 *
+	 * @param string $css             Input declaration.
+	 * @param string $expected        Output of the parser-based implementation.
+	 * @param string $expected_legacy Output of the legacy implementation.
+	 */
+	public function test_transform_values( $css, $expected, $expected_legacy ) {
+		$this->assertSame( $expected, safecss_filter_attr( $css ), 'Parser-based implementation' );
+
+		add_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
+		$actual_legacy = safecss_filter_attr( $css );
+		remove_filter( 'wp_kses_force_legacy_css_parser', '__return_true' );
+
+		$this->assertSame( $expected_legacy, $actual_legacy, 'Legacy implementation' );
+	}
+
+	/**
+	 * @return array<string, array{string, string, string}>
+	 */
+	public function data_transform_values() {
+		return array(
+			'rotate with a leading plus sign'            => array( 'rotate: +1deg', 'rotate: +1deg;', 'rotate: +1deg' ),
+			'rotate with no integer part'                => array( 'rotate: .5turn', 'rotate: .5turn;', 'rotate: .5turn' ),
+			'rotate with an uppercase unit'              => array( 'rotate: 1DEG', 'rotate: 1DEG;', 'rotate: 1DEG' ),
+			'rotate with an exponent'                    => array( 'rotate: 1e2deg', 'rotate: 1e2deg;', 'rotate: 1e2deg' ),
+			'rotate with an escaped unit'                => array( 'rotate: 1\64 eg', 'rotate: 1deg;', '' ),
+			'rotate with a leading comment'              => array( 'rotate: /**/45deg', 'rotate: 45deg;', '' ),
+			'rotate with a comment in the number'        => array( 'rotate: 4/**/5deg', '', '' ),
+			'rotate with important'                      => array( 'rotate: 45deg !important', 'rotate: 45deg !important;', '' ),
+			'rotate with a space before the unit'        => array( 'rotate: 45 deg', '', '' ),
+			'rotate with zero written 0.0'               => array( 'rotate: 0.0', '', '' ),
+			'translate with an uppercase unit'           => array( 'translate: 1PX 50%', 'translate: 1PX 50%;', 'translate: 1PX 50%' ),
+			'translate with an exponent'                 => array( 'translate: 1e1px', 'translate: 1e1px;', 'translate: 1e1px' ),
+			'translate with an escaped unit'             => array( 'translate: 1\70 x', 'translate: 1px;', '' ),
+			'translate with two spaces'                  => array( 'translate: 1px  2px', 'translate: 1px 2px;', 'translate: 1px  2px' ),
+			'translate with a tab'                       => array( "translate: 1px\t2px", 'translate: 1px 2px;', '' ),
+			'translate with a newline'                   => array( "translate: 1px\n2px", 'translate: 1px 2px;', '' ),
+			'translate with a form feed'                 => array( "translate: 1px\f2px", 'translate: 1px 2px;', '' ),
+			'translate with a vertical tab'              => array( "translate: 1px\v2px", '', '' ),
+			'translate with a no-break space'            => array( "translate: 1px\u{00A0}2px", '', '' ),
+			'translate separated by a comment'           => array( 'translate: 1px/**/2px', '', '' ),
+			'translate separated by a comment and space' => array( 'translate: 1px /**/ 2px', 'translate: 1px 2px;', '' ),
+			'translate with no space after a percentage' => array( 'translate: 50%2px', '', '' ),
+			'translate with a comma'                     => array( 'translate: 1px, 2px', '', '' ),
+			'translate with three lengths'               => array( 'translate: 1px 2px 3px', '', '' ),
+			'translate with zero written 0.0'            => array( 'translate: 0.0', '', '' ),
+			'translate with no value'                    => array( 'translate:', '', '' ),
+		);
+	}
+
+	/**
 	 * @ticket 65738
 	 */
 	public function test_escapes_are_decoded_before_checks() {
