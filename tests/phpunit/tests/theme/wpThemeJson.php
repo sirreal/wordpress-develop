@@ -8592,28 +8592,28 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 	public static function data_process_blocks_custom_css() {
 		return array(
 			// Simple CSS without any nested selectors.
-			'empty css'                    => array(
+			'empty css'                                 => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => '',
 				),
 				'expected' => '',
 			),
-			'css as an object'             => array(
+			'css as an object'                          => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => array( 'color' => 'red' ),
 				),
 				'expected' => '',
 			),
-			'css as a list of strings'     => array(
+			'css as a list of strings'                  => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => array( 'color: red;' ),
 				),
 				'expected' => '',
 			),
-			'no nested selectors'          => array(
+			'no nested selectors'                       => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => 'color: red; margin: auto;',
@@ -8621,14 +8621,14 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 				'expected' => ':root :where(.foo){color: red; margin: auto;}',
 			),
 			// CSS with nested selectors.
-			'with nested selector'         => array(
+			'with nested selector'                      => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => 'color: red; margin: auto; &.one{color: blue;} & .two{color: green;}',
 				),
 				'expected' => ':root :where(.foo){color: red; margin: auto;}:root :where(.foo.one){color: blue;}:root :where(.foo .two){color: green;}',
 			),
-			'no root styles'               => array(
+			'no root styles'                            => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => '&::before{color: red;}',
@@ -8636,7 +8636,7 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 				'expected' => ':root :where(.foo)::before{color: red;}',
 			),
 			// CSS with pseudo elements.
-			'with pseudo elements'         => array(
+			'with pseudo elements'                      => array(
 				'input'    => array(
 					'selector' => '.foo',
 					'css'      => 'color: red; margin: auto; &::before{color: blue;} & ::before{color: green;}  &.one::before{color: yellow;} & .two::before{color: purple;}',
@@ -8644,12 +8644,228 @@ class Tests_Theme_wpThemeJson extends WP_UnitTestCase {
 				'expected' => ':root :where(.foo){color: red; margin: auto;}:root :where(.foo)::before{color: blue;}:root :where(.foo) ::before{color: green;}:root :where(.foo.one)::before{color: yellow;}:root :where(.foo .two)::before{color: purple;}',
 			),
 			// CSS with multiple root selectors.
-			'with multiple root selectors' => array(
+			'with multiple root selectors'              => array(
 				'input'    => array(
 					'selector' => '.foo, .bar',
 					'css'      => 'color: red; margin: auto; &.one{color: blue;} & .two{color: green;} &::before{color: yellow;} & ::before{color: purple;}  &.three::before{color: orange;} & .four::before{color: skyblue;}',
 				),
 				'expected' => ':root :where(.foo, .bar){color: red; margin: auto;}:root :where(.foo.one, .bar.one){color: blue;}:root :where(.foo .two, .bar .two){color: green;}:root :where(.foo, .bar)::before{color: yellow;}:root :where(.foo, .bar) ::before{color: purple;}:root :where(.foo.three, .bar.three)::before{color: orange;}:root :where(.foo .four, .bar .four)::before{color: skyblue;}',
+			),
+			// Selector lists in nested rules.
+			'with nested selector list'                 => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '&.one, & .two {color: red;}',
+				),
+				'expected' => ':root :where(.foo.one, .foo .two){color: red;}',
+			),
+			// CSS with nested selectors without `&`.
+			'nested without &'                          => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; img{color: blue;}',
+				),
+				'expected' => ':root :where(.foo){color: red;}:root :where(.foo img){color: blue;}',
+			),
+			'only nested without &'                     => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'img{color: blue;}',
+				),
+				'expected' => ':root :where(.foo img){color: blue;}',
+			),
+			'mixed nested selectors'                    => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; &.one{color: blue;} .two{color: green;} > img{color: yellow;} ::before{color: purple;}',
+				),
+				'expected' => ':root :where(.foo){color: red;}:root :where(.foo.one){color: blue;}:root :where(.foo .two){color: green;}:root :where(.foo > img){color: yellow;}:root :where(.foo) ::before{color: purple;}',
+			),
+			'nested without & inside &'                 => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '& { color: red; img { color: blue; } }',
+				),
+				'expected' => ':root :where(.foo){color: red;}:root :where(.foo img){color: blue;}',
+			),
+			'nested without & multi root'               => array(
+				'input'    => array(
+					'selector' => '.foo, .bar',
+					'css'      => 'color: red; img{color: blue;}',
+				),
+				'expected' => ':root :where(.foo, .bar){color: red;}:root :where(.foo img, .bar img){color: blue;}',
+			),
+			// A leading rule without `&` keeps appending to the block selector.
+			'leading pseudo-class'                      => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => ':hover{color: red;}',
+				),
+				'expected' => ':root :where(.foo:hover){color: red;}',
+			),
+			'leading pseudo-element'                    => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '::before{color: red;}',
+				),
+				'expected' => ':root :where(.foo)::before{color: red;}',
+			),
+			'leading class'                             => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '.is-style-x{color: red;}',
+				),
+				'expected' => ':root :where(.foo.is-style-x){color: red;}',
+			),
+			'leading id'                                => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '#hero{color: red;}',
+				),
+				'expected' => ':root :where(.foo#hero){color: red;}',
+			),
+			'leading :is()'                             => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => ':is(.a, .b){color: red;}',
+				),
+				'expected' => ':root :where(.foo:is(.a, .b)){color: red;}',
+			),
+			'twenty twenty-four calendar'               => array(
+				'input'    => array(
+					'selector' => '.wp-block-calendar',
+					'css'      => '.wp-block-calendar table:where(:not(.has-text-color)) th{background-color:var(--wp--preset--color--contrast-2);color:var(--wp--preset--color--base);border-color:var(--wp--preset--color--contrast-2)} & table:where(:not(.has-text-color)) td{border-color:var(--wp--preset--color--contrast-2)}',
+				),
+				'expected' => ':root :where(.wp-block-calendar.wp-block-calendar table:where(:not(.has-text-color)) th){background-color:var(--wp--preset--color--contrast-2);color:var(--wp--preset--color--base);border-color:var(--wp--preset--color--contrast-2)}:root :where(.wp-block-calendar table:where(:not(.has-text-color)) td){border-color:var(--wp--preset--color--contrast-2)}',
+			),
+			'leading selector list'                     => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '.a, .b{color: red;}',
+				),
+				'expected' => ':root :where(.foo.a, .b){color: red;}',
+			),
+			'selector after an appended selector stays as written' => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '&.a, .rtl .b{color: red;}',
+				),
+				'expected' => ':root :where(.foo.a, .rtl .b){color: red;}',
+			),
+			'selector after a descendant selector is nested' => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '& .a, .b{color: red;}',
+				),
+				'expected' => ':root :where(.foo .a, .foo .b){color: red;}',
+			),
+			'different pseudo-elements in a list'       => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '&::before, &::after{content: "";}',
+				),
+				'expected' => ':root :where(.foo)::before, :root :where(.foo)::after{content: "";}',
+			),
+			// Nesting deeper than one level.
+			'nested rule in a nested rule'              => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => "&.is-layout-flex > *:has(+ *) {\n\tdisplay: flex;\n\tcolumn-gap: 5px;\n\n\t/* Second level */\n\t&::after {\n\t\tcontent: '•'\n\t}\n}",
+				),
+				'expected' => ":root :where(.foo.is-layout-flex > *:has(+ *)){display: flex;\n\tcolumn-gap: 5px;}:root :where(.foo.is-layout-flex > *:has(+ *))::after{content: '•'}",
+			),
+			'& after a compound'                        => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '.dark &{color: red;}',
+				),
+				'expected' => ':root :where(.dark .foo){color: red;}',
+			),
+			'declarations after a nested rule'          => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; & a{color: blue;} margin: 0;',
+				),
+				'expected' => ':root :where(.foo){color: red;}:root :where(.foo a){color: blue;}:root :where(.foo){margin: 0;}',
+			),
+			// Conditional group rules.
+			'media query'                               => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '@media (min-width: 1024px) { & { grid-template-columns: repeat(2, 1fr); } }',
+				),
+				'expected' => '@media (min-width: 1024px){:root :where(.foo){grid-template-columns: repeat(2, 1fr);}}',
+			),
+			'declarations in a media query'             => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; @media (min-width: 600px) { color: blue; & a { color: green; } }',
+				),
+				'expected' => ':root :where(.foo){color: red;}@media (min-width: 600px){:root :where(.foo){color: blue;}:root :where(.foo a){color: green;}}',
+			),
+			'media query in a nested rule'              => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '& a { color: red; @supports (display: grid) { @media print { color: blue; } } }',
+				),
+				'expected' => ':root :where(.foo a){color: red;}@supports (display: grid){@media print{:root :where(.foo a){color: blue;}}}',
+			),
+			'other at-rules are dropped'                => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '@import url(a.css); @font-face { font-family: a; } color: red;',
+				),
+				'expected' => ':root :where(.foo){color: red;}',
+			),
+			// Syntax that holds `&`, `{` or `}` without nesting.
+			'& and braces in strings'                   => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'content: "&{}"; & [title="a&b"]{color: red;}',
+				),
+				'expected' => ':root :where(.foo){content: "&{}";}:root :where(.foo [title="a&b"]){color: red;}',
+			),
+			'& in a comment'                            => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; /* & { } */ margin: 0;',
+				),
+				'expected' => ':root :where(.foo){color: red; /* & { } */ margin: 0;}',
+			),
+			'braces in a custom property'               => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => '--x: { a: b }; color: red;',
+				),
+				'expected' => ':root :where(.foo){--x: { a: b }; color: red;}',
+			),
+			'text that is not a declaration is dropped' => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color red; margin: 0;',
+				),
+				'expected' => ':root :where(.foo){margin: 0;}',
+			),
+			'stray closing brace ends a declaration'    => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red }; margin: 0; } .a { color: blue; }',
+				),
+				'expected' => ':root :where(.foo){margin: 0;}:root :where(.foo .a){color: blue;}',
+			),
+			'unclosed rule is dropped'                  => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; & a { color: blue;',
+				),
+				'expected' => ':root :where(.foo){color: red;}',
+			),
+			'unclosed string is dropped'                => array(
+				'input'    => array(
+					'selector' => '.foo',
+					'css'      => 'color: red; content: "a',
+				),
+				'expected' => ':root :where(.foo){color: red;}',
 			),
 		);
 	}
