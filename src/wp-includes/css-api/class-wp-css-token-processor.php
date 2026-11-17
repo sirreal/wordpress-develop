@@ -861,6 +861,114 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
+	 * Splits CSS into the source text between its top-level commas.
+	 *
+	 * The groups are the groups of parse_comma_separated_list(), returned as
+	 * their source text: the bytes of the input between two top-level commas,
+	 * with whitespace, comments and escapes as written. Joining the result
+	 * with commas reproduces the input.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $items = WP_CSS_Token_Processor::split_comma_separated_list( '[title="a,b"], :is(c, d) e,f\,g' );
+	 * foreach ( $items as $item ) {
+	 *     echo "[{$item}]\n";
+	 * }
+	 * // Outputs:
+	 * // [[title="a,b"]]
+	 * // [ :is(c, d) e]
+	 * // [f\,g]
+	 * ```
+	 *
+	 * A comma at the end of the input produces a final empty string. Empty
+	 * input produces an empty array.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @see WP_CSS_Token_Processor::parse_comma_separated_list()
+	 *
+	 * @param string $css CSS source to split.
+	 * @return string[] Source text of each group, in source order.
+	 */
+	public static function split_comma_separated_list( string $css ): array {
+		$length = strlen( $css );
+		if ( 0 === $length ) {
+			return array();
+		}
+
+		/*
+		 * Without strings, comments, escapes and url tokens, each `,` `(` `)`
+		 * `[` `]` `{` `}` byte is a token of its own or ends a function token,
+		 * so scanning those bytes finds the groups the tokenizer finds.
+		 */
+		if ( strcspn( $css, '"\'\\/' ) === $length && false === stripos( $css, 'url(' ) ) {
+			$items   = array();
+			$item_at = 0;
+
+			// Closing bytes of the open blocks and functions, innermost last.
+			$closers = '';
+
+			$at = strcspn( $css, ',()[]{}' );
+			while ( $at < $length ) {
+				$byte = $css[ $at ];
+				if ( ',' === $byte ) {
+					if ( '' === $closers ) {
+						$items[] = substr( $css, $item_at, $at - $item_at );
+						$item_at = $at + 1;
+					}
+				} elseif ( '' !== $closers && $closers[-1] === $byte ) {
+					$closers = substr( $closers, 0, -1 );
+				} elseif ( '(' === $byte ) {
+					$closers .= ')';
+				} elseif ( '[' === $byte ) {
+					$closers .= ']';
+				} elseif ( '{' === $byte ) {
+					$closers .= '}';
+				}
+				$at += 1 + strcspn( $css, ',()[]{}', $at + 1 );
+			}
+
+			$items[] = substr( $css, $item_at );
+			return $items;
+		}
+
+		$processor = new self( $css );
+		$items     = array();
+		$item_at   = 0;
+
+		// Closing token types of the open blocks and functions, innermost last.
+		$closers = array();
+
+		while ( $processor->next_token() ) {
+			$type = $processor->token_type;
+
+			if ( self::TOKEN_COMMA === $type && array() === $closers ) {
+				$items[] = substr( $css, $item_at, $processor->token_starts_at - $item_at );
+				$item_at = $processor->at;
+				continue;
+			}
+
+			// A closing token ends a block only when it matches the innermost open block.
+			if ( array() !== $closers && end( $closers ) === $type ) {
+				array_pop( $closers );
+			} elseif ( self::TOKEN_FUNCTION === $type || self::TOKEN_LEFT_PAREN === $type ) {
+				$closers[] = self::TOKEN_RIGHT_PAREN;
+			} elseif ( self::TOKEN_LEFT_BRACKET === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACKET;
+			} elseif ( self::TOKEN_LEFT_BRACE === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACE;
+			}
+		}
+
+		if ( $item_at < $processor->length || array() !== $items ) {
+			$items[] = substr( $css, $item_at );
+		}
+
+		return $items;
+	}
+
+	/**
 	 * Clears token state between tokens.
 	 *
 	 * @since 7.3.0

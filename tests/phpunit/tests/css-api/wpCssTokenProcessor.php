@@ -2675,4 +2675,50 @@ CSS;
 			'unterminated string holds comma' => array( '"a,b', array( '"a,b' ) ),
 		);
 	}
+
+	/**
+	 * Tests that the source text of each group matches the groups of
+	 * parse_comma_separated_list().
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_parse_comma_separated_list
+	 * @dataProvider data_split_comma_separated_list
+	 *
+	 * @covers ::split_comma_separated_list
+	 *
+	 * @param string   $css      CSS to split.
+	 * @param string[] $expected Source text of each group.
+	 */
+	public function test_split_comma_separated_list( string $css, array $expected ): void {
+		$this->assertSame( $expected, WP_CSS_Token_Processor::split_comma_separated_list( $css ), 'Wrong groups.' );
+
+		$groups = array();
+		foreach ( WP_CSS_Token_Processor::parse_comma_separated_list( $css ) as $group ) {
+			$text = '';
+			foreach ( $group as $token ) {
+				$text .= substr( $css, $token->get_start(), $token->get_length() );
+			}
+			$groups[] = $text;
+		}
+		$this->assertSame( $groups, WP_CSS_Token_Processor::split_comma_separated_list( $css ), 'Groups differ from parse_comma_separated_list().' );
+	}
+
+	/**
+	 * Data provider for test_split_comma_separated_list().
+	 *
+	 * @return array[]
+	 */
+	public static function data_split_comma_separated_list(): array {
+		return array(
+			'whitespace around commas'          => array( ' , ', array( ' ', ' ' ) ),
+			'selector list'                     => array( 'h1, h2,h3', array( 'h1', ' h2', 'h3' ) ),
+			'attribute selectors in a function' => array( 'input:where([type=a],[type=b]), textarea', array( 'input:where([type=a],[type=b])', ' textarea' ) ),
+			'comma in an uppercase url token'   => array( 'URL(a,b),c', array( 'URL(a,b)', 'c' ) ),
+			'comma in a quoted url argument'    => array( 'url("a,b"),c', array( 'url("a,b")', 'c' ) ),
+			'bad url ends at its first closer'  => array( 'url(a(b),c', array( 'url(a(b)', 'c' ) ),
+			'escaped url name'                  => array( 'u\rl(a(b),c', array( 'u\rl(a(b)', 'c' ) ),
+			'comma in an attribute string'      => array( '[title="a,b"],c', array( '[title="a,b"]', 'c' ) ),
+			'string holds a closer'             => array( ':is("(",a),b', array( ':is("(",a)', 'b' ) ),
+		);
+	}
 }
