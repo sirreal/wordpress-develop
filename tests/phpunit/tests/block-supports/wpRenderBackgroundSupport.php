@@ -636,4 +636,178 @@ class Tests_Block_Supports_WpRenderBackgroundSupport extends WP_UnitTestCase {
 
 		wp_delete_attachment( $attachment_id, true );
 	}
+
+	/**
+	 * Renders a block with a media library background image as an IMG element.
+	 *
+	 * @param string $wrapper    Block wrapper markup.
+	 * @param array  $background Background style attributes, without `backgroundImage`.
+	 * @return array {
+	 *     Styles of the rendered elements.
+	 *
+	 *     @type string|true|null $wrapper_style        Wrapper style attribute.
+	 *     @type string|true|null $img_style            IMG style attribute.
+	 *     @type string|true|null $img_object_position  IMG data-object-position attribute.
+	 * }
+	 */
+	private function render_background_image_element( $wrapper, $background ) {
+		switch_theme( 'block-theme-child-with-fluid-typography' );
+		$this->test_block_name = 'test/background-img-element-style';
+
+		$attachment_id = self::factory()->attachment->create_upload_object(
+			DIR_TESTDATA . '/images/canola.jpg',
+			0,
+			array( 'post_mime_type' => 'image/jpeg' )
+		);
+
+		register_block_type(
+			$this->test_block_name,
+			array(
+				'api_version' => 2,
+				'attributes'  => array(
+					'style' => array(
+						'type' => 'object',
+					),
+				),
+				'supports'    => array(
+					'background' => array(
+						'backgroundImage' => true,
+					),
+				),
+			)
+		);
+
+		$background['backgroundImage'] = array(
+			'id'  => $attachment_id,
+			'url' => wp_get_attachment_url( $attachment_id ),
+		);
+
+		$block = array(
+			'blockName' => $this->test_block_name,
+			'attrs'     => array(
+				'style' => array(
+					'background' => $background,
+				),
+			),
+		);
+
+		$actual = wp_render_background_support( $wrapper, $block );
+		wp_delete_attachment( $attachment_id, true );
+
+		$processor = new WP_HTML_Tag_Processor( $actual );
+		$processor->next_tag();
+		$wrapper_style = $processor->get_attribute( 'style' );
+		$processor->next_tag( 'IMG' );
+
+		return array(
+			'wrapper_style'       => $wrapper_style,
+			'img_style'           => $processor->get_attribute( 'style' ),
+			'img_object_position' => $processor->get_attribute( 'data-object-position' ),
+		);
+	}
+
+	/**
+	 * Tests that the wrapper gets `position: relative` unless a position
+	 * declaration exists.
+	 *
+	 * @ticket 64725
+	 *
+	 * @dataProvider data_background_img_element_wrapper_position
+	 *
+	 * @param string $wrapper  Block wrapper markup.
+	 * @param string $expected Expected wrapper style attribute.
+	 */
+	public function test_background_img_element_wrapper_position( $wrapper, $expected ) {
+		$styles = $this->render_background_image_element( $wrapper, array( 'backgroundSize' => 'cover' ) );
+		$this->assertSame( $expected, $styles['wrapper_style'] );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_background_img_element_wrapper_position() {
+		return array(
+			'no style'                             => array(
+				'<div>Content</div>',
+				'position: relative;',
+			),
+			'style without position'               => array(
+				'<div style="color:red">Content</div>',
+				'color:red; position: relative;',
+			),
+			'position declaration'                 => array(
+				'<div style="color:red;position:absolute">Content</div>',
+				'color:red;position:absolute',
+			),
+			'position declaration in uppercase'    => array(
+				'<div style="POSITION:absolute">Content</div>',
+				'POSITION:absolute',
+			),
+			'position declaration after a comment' => array(
+				'<div style="color:red;/* note */position:absolute">Content</div>',
+				'color:red;/* note */position:absolute',
+			),
+			'position inside a string'             => array(
+				'<div style=\'font-family:"a;position:b"\'>Content</div>',
+				'font-family:"a;position:b"; position: relative;',
+			),
+			'position inside a comment'            => array(
+				'<div style="color:red;/*;position:absolute*/">Content</div>',
+				'color:red;/*;position:absolute*/ position: relative;',
+			),
+		);
+	}
+
+	/**
+	 * Tests that the background position becomes the IMG object-position when
+	 * it is one CSS declaration value.
+	 *
+	 * @ticket 64725
+	 *
+	 * @dataProvider data_background_img_element_object_position
+	 *
+	 * @param string      $position                 Background position attribute.
+	 * @param string      $expected_style           Expected IMG style attribute.
+	 * @param string|null $expected_object_position Expected IMG data-object-position attribute.
+	 */
+	public function test_background_img_element_object_position( $position, $expected_style, $expected_object_position ) {
+		$styles = $this->render_background_image_element(
+			'<div>Content</div>',
+			array(
+				'backgroundSize'     => 'cover',
+				'backgroundPosition' => $position,
+			)
+		);
+		$this->assertSame( $expected_style, $styles['img_style'], 'IMG style should be correct.' );
+		$this->assertSame( $expected_object_position, $styles['img_object_position'], 'IMG data-object-position should be correct.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public static function data_background_img_element_object_position() {
+		$img_style = 'position:absolute;top:0;left:0;right:0;bottom:0;margin:0;padding:0;width:100%;height:100%;max-width:none;max-height:none;pointer-events:none; object-fit: cover;';
+
+		return array(
+			'position'                        => array(
+				'right 10% bottom 20px',
+				"{$img_style} object-position: right 10% bottom 20px;",
+				'right 10% bottom 20px',
+			),
+			'position with a semicolon'       => array(
+				'50% 50%; width: 1px',
+				$img_style,
+				null,
+			),
+			'position with an unclosed block' => array(
+				'calc(50% + 1px',
+				$img_style,
+				null,
+			),
+		);
+	}
 }
