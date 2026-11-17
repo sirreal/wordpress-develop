@@ -189,6 +189,58 @@ class Tests_Block_Supports_Duotone extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that the filter class is added to each selector in a duotone
+	 * selector list, and that commas inside strings and escapes do not
+	 * split the list.
+	 *
+	 * @ticket 65669
+	 *
+	 * @covers ::render_duotone_support
+	 *
+	 * @dataProvider data_duotone_selector_list
+	 *
+	 * @param string $duotone_selector Duotone selector of the block type.
+	 * @param string $expected         Expected selector, with `ID` in place of the filter class.
+	 */
+	public function test_duotone_selector_list( $duotone_selector, $expected ) {
+		register_block_type(
+			'test/duotone-selector-list',
+			array(
+				'api_version' => 3,
+				'supports'    => array( 'filter' => array( 'duotone' => true ) ),
+				'selectors'   => array( 'filter' => array( 'duotone' => $duotone_selector ) ),
+			)
+		);
+
+		$block    = array(
+			'blockName' => 'test/duotone-selector-list',
+			'attrs'     => array( 'style' => array( 'color' => array( 'duotone' => 'unset' ) ) ),
+		);
+		$wp_block = new WP_Block( $block );
+		WP_Duotone::render_duotone_support( '<div></div>', $block, $wp_block );
+		WP_Duotone::output_block_styles();
+		$css = wp_style_engine_get_stylesheet_from_context( 'block-supports', array( 'prettify' => false ) );
+
+		unregister_block_type( 'test/duotone-selector-list' );
+
+		$rule = str_replace( 'ID', 'wp-duotone-unset-[0-9]+', preg_quote( $expected . '{filter:unset;}', '/' ) );
+		$this->assertMatchesRegularExpression( "/(?:^|}){$rule}/", $css );
+	}
+
+	/**
+	 * Data provider for test_duotone_selector_list().
+	 *
+	 * @return array<string, array{0: string, 1: string}>
+	 */
+	public static function data_duotone_selector_list() {
+		return array(
+			'selector list'                => array( '.a img, .b img', '.ID.a img, .ID.b img' ),
+			'comma in an attribute string' => array( '[data-x="a,b"] img', '.ID[data-x="a,b"] img' ),
+			'escaped comma'                => array( '.a\\,b img', '.ID.a\\,b img' ),
+		);
+	}
+
+	/**
 	 * @dataProvider data_is_preset
 	 */
 	public function test_is_preset( $data_attr, $expected ) {
