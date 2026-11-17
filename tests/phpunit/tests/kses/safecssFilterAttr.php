@@ -537,7 +537,10 @@ class Tests_Kses_SafecssFilterAttr extends WP_UnitTestCase {
 			'translate with no space after a percentage' => array( 'translate: 50%2px', '', '' ),
 			'translate with a comma'                     => array( 'translate: 1px, 2px', '', '' ),
 			'translate with three lengths'               => array( 'translate: 1px 2px 3px', '', '' ),
-			'translate with zero written 0.0'            => array( 'translate: 0.0', '', '' ),
+			'translate with zero written 0.0'            => array( 'translate: 0.0', 'translate: 0.0;', 'translate: 0.0' ),
+			'translate with negative zero'               => array( 'translate: -0 +0', 'translate: -0 +0;', 'translate: -0 +0' ),
+			'translate with zero with no integer part'   => array( 'translate: .0 0e3', 'translate: .0 0e3;', 'translate: .0 0e3' ),
+			'translate with a nonzero number'            => array( 'translate: 0.1', '', '' ),
 			'translate with no value'                    => array( 'translate:', '', '' ),
 		);
 	}
