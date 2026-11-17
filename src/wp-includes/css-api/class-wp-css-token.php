@@ -314,6 +314,38 @@ final class WP_CSS_Token {
 	}
 
 	/**
+	 * Reports whether the token is whitespace or a comment.
+	 *
+	 * CSS Syntax 3 discards comments while tokenizing, and most grammars
+	 * allow whitespace between component values, so a consumer that reads
+	 * a value usually skips both.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $processor = new WP_CSS_Token_Processor( "a /* b *\x2F c" );
+	 * while ( $processor->next_token() ) {
+	 *     $token = $processor->get_token();
+	 *     if ( ! $token->is_whitespace_or_comment() ) {
+	 *         echo $token->get_value() . "\n";
+	 *     }
+	 * }
+	 * // Outputs:
+	 * // a
+	 * // c
+	 * ```
+	 *
+	 * @since 7.3.0
+	 *
+	 * @link https://www.w3.org/TR/css-syntax-3/#consume-comments
+	 *
+	 * @return bool Whether the token is a whitespace token or a comment.
+	 */
+	public function is_whitespace_or_comment(): bool {
+		return WP_CSS_Token_Processor::TOKEN_WHITESPACE === $this->type || WP_CSS_Token_Processor::TOKEN_COMMENT === $this->type;
+	}
+
+	/**
 	 * Decodes the value from the CSS source.
 	 *
 	 * @since 7.3.0

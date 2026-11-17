@@ -188,6 +188,39 @@ class Tests_CssApi_WpCssToken extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that whitespace and comment tokens are reported as such.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_whitespace_or_comment
+	 *
+	 * @covers ::is_whitespace_or_comment
+	 */
+	public function test_is_whitespace_or_comment( string $css, bool $expected ): void {
+		$processor = new WP_CSS_Token_Processor( $css );
+		$this->assertTrue( $processor->next_token() );
+
+		$this->assertSame( $expected, $processor->get_token()->is_whitespace_or_comment() );
+	}
+
+	/**
+	 * Data provider for test_is_whitespace_or_comment().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_whitespace_or_comment(): array {
+		return array(
+			'space'                => array( ' a', true ),
+			'newline and tab'      => array( "\n\ta", true ),
+			'comment'              => array( '/* a */', true ),
+			'unterminated comment' => array( '/* a', true ),
+			'ident'                => array( 'a', false ),
+			'string with a space'  => array( '" "', false ),
+			'escaped space'        => array( '\\20', false ),
+			'delim slash'          => array( '/ *', false ),
+		);
+	}
+
+	/**
 	 * Tests that the value of a comment token is the text between its delimiters.
 	 *
 	 * @ticket 65738
