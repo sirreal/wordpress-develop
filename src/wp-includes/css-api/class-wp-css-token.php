@@ -47,6 +47,69 @@ final class WP_CSS_Token {
 	private const ANGLE_UNITS = array( 'deg', 'grad', 'rad', 'turn' );
 
 	/**
+	 * Length units, lowercase.
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @link https://drafts.csswg.org/css-values-4/#lengths
+	 * @link https://drafts.csswg.org/css-contain-3/#container-lengths
+	 *
+	 * @var string[]
+	 */
+	private const LENGTH_UNITS = array(
+		'px',
+		'cm',
+		'mm',
+		'q',
+		'in',
+		'pt',
+		'pc',
+		'em',
+		'rem',
+		'ex',
+		'rex',
+		'cap',
+		'rcap',
+		'ch',
+		'rch',
+		'ic',
+		'ric',
+		'lh',
+		'rlh',
+		'vw',
+		'vh',
+		'vi',
+		'vb',
+		'vmin',
+		'vmax',
+		'svw',
+		'svh',
+		'svi',
+		'svb',
+		'svmin',
+		'svmax',
+		'lvw',
+		'lvh',
+		'lvi',
+		'lvb',
+		'lvmin',
+		'lvmax',
+		'dvw',
+		'dvh',
+		'dvi',
+		'dvb',
+		'dvmin',
+		'dvmax',
+		'cqw',
+		'cqh',
+		'cqi',
+		'cqb',
+		'cqmin',
+		'cqmax',
+	);
+
+	/**
 	 * CSS source the offsets index.
 	 *
 	 * @since 7.3.0
@@ -364,6 +427,63 @@ final class WP_CSS_Token {
 			WP_CSS_Token_Processor::TOKEN_DIMENSION === $this->type &&
 			in_array( strtolower( (string) $this->unit ), self::ANGLE_UNITS, true )
 		);
+	}
+
+	/**
+	 * Reports whether the token is a CSS length.
+	 *
+	 * A length is a dimension token whose unit is an ASCII case-insensitive
+	 * match for a length unit, or a number token whose value is zero. The
+	 * unit is compared after escape decoding. The length units are the
+	 * absolute, font-relative and viewport units of CSS Values 4 and the
+	 * container query units of CSS Containment 3.
+	 *
+	 * CSS allows a bare zero for a length. A number token is zero when every
+	 * digit before its exponent is `0`, whatever its sign, decimal point or
+	 * exponent: `0`, `-0`, `0.0`, `.0` and `0e3`. A nonzero number is not a
+	 * length, even one too small to represent as a float, such as `1e-400`.
+	 *
+	 * Percentages are not lengths. Check for a percentage token separately
+	 * where CSS accepts `<length-percentage>`.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $processor = new WP_CSS_Token_Processor( '10DVH 1\\70 x -0.0 50% 10' );
+	 * while ( $processor->next_token() ) {
+	 *     $token = $processor->get_token();
+	 *     if ( WP_CSS_Token_Processor::TOKEN_WHITESPACE !== $token->get_type() ) {
+	 *         var_dump( $token->is_length() );
+	 *     }
+	 * }
+	 * // Outputs:
+	 * // bool(true)
+	 * // bool(true)
+	 * // bool(true)
+	 * // bool(false)
+	 * // bool(false)
+	 * ```
+	 *
+	 * @since 7.3.0
+	 *
+	 * @link https://drafts.csswg.org/css-values-4/#lengths
+	 * @link https://drafts.csswg.org/css-contain-3/#container-lengths
+	 *
+	 * @return bool Whether the token is a length.
+	 */
+	public function is_length(): bool {
+		switch ( $this->type ) {
+			case WP_CSS_Token_Processor::TOKEN_DIMENSION:
+				return in_array( strtolower( (string) $this->unit ), self::LENGTH_UNITS, true );
+
+			case WP_CSS_Token_Processor::TOKEN_NUMBER:
+				// A number is zero when its digits before any exponent are all `0`.
+				$number = (string) $this->get_value();
+				return '' === trim( substr( $number, 0, strcspn( $number, 'eE' ) ), '+-.0' );
+
+			default:
+				return false;
+		}
 	}
 
 	/**

@@ -262,6 +262,63 @@ class Tests_CssApi_WpCssToken extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tests that a token reports whether it is a length.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_length
+	 *
+	 * @covers ::is_length
+	 */
+	public function test_is_length( string $css, bool $expected ): void {
+		$this->assertSame( $expected, self::get_only_token( $css )->is_length() );
+	}
+
+	/**
+	 * Data provider for test_is_length().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_length(): array {
+		return array(
+			'pixels'                         => array( '10px', true ),
+			'quarter millimeters'            => array( '1Q', true ),
+			'font-relative unit'             => array( '.5em', true ),
+			'root font-relative unit'        => array( '1rcap', true ),
+			'viewport unit'                  => array( '10vmin', true ),
+			'small viewport unit'            => array( '1svmax', true ),
+			'large viewport unit'            => array( '1lvh', true ),
+			'dynamic viewport unit'          => array( '10DVH', true ),
+			'container query unit'           => array( '2cqi', true ),
+			'negative'                       => array( '-1px', true ),
+			'leading plus sign'              => array( '+.5em', true ),
+			'exponent'                       => array( '1e1px', true ),
+			'uppercase unit'                 => array( '1PX', true ),
+			'hex escape in the unit'         => array( '1\\70 x', true ),
+			'number 0'                       => array( '0', true ),
+			'zero with a decimal point'      => array( '0.0', true ),
+			'negative zero'                  => array( '-0', true ),
+			'zero with a plus sign'          => array( '+0', true ),
+			'zero with no integer part'      => array( '.0', true ),
+			'zero with an exponent'          => array( '0e3', true ),
+			'zero with a negative exponent'  => array( '-0.00E-5', true ),
+			'zero with leading zeros'        => array( '000', true ),
+			'number other than 0'            => array( '10', false ),
+			'number with a zero exponent'    => array( '1e0', false ),
+			'number that underflows a float' => array( '1e-400', false ),
+			'zero point one'                 => array( '0.1', false ),
+			'percentage'                     => array( '50%', false ),
+			'zero percent'                   => array( '0%', false ),
+			'angle'                          => array( '5deg', false ),
+			'resolution'                     => array( '1dppx', false ),
+			'flex'                           => array( '1fr', false ),
+			'unit with a suffix'             => array( '1pxx', false ),
+			'fullwidth unit'                 => array( "1\u{FF50}\u{FF58}", false ),
+			'ident'                          => array( 'px', false ),
+			'function'                       => array( 'calc(', false ),
+		);
+	}
+
+	/**
 	 * Returns the token of CSS that tokenizes as exactly one token.
 	 *
 	 * @param string $css CSS of one token.
