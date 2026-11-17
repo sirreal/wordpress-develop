@@ -1387,6 +1387,11 @@ class WP_CSS_Token_Processor {
 			return 1;
 		}
 
+		// Other ASCII code points do not start an identifier.
+		if ( $this->css[ $at ] < "\x80" ) {
+			return 0;
+		}
+
 		$new_at         = $at;
 		$invalid_length = 0;
 		if ( 1 !== _wp_scan_utf8( $this->css, $new_at, $invalid_length, null, 1 ) ) {
