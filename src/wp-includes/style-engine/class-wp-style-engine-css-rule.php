@@ -177,9 +177,10 @@ class WP_Style_Engine_CSS_Rule {
 		$nested_declarations_indent = $should_prettify ? $indent_count + 2 : 0;
 		$suffix                     = $should_prettify ? "\n" : '';
 		$spacer                     = $should_prettify ? ' ' : '';
-		// Trims any multiple selectors strings.
-		$selector         = $should_prettify ? implode( ',', array_map( 'trim', explode( ',', $this->get_selector() ) ) ) : $this->get_selector();
-		$selector         = $should_prettify ? str_replace( array( ',' ), ",\n", $selector ) : $selector;
+		// Puts each selector of a selector list on its own line.
+		$selector         = $should_prettify
+			? implode( ",\n", array_map( 'trim', WP_CSS_Token_Processor::split_comma_separated_list( $this->get_selector() ) ) )
+			: $this->get_selector();
 		$rules_group      = $this->get_rules_group();
 		$has_rules_group  = ! empty( $rules_group );
 		$css_declarations = $this->declarations->get_declarations_string( $should_prettify, $has_rules_group ? $nested_declarations_indent : $declarations_indent );
