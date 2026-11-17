@@ -216,4 +216,63 @@ class Tests_CssApi_WpCssToken extends WP_UnitTestCase {
 			'no escapes, newlines preprocessed' => array( "/*\\41\r\n*/", "\\41\n" ),
 		);
 	}
+
+	/**
+	 * Tests that a token reports whether it is an angle.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_angle
+	 *
+	 * @covers ::is_angle
+	 */
+	public function test_is_angle( string $css, bool $expected ): void {
+		$this->assertSame( $expected, self::get_only_token( $css )->is_angle() );
+	}
+
+	/**
+	 * Data provider for test_is_angle().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_angle(): array {
+		return array(
+			'degrees'                      => array( '45deg', true ),
+			'gradians'                     => array( '100grad', true ),
+			'radians'                      => array( '1.5rad', true ),
+			'turns'                        => array( '.5turn', true ),
+			'negative'                     => array( '-15deg', true ),
+			'leading plus sign'            => array( '+1deg', true ),
+			'zero with a unit'             => array( '0deg', true ),
+			'exponent'                     => array( '1e2deg', true ),
+			'negative exponent'            => array( '1e-1turn', true ),
+			'uppercase unit'               => array( '1DEG', true ),
+			'mixed case unit'              => array( '100GrAd', true ),
+			'hex escape in the unit'       => array( '1\\64 eg', true ),
+			'identity escape in the unit'  => array( '1de\\g', true ),
+			'number 0'                     => array( '0', false ),
+			'number other than 0'          => array( '45', false ),
+			'percentage'                   => array( '50%', false ),
+			'length'                       => array( '1px', false ),
+			'unit with a suffix'           => array( '1degs', false ),
+			'unit with a trailing null'    => array( "1deg\0", false ),
+			'non-ASCII letter in the unit' => array( "1d\u{0435}g", false ),
+			'ident'                        => array( 'deg', false ),
+			'function'                     => array( 'calc(', false ),
+		);
+	}
+
+	/**
+	 * Returns the token of CSS that tokenizes as exactly one token.
+	 *
+	 * @param string $css CSS of one token.
+	 * @return WP_CSS_Token The token.
+	 */
+	private static function get_only_token( string $css ): WP_CSS_Token {
+		$processor = new WP_CSS_Token_Processor( $css );
+		self::assertTrue( $processor->next_token(), 'The CSS must have a token.' );
+		$token = $processor->get_token();
+		self::assertFalse( $processor->next_token(), 'The CSS must have only one token.' );
+
+		return $token;
+	}
 }
