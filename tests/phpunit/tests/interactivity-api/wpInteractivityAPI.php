@@ -1356,7 +1356,7 @@ class Tests_Interactivity_API_WpInteractivityAPI extends WP_UnitTestCase {
 		$p->next_tag();
 		$this->assertSame( 'some-id', $p->get_attribute( 'id' ) );
 		$this->assertSame( 'some-class', $p->get_attribute( 'class' ) );
-		$this->assertSame( 'display:none;', $p->get_attribute( 'style' ) );
+		$this->assertSame( 'display: none;', $p->get_attribute( 'style' ) );
 		$this->assertStringContainsString( 'Updated', $p->get_updated_html() );
 		$this->assertStringNotContainsString( 'Text', $p->get_updated_html() );
 	}

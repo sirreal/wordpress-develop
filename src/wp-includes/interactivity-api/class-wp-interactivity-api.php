@@ -1517,15 +1517,22 @@ final class WP_Interactivity_API {
 	 * Merges an individual style property in the `style` attribute of an HTML
 	 * element, updating or removing the property when necessary.
 	 *
-	 * If a property is modified, the old one is removed and the new one is added
-	 * at the end of the list.
+	 * Every declaration of the property is removed, and the new declaration is
+	 * appended at the end of the list. Other declarations keep their text.
+	 * Property names match as in {@see WP_HTML_Style_Attribute_Processor::next_declaration()}:
+	 * ASCII-case-insensitively, except custom properties, which match exactly.
+	 *
+	 * A value that is not one valid CSS declaration value, such as one with a
+	 * semicolon outside a string or block, or one ending in `!important`, removes
+	 * the property and adds nothing.
 	 *
 	 * @since 6.5.0
+	 * @since 7.3.0 Parses the style attribute value as CSS.
 	 *
 	 * Example:
 	 *
-	 *     merge_style_property( 'color:green;', 'color', 'red' )      => 'color:red;'
-	 *     merge_style_property( 'background:green;', 'color', 'red' ) => 'background:green;color:red;'
+	 *     merge_style_property( 'color:green;', 'color', 'red' )      => 'color: red;'
+	 *     merge_style_property( 'background:green;', 'color', 'red' ) => 'background:green; color: red;'
 	 *     merge_style_property( 'color:green;', 'color', null )       => ''
 	 *
 	 * @param string            $style_attribute_value The current style attribute value.
@@ -1535,26 +1542,18 @@ final class WP_Interactivity_API {
 	 * @return string The new style attribute value after the specified property has been added, updated or removed.
 	 */
 	private function merge_style_property( string $style_attribute_value, string $style_property_name, $style_property_value ): string {
-		$style_assignments    = explode( ';', $style_attribute_value );
-		$result               = array();
 		$style_property_value = ! empty( $style_property_value ) ? rtrim( trim( $style_property_value ), ';' ) : null;
-		$new_style_property   = $style_property_value ? $style_property_name . ':' . $style_property_value . ';' : '';
+		$styles               = new WP_HTML_Style_Attribute_Processor( $style_attribute_value );
 
-		// Generates an array with all the properties but the modified one.
-		foreach ( $style_assignments as $style_assignment ) {
-			if ( empty( trim( $style_assignment ) ) ) {
-				continue;
-			}
-			list( $name, $value ) = explode( ':', $style_assignment );
-			if ( trim( $name ) !== $style_property_name ) {
-				$result[] = trim( $name ) . ':' . trim( $value ) . ';';
-			}
+		while ( $styles->next_declaration( $style_property_name ) ) {
+			$styles->remove_declaration();
 		}
 
-		// Adds the new/modified property at the end of the list.
-		$result[] = $new_style_property;
+		if ( $style_property_value ) {
+			$styles->append_declaration( $style_property_name, $style_property_value );
+		}
 
-		return implode( '', $result );
+		return $styles->get_updated_style();
 	}
 
 	/**
