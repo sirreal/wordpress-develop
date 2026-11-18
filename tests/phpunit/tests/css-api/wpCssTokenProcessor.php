@@ -2621,8 +2621,7 @@ CSS;
 	}
 
 	/**
-	 * Tests that CSS holding exactly one token, with whitespace and comments
-	 * around it, parses as that token.
+	 * Tests that CSS that is exactly one token parses as that token.
 	 *
 	 * @ticket 65738
 	 * @dataProvider data_parse_single_token
@@ -2649,8 +2648,6 @@ CSS;
 	public static function data_parse_single_token(): array {
 		return array(
 			'dimension'                    => array( '45deg', WP_CSS_Token_Processor::TOKEN_DIMENSION, '45deg' ),
-			'whitespace around'            => array( " \t45deg\n", WP_CSS_Token_Processor::TOKEN_DIMENSION, '45deg' ),
-			'comments around'              => array( '/* a */1px/* b */', WP_CSS_Token_Processor::TOKEN_DIMENSION, '1px' ),
 			'number'                       => array( '0', WP_CSS_Token_Processor::TOKEN_NUMBER, '0' ),
 			'percentage'                   => array( '50%', WP_CSS_Token_Processor::TOKEN_PERCENTAGE, '50%' ),
 			'string with spaces'           => array( '"a b"', WP_CSS_Token_Processor::TOKEN_STRING, '"a b"' ),
@@ -2661,7 +2658,8 @@ CSS;
 	}
 
 	/**
-	 * Tests that CSS holding no token or more than one does not parse as a single token.
+	 * Tests that CSS that is not exactly one token, or is only whitespace or a
+	 * comment, does not parse as a single token.
 	 *
 	 * @ticket 65738
 	 * @dataProvider data_parse_single_token_rejects
@@ -2684,6 +2682,12 @@ CSS;
 			'empty'                => array( '' ),
 			'whitespace only'      => array( '   ' ),
 			'comment only'         => array( '/* a */' ),
+			'leading whitespace'   => array( ' 45deg' ),
+			'trailing whitespace'  => array( '45deg ' ),
+			'trailing newline'     => array( "45deg\n" ),
+			'leading comment'      => array( '/* a */1px' ),
+			'trailing comment'     => array( '1px/* b */' ),
+			'unclosed comment'     => array( '1px/*' ),
 			'two values'           => array( '1px 2px' ),
 			'two values, no space' => array( '1px/**/2px' ),
 			'function'             => array( 'calc(1px)' ),
