@@ -13,7 +13,7 @@
  * @group style-engine
  *
  * @covers ::wp_style_engine_get_styles
- * @covers ::_wp_style_engine_get_single_css_token
+ * @covers WP_CSS_Token_Processor::parse_single_token
  */
 class Tests_Style_Engine_wpStyleEngineValueTypes extends WP_UnitTestCase {
 	/**

@@ -198,30 +198,3 @@ function wp_style_engine_get_stylesheet_from_css_rules( $css_rules, $options = a
 function wp_style_engine_get_stylesheet_from_context( $context, $options = array() ) {
 	return WP_Style_Engine::compile_stylesheet_from_css_rules( WP_Style_Engine::get_store( $context )->get_all_rules(), $options );
 }
-
-/**
- * Returns the CSS token a style value is, if the value is exactly one token.
- *
- * Whitespace and comments are tokens, so a value with whitespace or a
- * comment before or after it is not one token.
- *
- * @since 7.3.0
- * @access private
- * @ignore
- *
- * @param mixed $value Style value.
- * @return WP_CSS_Token|null The token, or null when the value is not a string of exactly one token.
- */
-function _wp_style_engine_get_single_css_token( $value ): ?WP_CSS_Token {
-	if ( ! is_string( $value ) ) {
-		return null;
-	}
-
-	$processor = new WP_CSS_Token_Processor( $value );
-	if ( ! $processor->next_token() ) {
-		return null;
-	}
-
-	$token = $processor->get_token();
-	return $processor->next_token() ? null : $token;
-}

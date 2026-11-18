@@ -888,7 +888,7 @@ final class WP_Style_Engine {
 	 * @return array<string, string> An associative array of CSS definitions, mapping properties to values.
 	 */
 	protected static function get_angle_css_declarations( $style_value, $style_definition ) {
-		$token = _wp_style_engine_get_single_css_token( $style_value );
+		$token = is_string( $style_value ) ? WP_CSS_Token_Processor::parse_single_token( $style_value ) : null;
 		if ( null === $token || ! $token->is_angle() ) {
 			return array();
 		}
@@ -917,7 +917,7 @@ final class WP_Style_Engine {
 		$axes = array();
 		foreach ( array( 'x', 'y' ) as $axis ) {
 			$axis_value = $style_value[ $axis ] ?? '0';
-			$token      = _wp_style_engine_get_single_css_token( $axis_value );
+			$token      = is_string( $axis_value ) ? WP_CSS_Token_Processor::parse_single_token( $axis_value ) : null;
 			if ( null === $token || ! ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() ) ) {
 				return array();
 			}
