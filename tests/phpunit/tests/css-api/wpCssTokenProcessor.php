@@ -2619,4 +2619,76 @@ CSS;
 		);
 		$this->assertSame( $expected_tokens, $actual_tokens );
 	}
+
+	/**
+	 * Tests that CSS holding exactly one token, with whitespace and comments
+	 * around it, parses as that token.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_parse_single_token
+	 *
+	 * @covers ::parse_single_token
+	 *
+	 * @param string $css           CSS to parse.
+	 * @param string $expected_type Expected token type.
+	 * @param string $expected_text Expected source text of the token.
+	 */
+	public function test_parse_single_token( string $css, string $expected_type, string $expected_text ): void {
+		$token = WP_CSS_Token_Processor::parse_single_token( $css );
+
+		$this->assertInstanceOf( WP_CSS_Token::class, $token );
+		$this->assertSame( $expected_type, $token->get_type() );
+		$this->assertSame( $expected_text, substr( $css, $token->get_start(), $token->get_length() ) );
+	}
+
+	/**
+	 * Data provider for test_parse_single_token().
+	 *
+	 * @return array[]
+	 */
+	public static function data_parse_single_token(): array {
+		return array(
+			'dimension'                    => array( '45deg', WP_CSS_Token_Processor::TOKEN_DIMENSION, '45deg' ),
+			'whitespace around'            => array( " \t45deg\n", WP_CSS_Token_Processor::TOKEN_DIMENSION, '45deg' ),
+			'comments around'              => array( '/* a */1px/* b */', WP_CSS_Token_Processor::TOKEN_DIMENSION, '1px' ),
+			'number'                       => array( '0', WP_CSS_Token_Processor::TOKEN_NUMBER, '0' ),
+			'percentage'                   => array( '50%', WP_CSS_Token_Processor::TOKEN_PERCENTAGE, '50%' ),
+			'string with spaces'           => array( '"a b"', WP_CSS_Token_Processor::TOKEN_STRING, '"a b"' ),
+			'escaped unit'                 => array( '1\\64 eg', WP_CSS_Token_Processor::TOKEN_DIMENSION, '1\\64 eg' ),
+			'url'                          => array( 'url(a.png)', WP_CSS_Token_Processor::TOKEN_URL, 'url(a.png)' ),
+			'function token without close' => array( 'calc(', WP_CSS_Token_Processor::TOKEN_FUNCTION, 'calc(' ),
+		);
+	}
+
+	/**
+	 * Tests that CSS holding no token or more than one does not parse as a single token.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_parse_single_token_rejects
+	 *
+	 * @covers ::parse_single_token
+	 *
+	 * @param string $css CSS to parse.
+	 */
+	public function test_parse_single_token_rejects( string $css ): void {
+		$this->assertNull( WP_CSS_Token_Processor::parse_single_token( $css ) );
+	}
+
+	/**
+	 * Data provider for test_parse_single_token_rejects().
+	 *
+	 * @return array[]
+	 */
+	public static function data_parse_single_token_rejects(): array {
+		return array(
+			'empty'                => array( '' ),
+			'whitespace only'      => array( '   ' ),
+			'comment only'         => array( '/* a */' ),
+			'two values'           => array( '1px 2px' ),
+			'two values, no space' => array( '1px/**/2px' ),
+			'function'             => array( 'calc(1px)' ),
+			'value and semicolon'  => array( '1px;' ),
+			'sign and number'      => array( '- 1' ),
+		);
+	}
 }
