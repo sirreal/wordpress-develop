@@ -787,51 +787,43 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
-	 * Parses CSS that should hold exactly one token.
+	 * Parses CSS that is exactly one token, other than whitespace or a comment.
 	 *
-	 * Whitespace and comments before and after the token are ignored, as
-	 * CSS Syntax 3 discards whitespace around a component value and drops
-	 * comments while tokenizing. Use this to check a value that must be one
-	 * token, such as a length or an angle.
+	 * Any other text in the CSS, including whitespace or a comment before or
+	 * after the token, returns null. Use this to check a value that must be
+	 * one token, such as a length or an angle.
 	 *
 	 * Example:
 	 *
 	 * ```php interactive
-	 * $token = WP_CSS_Token_Processor::parse_single_token( ' 45deg ' );
+	 * $token = WP_CSS_Token_Processor::parse_single_token( '45deg' );
 	 * echo $token->get_type() . ' ' . $token->get_value() . $token->get_unit() . "\n";
+	 * var_dump( WP_CSS_Token_Processor::parse_single_token( ' 45deg' ) );
 	 * var_dump( WP_CSS_Token_Processor::parse_single_token( '1px 2px' ) );
 	 * // Outputs:
 	 * // dimension-token 45deg
 	 * // NULL
+	 * // NULL
 	 * ```
-	 *
-	 * The token's offsets index the given CSS, so a caller that writes the
-	 * value back as it was written can take the token's own bytes from it.
 	 *
 	 * @since 7.3.0
 	 *
-	 * @link https://www.w3.org/TR/css-syntax-3/#parse-component-value
-	 *
 	 * @param string $css CSS source to parse.
-	 * @return WP_CSS_Token|null The token, or null when the CSS holds no token or more than one.
+	 * @return WP_CSS_Token|null The token, or null when the CSS is not exactly one token
+	 *                           or the token is whitespace or a comment.
 	 */
 	public static function parse_single_token( string $css ): ?WP_CSS_Token {
 		$processor = new self( $css );
-		$token     = null;
-
-		while ( $processor->next_token() ) {
-			if ( self::TOKEN_WHITESPACE === $processor->token_type || self::TOKEN_COMMENT === $processor->token_type ) {
-				continue;
-			}
-
-			if ( null !== $token ) {
-				return null;
-			}
-
-			$token = $processor->get_token();
+		if (
+			! $processor->next_token() ||
+			self::TOKEN_WHITESPACE === $processor->token_type ||
+			self::TOKEN_COMMENT === $processor->token_type
+		) {
+			return null;
 		}
 
-		return $token;
+		$token = $processor->get_token();
+		return $processor->next_token() ? null : $token;
 	}
 
 	/**
