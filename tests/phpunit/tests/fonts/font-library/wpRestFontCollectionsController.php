@@ -336,7 +336,7 @@ class Tests_REST_WpRestFontCollectionsController extends WP_Test_REST_Controller
 					'preview'    => 'https://example.com/open-sans.png',
 					'fontFace'   => array(
 						array(
-							'fontFamily' => 'Open Sans',
+							'fontFamily' => '"Open Sans"',
 							'fontStyle'  => 'normal',
 							'fontWeight' => '400',
 							'src'        => 'https://example.com/open-sans.woff2',

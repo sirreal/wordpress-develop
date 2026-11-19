@@ -157,6 +157,7 @@ class WP_REST_Font_Faces_Controller extends WP_REST_Posts_Controller {
 	 * Validates settings when creating a font face.
 	 *
 	 * @since 6.5.0
+	 * @since 7.3.0 Rejects a `fontFamily` value that is not valid CSS or a plain font name.
 	 *
 	 * @param string          $value   Encoded JSON string of font face settings.
 	 * @param WP_REST_Request $request Request object.
@@ -194,7 +195,8 @@ class WP_REST_Font_Faces_Controller extends WP_REST_Posts_Controller {
 		// Check that none of the required settings are empty values.
 		$required = $schema['required'];
 		foreach ( $required as $key ) {
-			if ( isset( $settings[ $key ] ) && ! $settings[ $key ] ) {
+			// A string such as '0' is not empty. A font can use the name '0'.
+			if ( isset( $settings[ $key ] ) && ( '' === $settings[ $key ] || array() === $settings[ $key ] ) ) {
 				return new WP_Error(
 					'rest_invalid_param',
 					/* translators: %s: Name of the missing font face settings parameter, e.g. "font_face_settings[src]". */
@@ -202,6 +204,19 @@ class WP_REST_Font_Faces_Controller extends WP_REST_Posts_Controller {
 					array( 'status' => 400 )
 				);
 			}
+		}
+
+		/*
+		 * Check that the font family value names one font family. The value can
+		 * be valid CSS, or a plain font name.
+		 */
+		if ( '' === WP_Font_Utils::get_font_face_family( $settings['fontFamily'] ) ) {
+			return new WP_Error(
+				'rest_invalid_param',
+				/* translators: %s: Name of the font face setting parameter: "font_face_settings[fontFamily]". */
+				sprintf( __( '%s must be a valid CSS font-family value.' ), 'font_face_settings[fontFamily]' ),
+				array( 'status' => 400 )
+			);
 		}
 
 		$srcs  = is_array( $settings['src'] ) ? $settings['src'] : array( $settings['src'] );
@@ -335,16 +350,7 @@ class WP_REST_Font_Faces_Controller extends WP_REST_Posts_Controller {
 		$file_params = $request->get_file_params();
 
 		// Check that the necessary font face properties are unique.
-		$query = new WP_Query(
-			array(
-				'post_type'              => $this->post_type,
-				'posts_per_page'         => 1,
-				'title'                  => WP_Font_Utils::get_font_face_slug( $settings ),
-				'update_post_meta_cache' => false,
-				'update_post_term_cache' => false,
-			)
-		);
-		if ( ! empty( $query->posts ) ) {
+		if ( $this->font_face_exists( $settings ) ) {
 			return new WP_Error(
 				'rest_duplicate_font_face',
 				__( 'A font face matching those settings already exists.' ),
@@ -397,6 +403,83 @@ class WP_REST_Font_Faces_Controller extends WP_REST_Posts_Controller {
 		}
 
 		return $font_face_post;
+	}
+
+	/**
+	 * Checks for a font face with the same settings.
+	 *
+	 * A face saved by WordPress 6.5 to 7.2 has a title in the earlier slug
+	 * format, which differs from the current slug when a font name holds
+	 * `%`, `\`, `;`, `,`, `&`, `<` or `>`. Such a face is found by the earlier
+	 * slug of the requested settings. A face whose name differs only in its
+	 * CSS escapes from the requested name is not found.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @param array $settings Font face settings.
+	 * @return bool True if the font face exists.
+	 */
+	private function font_face_exists( $settings ) {
+		$slug = WP_Font_Utils::get_font_face_slug( $settings );
+
+		foreach ( $this->get_font_face_settings_by_title( $slug ) as $saved_settings ) {
+			if ( WP_Font_Utils::get_font_face_slug( $saved_settings ) === $slug ) {
+				return true;
+			}
+		}
+
+		$legacy_slug = WP_Font_Utils::get_legacy_font_face_slug( $settings );
+		if ( $legacy_slug === $slug ) {
+			return false;
+		}
+
+		foreach ( $this->get_font_face_settings_by_title( $legacy_slug ) as $saved_settings ) {
+			// A face with a title in the earlier format has a different current slug.
+			if ( WP_Font_Utils::get_font_face_slug( $saved_settings ) !== $legacy_slug ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Returns the saved settings of the font faces with a given title.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @param string $title Font face post title.
+	 * @return array[] Saved font face settings that a slug can compare.
+	 */
+	private function get_font_face_settings_by_title( $title ) {
+		$query = new WP_Query(
+			array(
+				'post_type'              => $this->post_type,
+				'posts_per_page'         => 100,
+				'title'                  => $title,
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			)
+		);
+
+		$settings = array();
+		foreach ( $query->posts as $post ) {
+			$saved_settings = json_decode( $post->post_content, true );
+			if ( ! is_array( $saved_settings ) || ! isset( $saved_settings['fontFamily'] ) || ! is_string( $saved_settings['fontFamily'] ) ) {
+				continue;
+			}
+
+			foreach ( array( 'fontStyle', 'fontWeight', 'fontStretch', 'unicodeRange' ) as $key ) {
+				if ( array_key_exists( $key, $saved_settings ) && ! is_scalar( $saved_settings[ $key ] ) ) {
+					continue 2;
+				}
+			}
+
+			$settings[] = $saved_settings;
+		}
+
+		return $settings;
 	}
 
 	/**
