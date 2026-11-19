@@ -787,6 +787,80 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
+	 * Splits CSS into the groups of tokens between its top-level commas.
+	 *
+	 * A comma inside a function, `()`, `[]` or `{}` block belongs to the
+	 * group that holds the block. Each group holds every token of its
+	 * part of the input, including whitespace and comments, and no comma.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $groups = WP_CSS_Token_Processor::parse_comma_separated_list( '"A, B", var(--a, b) c' );
+	 * foreach ( $groups as $group ) {
+	 *     $text = '';
+	 *     foreach ( $group as $token ) {
+	 *         $text .= substr( '"A, B", var(--a, b) c', $token->get_start(), $token->get_length() );
+	 *     }
+	 *     echo "[{$text}]\n";
+	 * }
+	 * // Outputs:
+	 * // ["A, B"]
+	 * // [ var(--a, b) c]
+	 * ```
+	 *
+	 * Unlike the CSS Syntax 3 algorithm, a comma at the end of the input
+	 * produces a final empty group, so a caller whose grammar forbids a
+	 * trailing comma can reject it. Empty input produces no groups.
+	 * Blocks and functions are not nested in the result: their tokens
+	 * appear in order in the group that holds them.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @link https://www.w3.org/TR/css-syntax-3/#parse-comma-separated-list-of-component-values
+	 *
+	 * @param string $css CSS source to split.
+	 * @return WP_CSS_Token[][] Groups of tokens, in source order.
+	 */
+	public static function parse_comma_separated_list( string $css ): array {
+		$processor = new self( $css );
+		$groups    = array();
+		$group     = array();
+
+		// Closing token types of the open blocks and functions, innermost last.
+		$closers = array();
+
+		while ( $processor->next_token() ) {
+			$type = $processor->token_type;
+
+			if ( self::TOKEN_COMMA === $type && array() === $closers ) {
+				$groups[] = $group;
+				$group    = array();
+				continue;
+			}
+
+			// A closing token ends a block only when it matches the innermost open block.
+			if ( array() !== $closers && end( $closers ) === $type ) {
+				array_pop( $closers );
+			} elseif ( self::TOKEN_FUNCTION === $type || self::TOKEN_LEFT_PAREN === $type ) {
+				$closers[] = self::TOKEN_RIGHT_PAREN;
+			} elseif ( self::TOKEN_LEFT_BRACKET === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACKET;
+			} elseif ( self::TOKEN_LEFT_BRACE === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACE;
+			}
+
+			$group[] = $processor->get_token();
+		}
+
+		if ( array() !== $group || array() !== $groups ) {
+			$groups[] = $group;
+		}
+
+		return $groups;
+	}
+
+	/**
 	 * Clears token state between tokens.
 	 *
 	 * @since 7.3.0

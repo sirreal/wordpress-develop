@@ -2619,4 +2619,60 @@ CSS;
 		);
 		$this->assertSame( $expected_tokens, $actual_tokens );
 	}
+
+	/**
+	 * Tests that a comma-separated list splits at its top-level commas only.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_parse_comma_separated_list
+	 *
+	 * @covers ::parse_comma_separated_list
+	 *
+	 * @param string   $css      CSS to split.
+	 * @param string[] $expected Source text of each group.
+	 */
+	public function test_parse_comma_separated_list( string $css, array $expected ): void {
+		$groups = WP_CSS_Token_Processor::parse_comma_separated_list( $css );
+
+		$actual = array();
+		foreach ( $groups as $group ) {
+			$text = '';
+			foreach ( $group as $token ) {
+				$text .= substr( $css, $token->get_start(), $token->get_length() );
+			}
+			$actual[] = $text;
+		}
+
+		$this->assertSame( $expected, $actual );
+	}
+
+	/**
+	 * Data provider for test_parse_comma_separated_list().
+	 *
+	 * @return array[]
+	 */
+	public static function data_parse_comma_separated_list(): array {
+		return array(
+			'empty input'                     => array( '', array() ),
+			'whitespace only'                 => array( ' ', array( ' ' ) ),
+			'one item'                        => array( 'a', array( 'a' ) ),
+			'items keep their whitespace'     => array( 'a , b', array( 'a ', ' b' ) ),
+			'trailing comma'                  => array( 'a,', array( 'a', '' ) ),
+			'leading comma'                   => array( ',a', array( '', 'a' ) ),
+			'empty item'                      => array( 'a,,b', array( 'a', '', 'b' ) ),
+			'comma in a string'               => array( '"a,b",c', array( '"a,b"', 'c' ) ),
+			'escaped comma'                   => array( 'a\,b,c', array( 'a\,b', 'c' ) ),
+			'comma in a comment'              => array( 'a/*,*/,b', array( 'a/*,*/', 'b' ) ),
+			'comma in a function'             => array( 'var(--a, b), c', array( 'var(--a, b)', ' c' ) ),
+			'comma in a url token'            => array( 'url(a,b),c', array( 'url(a,b)', 'c' ) ),
+			'comma in parentheses'            => array( ':is(a, b), c', array( ':is(a, b)', ' c' ) ),
+			'comma in brackets'               => array( '[a, b], c', array( '[a, b]', ' c' ) ),
+			'comma in braces'                 => array( '{a, b}, c', array( '{a, b}', ' c' ) ),
+			'nested blocks'                   => array( 'f(a,[b,{c,d}],e),g', array( 'f(a,[b,{c,d}],e)', 'g' ) ),
+			'stray closer at the top level'   => array( 'a),b', array( 'a)', 'b' ) ),
+			'mismatched closer in a block'    => array( '(a]b,c),d', array( '(a]b,c)', 'd' ) ),
+			'unclosed block holds the rest'   => array( 'f(a,b', array( 'f(a,b' ) ),
+			'unterminated string holds comma' => array( '"a,b', array( '"a,b' ) ),
+		);
+	}
 }
