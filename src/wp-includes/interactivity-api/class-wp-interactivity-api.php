@@ -1474,87 +1474,86 @@ final class WP_Interactivity_API {
 	 * It updates the style attribute value of the current HTML element based on
 	 * the evaluation of its associated references.
 	 *
+	 * Each `data-wp-style--<property>` entry removes every declaration of the
+	 * property, then appends a declaration with the entry's value when the
+	 * value is set. Other declarations keep their text.
+	 *
+	 * The value is converted to a string:
+	 *
+	 * - A string is used without surrounding whitespace.
+	 * - `true` is `true`, and a number other than `0` is its string.
+	 * - An empty string, `0` and any other value remove the property.
+	 *
+	 * A string that is not one valid CSS declaration value, such as one with a
+	 * semicolon outside a string or block, or one ending in `!important`, is
+	 * ignored and the property keeps its declarations, as `style.setProperty()`
+	 * ignores it in the browser.
+	 *
 	 * @since 6.5.0
+	 * @since 7.3.0 Parses the style attribute value as CSS.
 	 *
 	 * @param WP_Interactivity_API_Directives_Processor $p               The directives processor instance.
 	 * @param string                                    $mode            Whether the processing is entering or exiting the tag.
 	 */
 	private function data_wp_style_processor( WP_Interactivity_API_Directives_Processor $p, string $mode ) {
-		if ( 'enter' === $mode ) {
-			$entries = $this->get_directive_entries( $p, 'style' );
-			foreach ( $entries as $entry ) {
-				$style_property = $entry['suffix'];
-				if ( empty( $style_property ) || null !== $entry['unique_id'] ) {
-					continue;
-				}
-
-				$style_property_value  = $this->evaluate( $entry );
-				$style_attribute_value = $p->get_attribute( 'style' );
-				$style_attribute_value = ( $style_attribute_value && ! is_bool( $style_attribute_value ) ) ? $style_attribute_value : '';
-
-				/*
-				 * Checks first if the style property is not falsy and the style
-				 * attribute value is not empty because if it is, it doesn't need to
-				 * update the attribute value.
-				 */
-				if ( $style_property_value || $style_attribute_value ) {
-					$style_attribute_value = $this->merge_style_property( $style_attribute_value, $style_property, $style_property_value );
-					/*
-					 * If the style attribute value is not empty, it sets it. Otherwise,
-					 * it removes it.
-					 */
-					if ( ! empty( $style_attribute_value ) ) {
-						$p->set_attribute( 'style', $style_attribute_value );
-					} else {
-						$p->remove_attribute( 'style' );
-					}
-				}
-			}
+		if ( 'enter' !== $mode ) {
+			return;
 		}
-	}
 
-	/**
-	 * Merges an individual style property in the `style` attribute of an HTML
-	 * element, updating or removing the property when necessary.
-	 *
-	 * If a property is modified, the old one is removed and the new one is added
-	 * at the end of the list.
-	 *
-	 * @since 6.5.0
-	 *
-	 * Example:
-	 *
-	 *     merge_style_property( 'color:green;', 'color', 'red' )      => 'color:red;'
-	 *     merge_style_property( 'background:green;', 'color', 'red' ) => 'background:green;color:red;'
-	 *     merge_style_property( 'color:green;', 'color', null )       => ''
-	 *
-	 * @param string            $style_attribute_value The current style attribute value.
-	 * @param string            $style_property_name   The style property name to set.
-	 * @param string|false|null $style_property_value  The value to set for the style property. With false, null or an
-	 *                                                 empty string, it removes the style property.
-	 * @return string The new style attribute value after the specified property has been added, updated or removed.
-	 */
-	private function merge_style_property( string $style_attribute_value, string $style_property_name, $style_property_value ): string {
-		$style_assignments    = explode( ';', $style_attribute_value );
-		$result               = array();
-		$style_property_value = ! empty( $style_property_value ) ? rtrim( trim( $style_property_value ), ';' ) : null;
-		$new_style_property   = $style_property_value ? $style_property_name . ':' . $style_property_value . ';' : '';
-
-		// Generates an array with all the properties but the modified one.
-		foreach ( $style_assignments as $style_assignment ) {
-			if ( empty( trim( $style_assignment ) ) ) {
+		// Maps each property name to its value, or to '' to remove the property.
+		$values = array();
+		foreach ( $this->get_directive_entries( $p, 'style' ) as $entry ) {
+			if ( empty( $entry['suffix'] ) || null !== $entry['unique_id'] ) {
 				continue;
 			}
-			list( $name, $value ) = explode( ':', $style_assignment );
-			if ( trim( $name ) !== $style_property_name ) {
-				$result[] = trim( $name ) . ':' . trim( $value ) . ';';
+
+			$value = $this->evaluate( $entry );
+			if ( true === $value ) {
+				$value = 'true';
+			} elseif ( is_int( $value ) || is_float( $value ) ) {
+				$value = $value ? (string) $value : '';
+			}
+
+			$value = is_string( $value ) ? trim( $value ) : '';
+
+			// Only a value that can be written as one declaration replaces the property.
+			if ( '' !== $value && ! ( new WP_HTML_Style_Attribute_Processor( '' ) )->append_declaration( $entry['suffix'], $value ) ) {
+				continue;
+			}
+
+			$values[ $entry['suffix'] ] = $value;
+		}
+
+		if ( empty( $values ) ) {
+			return;
+		}
+
+		$style  = $p->get_attribute( 'style' );
+		$styles = new WP_HTML_Style_Attribute_Processor( $style );
+
+		while ( $styles->next_declaration() ) {
+			if ( isset( $values[ $styles->get_property_name() ] ) ) {
+				$styles->remove_declaration();
 			}
 		}
 
-		// Adds the new/modified property at the end of the list.
-		$result[] = $new_style_property;
+		foreach ( $values as $name => $value ) {
+			if ( '' !== $value ) {
+				$styles->append_declaration( (string) $name, $value );
+			}
+		}
 
-		return implode( '', $result );
+		$original_style = is_string( $style ) ? $style : '';
+		$updated_style  = $styles->get_updated_style();
+		if ( $original_style === $updated_style ) {
+			return;
+		}
+
+		if ( '' === $updated_style ) {
+			$p->remove_attribute( 'style' );
+		} else {
+			$p->set_attribute( 'style', $updated_style );
+		}
 	}
 
 	/**
