@@ -2073,60 +2073,487 @@ class WP_Theme_JSON {
 	/**
 	 * Processes the CSS, to apply nesting.
 	 *
+	 * The CSS is the contents of a style rule for the block, as in CSS
+	 * Nesting: declarations apply to the block, and nested rules apply
+	 * to elements related to it. Every rule is flattened into a
+	 * `:root :where()` selector, so it has 0-1-0 specificity.
+	 *
+	 * - Declarations at the top level apply to `$selector`.
+	 * - `&` in a nested selector stands for the selectors of the rule
+	 *   around it. A nested selector without `&` selects descendants,
+	 *   as if it started with `& `.
+	 * - The first rule keeps its legacy meaning: when it starts with a
+	 *   class, ID, attribute, pseudo-class or pseudo-element, the block
+	 *   selector is prepended without a space, so `.is-style-x { … }`
+	 *   selects `.block.is-style-x`.
+	 * - In a selector list whose first selector is joined to the block
+	 *   selector without a space, as in `&.a, .rtl .b`, the selectors
+	 *   without `&` stay as written.
+	 * - A pseudo-element moves after `:where()`, which cannot hold one.
+	 * - `@media`, `@supports`, `@container` and `@layer` blocks wrap the
+	 *   rules made from their contents. Other at-rules are dropped.
+	 * - Text without a property name and a colon is not a declaration, and
+	 *   is dropped. So is a rule or declaration still open at the end of
+	 *   the CSS.
+	 *
+	 * Example:
+	 *
+	 *     color: red; & > a { color: blue; &:hover { color: green; } }
+	 *
+	 * with `$selector` `.foo` produces
+	 *
+	 *     :root :where(.foo){color: red;}
+	 *     :root :where(.foo > a){color: blue;}
+	 *     :root :where(.foo > a:hover){color: green;}
+	 *
 	 * @since 6.2.0
 	 * @since 6.6.0 Enforced 0-1-0 specificity for block custom CSS selectors.
 	 * @since 7.0.0 Made public for use in custom-css block support.
+	 * @since 7.3.0 Supports nesting at any depth, selector lists, nested selectors
+	 *              without `&`, and conditional group rules such as `@media`.
+	 *
+	 * @link https://www.w3.org/TR/css-nesting-1/
 	 *
 	 * @param string $css      The CSS to process.
 	 * @param string $selector The selector to nest.
 	 * @return string The processed CSS.
 	 */
 	public static function process_blocks_custom_css( $css, $selector ) {
-		$processed_css = '';
-
 		if ( empty( $css ) || ! is_string( $css ) ) {
-			return $processed_css;
+			return '';
 		}
 
-		// Split CSS nested rules.
-		$parts = explode( '&', $css );
-		foreach ( $parts as $part ) {
-			if ( empty( $part ) ) {
+		$tokens = static::get_custom_css_tokens( $css );
+
+		return static::process_custom_css_contents(
+			$css,
+			$tokens,
+			0,
+			count( $tokens['type'] ),
+			static::split_selector_list( $selector ),
+			':root :where(' . trim( $selector ) . ')',
+			true
+		);
+	}
+
+	/**
+	 * Tokenizes custom CSS and pairs each block opener with its closer.
+	 *
+	 * A token that the end of the input cuts off, such as an unclosed
+	 * string or comment, is removed and `truncated` is set.
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @param string $css Custom CSS.
+	 * @return array {
+	 *     Token data, indexed by token position.
+	 *
+	 *     @type string[] $type      Token types.
+	 *     @type int[]    $start     Byte offsets at which the tokens start.
+	 *     @type int[]    $end       Byte offsets at which the tokens end.
+	 *     @type int[]    $match     For a function, `(`, `[` or `{` token, the position
+	 *                               of its closer, or -1 if the input ends first.
+	 *     @type bool     $truncated Whether a token was cut off by the end of the input.
+	 * }
+	 */
+	protected static function get_custom_css_tokens( $css ) {
+		$tokens = array(
+			'type'      => array(),
+			'start'     => array(),
+			'end'       => array(),
+			'match'     => array(),
+			'truncated' => false,
+		);
+
+		// Positions of the open blocks, innermost last, and the closer each expects.
+		$open    = array();
+		$closers = array();
+
+		$processor = new WP_CSS_Token_Processor( $css );
+		for ( $i = 0; $processor->next_token(); $i++ ) {
+			$type  = $processor->get_token_type();
+			$start = $processor->get_token_start();
+
+			$tokens['type'][ $i ]  = $type;
+			$tokens['start'][ $i ] = $start;
+			$tokens['end'][ $i ]   = $start + $processor->get_token_length();
+
+			switch ( $type ) {
+				case WP_CSS_Token_Processor::TOKEN_FUNCTION:
+				case WP_CSS_Token_Processor::TOKEN_LEFT_PAREN:
+					$open[]    = $i;
+					$closers[] = WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN;
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET:
+					$open[]    = $i;
+					$closers[] = WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET;
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_LEFT_BRACE:
+					$open[]    = $i;
+					$closers[] = WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE;
+					break;
+
+				case WP_CSS_Token_Processor::TOKEN_COMMENT:
+				case WP_CSS_Token_Processor::TOKEN_STRING:
+				case WP_CSS_Token_Processor::TOKEN_URL:
+				case WP_CSS_Token_Processor::TOKEN_BAD_URL:
+					if ( ! $processor->get_token()->is_terminated() ) {
+						array_pop( $tokens['type'] );
+						array_pop( $tokens['start'] );
+						array_pop( $tokens['end'] );
+						$tokens['truncated'] = true;
+					}
+					break;
+
+				default:
+					// A closer ends a block only when it matches the innermost open block.
+					if ( array() !== $closers && end( $closers ) === $type ) {
+						$tokens['match'][ array_pop( $open ) ] = $i;
+						array_pop( $closers );
+					}
+			}
+		}
+
+		foreach ( $open as $i ) {
+			$tokens['match'][ $i ] = -1;
+		}
+
+		return $tokens;
+	}
+
+	/**
+	 * Processes the declarations and rules in a range of custom CSS tokens.
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @param string   $css                   Custom CSS.
+	 * @param array    $tokens                Token data from get_custom_css_tokens().
+	 * @param int      $at                    Position of the first token.
+	 * @param int      $end                   Position after the last token.
+	 * @param string[] $parents               Selectors that `&` stands for.
+	 * @param string   $declarations_selector Selector of the rule that holds the declarations.
+	 * @param bool     $is_top_level          Whether the range is the whole CSS.
+	 * @return string The processed CSS.
+	 */
+	protected static function process_custom_css_contents( $css, $tokens, $at, $end, $parents, $declarations_selector, $is_top_level ) {
+		$processed_css = '';
+		$is_first_rule = $is_top_level;
+
+		// Byte range of consecutive declarations, which share one rule.
+		$declarations_start = null;
+		$declarations_end   = null;
+
+		while ( $at < $end ) {
+			$type = $tokens['type'][ $at ];
+			if (
+				WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ||
+				WP_CSS_Token_Processor::TOKEN_COMMENT === $type ||
+				WP_CSS_Token_Processor::TOKEN_SEMICOLON === $type ||
+				WP_CSS_Token_Processor::TOKEN_CDO === $type ||
+				WP_CSS_Token_Processor::TOKEN_CDC === $type
+			) {
+				++$at;
 				continue;
 			}
-			$is_root_css = ( ! str_contains( $part, '{' ) );
-			if ( $is_root_css ) {
-				// If the part doesn't contain braces, it applies to the root level.
-				$processed_css .= ':root :where(' . trim( $selector ) . '){' . trim( $part ) . '}';
-			} else {
-				// If the part contains braces, it's a nested CSS rule.
-				$part = explode( '{', str_replace( '}', '', $part ) );
-				if ( count( $part ) !== 2 ) {
-					continue;
+
+			$item_start         = $at;
+			$is_at_rule         = WP_CSS_Token_Processor::TOKEN_AT_KEYWORD === $type;
+			$is_custom_property = (
+				WP_CSS_Token_Processor::TOKEN_IDENT === $type &&
+				0 === substr_compare( $css, '--', $tokens['start'][ $at ], 2 )
+			);
+
+			/*
+			 * An item ends at a `;` or, unless it is a custom property, at the `{` of its block.
+			 * A closer outside the item's own blocks makes the item invalid, and a `}` also ends it.
+			 */
+			$brace     = null;
+			$is_closed = true;
+			$is_valid  = true;
+			while ( $at < $end ) {
+				$type = $tokens['type'][ $at ];
+				if ( WP_CSS_Token_Processor::TOKEN_SEMICOLON === $type ) {
+					break;
 				}
-				$nested_selector = $part[0];
-				$css_value       = $part[1];
+				if ( WP_CSS_Token_Processor::TOKEN_RIGHT_BRACE === $type ) {
+					$is_valid = false;
+					break;
+				}
+				if ( WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET === $type ) {
+					$is_valid = false;
+				}
+				if ( WP_CSS_Token_Processor::TOKEN_LEFT_BRACE === $type && ! $is_custom_property ) {
+					$brace = $at;
+					break;
+				}
+				if ( isset( $tokens['match'][ $at ] ) ) {
+					if ( -1 === $tokens['match'][ $at ] ) {
+						$is_closed = false;
+						$at        = $end;
+						break;
+					}
+					$at = $tokens['match'][ $at ];
+				}
+				++$at;
+			}
 
-				/*
-				 * Handle pseudo elements such as ::before, ::after etc. Regex will also
-				 * capture any leading combinator such as >, +, or ~, as well as spaces.
-				 * This allows pseudo elements as descendants e.g. `.parent ::before`.
-				 */
-				$matches            = array();
-				$has_pseudo_element = preg_match( '/([>+~\s]*::[a-zA-Z-]+)/', $nested_selector, $matches );
-				$pseudo_part        = $has_pseudo_element ? $matches[1] : '';
-				$nested_selector    = $has_pseudo_element ? str_replace( $pseudo_part, '', $nested_selector ) : $nested_selector;
+			if ( ! $is_closed || ( $tokens['truncated'] && $at === $end && count( $tokens['type'] ) === $end ) ) {
+				break;
+			}
 
-				// Finalize selector and re-append pseudo element if required.
-				$part_selector  = str_starts_with( $nested_selector, ' ' )
-					? static::scope_selector( $selector, $nested_selector )
-					: static::append_to_selector( $selector, $nested_selector );
-				$final_selector = ":root :where($part_selector)$pseudo_part";
+			if ( null === $brace ) {
+				// A declaration starts with a name and a colon.
+				$colon = $item_start + 1;
+				while ( $colon < $at && ( WP_CSS_Token_Processor::TOKEN_WHITESPACE === $tokens['type'][ $colon ] || WP_CSS_Token_Processor::TOKEN_COMMENT === $tokens['type'][ $colon ] ) ) {
+					++$colon;
+				}
+				$is_declaration = (
+					$is_valid &&
+					WP_CSS_Token_Processor::TOKEN_IDENT === $tokens['type'][ $item_start ] &&
+					$colon < $at &&
+					WP_CSS_Token_Processor::TOKEN_COLON === $tokens['type'][ $colon ]
+				);
 
-				$processed_css .= $final_selector . '{' . trim( $css_value ) . '}';
+				if ( $is_declaration ) {
+					$last = $at - 1;
+					while ( WP_CSS_Token_Processor::TOKEN_WHITESPACE === $tokens['type'][ $last ] || WP_CSS_Token_Processor::TOKEN_COMMENT === $tokens['type'][ $last ] ) {
+						--$last;
+					}
+					$declarations_start = $declarations_start ?? $tokens['start'][ $item_start ];
+					$declarations_end   = $at < $end ? $tokens['end'][ $at ] : $tokens['end'][ $last ];
+				} elseif ( null !== $declarations_start ) {
+					$processed_css     .= $declarations_selector . '{' . substr( $css, $declarations_start, $declarations_end - $declarations_start ) . '}';
+					$declarations_start = null;
+				}
+				++$at;
+				continue;
+			}
+
+			$close = $tokens['match'][ $brace ];
+			if ( -1 === $close ) {
+				break;
+			}
+
+			if ( null !== $declarations_start ) {
+				$processed_css     .= $declarations_selector . '{' . substr( $css, $declarations_start, $declarations_end - $declarations_start ) . '}';
+				$declarations_start = null;
+			}
+
+			if ( ! $is_valid ) {
+				$is_first_rule = false;
+				$at            = $close + 1;
+				continue;
+			}
+
+			if ( $is_at_rule ) {
+				$name = strtolower( WP_CSS_Token_Processor::decode_range( $css, $tokens['start'][ $item_start ] + 1, $tokens['end'][ $item_start ] - $tokens['start'][ $item_start ] - 1 ) );
+				if ( in_array( $name, array( 'media', 'supports', 'container', 'layer' ), true ) ) {
+					$inner = static::process_custom_css_contents( $css, $tokens, $brace + 1, $close, $parents, $declarations_selector, false );
+					if ( '' !== $inner ) {
+						$processed_css .= trim( substr( $css, $tokens['start'][ $item_start ], $tokens['start'][ $brace ] - $tokens['start'][ $item_start ] ) ) . '{' . $inner . '}';
+					}
+				}
+			} else {
+				list( $rule_selector, $rule_parents ) = static::resolve_custom_css_selector( $css, $tokens, $item_start, $brace, $parents, $is_first_rule );
+
+				$processed_css .= static::process_custom_css_contents( $css, $tokens, $brace + 1, $close, $rule_parents, $rule_selector, false );
+			}
+
+			$is_first_rule = false;
+			$at            = $close + 1;
+		}
+
+		if ( null !== $declarations_start ) {
+			$processed_css .= $declarations_selector . '{' . substr( $css, $declarations_start, $declarations_end - $declarations_start ) . '}';
+		}
+
+		return $processed_css;
+	}
+
+	/**
+	 * Resolves a nested selector list against the selectors around it.
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @param string   $css           Custom CSS.
+	 * @param array    $tokens        Token data from get_custom_css_tokens().
+	 * @param int      $at            Position of the first token of the selector list.
+	 * @param int      $end           Position of the `{` after it.
+	 * @param string[] $parents       Selectors that `&` stands for.
+	 * @param bool     $is_first_rule Whether the rule is the first one in the CSS.
+	 * @return array {
+	 *     @type string   $0 Selector for the rule, in `:root :where()`.
+	 *     @type string[] $1 Resolved selectors, for the rules nested in this one.
+	 * }
+	 */
+	protected static function resolve_custom_css_selector( $css, $tokens, $at, $end, $parents, $is_first_rule ) {
+		$selectors   = array();
+		$resolved    = array();
+		$is_appended = false;
+
+		// A space before the first rule selects descendants.
+		$has_leading_space = $at > 0 && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $tokens['type'][ $at - 1 ];
+
+		while ( $at < $end ) {
+			// Collect one selector, up to a top-level comma.
+			$selector_tokens = array();
+			$nested_closers  = array();
+			for ( ; $at < $end; $at++ ) {
+				if ( array() === $nested_closers && WP_CSS_Token_Processor::TOKEN_COMMA === $tokens['type'][ $at ] ) {
+					break;
+				}
+				if ( isset( $tokens['match'][ $at ] ) ) {
+					$nested_closers[] = $tokens['match'][ $at ];
+				} elseif ( array() !== $nested_closers && end( $nested_closers ) === $at ) {
+					array_pop( $nested_closers );
+				}
+				$selector_tokens[] = $at;
+			}
+			++$at;
+
+			while ( array() !== $selector_tokens && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $tokens['type'][ end( $selector_tokens ) ] ) {
+				array_pop( $selector_tokens );
+			}
+			while ( array() !== $selector_tokens && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $tokens['type'][ $selector_tokens[0] ] ) {
+				array_shift( $selector_tokens );
+			}
+			if ( array() === $selector_tokens ) {
+				continue;
+			}
+
+			// Split the selector at each `&`. Whitespace becomes one space.
+			$pieces = array( '' );
+			foreach ( $selector_tokens as $i ) {
+				$type = $tokens['type'][ $i ];
+				$text = substr( $css, $tokens['start'][ $i ], $tokens['end'][ $i ] - $tokens['start'][ $i ] );
+				if ( WP_CSS_Token_Processor::TOKEN_DELIM === $type && '&' === $text ) {
+					$pieces[] = '';
+				} else {
+					$pieces[ count( $pieces ) - 1 ] .= WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ? ' ' : $text;
+				}
+			}
+
+			$is_first_selector = array() === $selectors;
+			if ( 1 === count( $pieces ) ) {
+				$first                       = $selector_tokens[0];
+				$first_text                  = substr( $css, $tokens['start'][ $first ], $tokens['end'][ $first ] - $tokens['start'][ $first ] );
+				$is_type_or_combinator_first = (
+					WP_CSS_Token_Processor::TOKEN_IDENT === $tokens['type'][ $first ] ||
+					( WP_CSS_Token_Processor::TOKEN_DELIM === $tokens['type'][ $first ] && str_contains( '*>+~', $first_text ) )
+				);
+
+				if ( ! $is_first_selector && $is_appended ) {
+					// After an appended first selector, a selector without `&` stays as written.
+					$pieces = array( $pieces[0] );
+				} elseif ( $is_first_rule && $is_first_selector && ! $has_leading_space && ! $is_type_or_combinator_first ) {
+					$pieces = array( '', $pieces[0] );
+				} else {
+					$pieces = array( '', ' ' . $pieces[0] );
+				}
+			}
+
+			if ( $is_first_selector ) {
+				$is_appended = '' === $pieces[0] && '' !== $pieces[1] && ' ' !== $pieces[1][0];
+			}
+
+			$selectors[] = $pieces;
+		}
+
+		$bases   = array();
+		$pseudos = array();
+		foreach ( $parents as $parent ) {
+			foreach ( $selectors as $pieces ) {
+				$selector   = implode( $parent, $pieces );
+				$resolved[] = $selector;
+
+				list( $base, $pseudo ) = static::split_custom_css_pseudo_element( $selector );
+
+				$bases[]   = $base;
+				$pseudos[] = $pseudo;
 			}
 		}
-		return $processed_css;
+
+		// A pseudo-element cannot be in `:where()`, so each different one needs its own.
+		if ( count( array_unique( $pseudos ) ) <= 1 ) {
+			return array( ':root :where(' . implode( ', ', $bases ) . ')' . ( $pseudos[0] ?? '' ), $resolved );
+		}
+
+		$rule_selectors = array();
+		foreach ( $bases as $i => $base ) {
+			$rule_selectors[] = ":root :where({$base}){$pseudos[ $i ]}";
+		}
+
+		return array( implode( ', ', $rule_selectors ), $resolved );
+	}
+
+	/**
+	 * Splits a selector before its pseudo-element.
+	 *
+	 * The pseudo-element part starts at the first top-level `::` and
+	 * includes the whitespace and combinators before it.
+	 *
+	 * Example:
+	 *
+	 *     array( '.a', ' > ::before:hover' ) === split_custom_css_pseudo_element( '.a > ::before:hover' );
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @param string $selector Complex selector.
+	 * @return string[] The selector before the pseudo-element, and the pseudo-element part.
+	 */
+	protected static function split_custom_css_pseudo_element( $selector ) {
+		if ( ! str_contains( $selector, '::' ) ) {
+			return array( $selector, '' );
+		}
+
+		// Byte offsets of the top-level tokens, and whether each is a colon or a combinator.
+		$starts        = array();
+		$is_colon      = array();
+		$is_combinator = array();
+
+		$processor = new WP_CSS_Token_Processor( $selector );
+		$depth     = 0;
+		$split_at  = null;
+		while ( null === $split_at && $processor->next_token() ) {
+			$type = $processor->get_token_type();
+
+			if ( 0 === $depth ) {
+				$start           = $processor->get_token_start();
+				$starts[]        = $start;
+				$is_colon[]      = WP_CSS_Token_Processor::TOKEN_COLON === $type;
+				$is_combinator[] = (
+					WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ||
+					( WP_CSS_Token_Processor::TOKEN_DELIM === $type && str_contains( '>+~', $selector[ $start ] ) )
+				);
+
+				$i = count( $starts ) - 1;
+				if ( $i > 0 && $is_colon[ $i ] && $is_colon[ $i - 1 ] ) {
+					$split_at = $i - 1;
+					while ( $split_at > 0 && $is_combinator[ $split_at - 1 ] ) {
+						--$split_at;
+					}
+				}
+			}
+
+			if ( WP_CSS_Token_Processor::TOKEN_FUNCTION === $type || WP_CSS_Token_Processor::TOKEN_LEFT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET === $type ) {
+				++$depth;
+			} elseif ( $depth > 0 && ( WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET === $type ) ) {
+				--$depth;
+			}
+		}
+
+		if ( null === $split_at ) {
+			return array( $selector, '' );
+		}
+
+		$split_at = $starts[ $split_at ];
+		return array( substr( $selector, 0, $split_at ), substr( $selector, $split_at ) );
 	}
 
 	/**
