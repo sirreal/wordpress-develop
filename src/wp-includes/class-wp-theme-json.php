@@ -1660,29 +1660,6 @@ class WP_Theme_JSON {
 			return trim( $selector, " \t\n" ) . $to_append;
 		}
 
-		/**
-		 * Check for an opportunity to skip the more-costly selector splitting.
-		 * This should be possible if there are no comments, strings, functions,
-		 * URLs, escapes, or comment declaration openers (CDOs).
-		 *
-		 * Note that this means the fast-path will not apply for selectors like
-		 * the following incomplete list:
-		 *
-		 *  - `[class ~= "wide"]`
-		 *  - `.wp-block:is(.is-style-a, .is-style-b)`
-		 *  - `:nth-child(1)`
-		 *
-		 * These syntax forms all present opportunities where a comma may not
-		 * separate selectors. If none of the start characters are present,
-		 * there should be no way for a comma to mean anything other than a
-		 * comma token. The exception are syntax errors, which are not handled here.
-		 *
-		 * @link https://www.w3.org/TR/css-syntax-3/#parse-comma-separated-list-of-component-values
-		 */
-		if ( strlen( $selector ) === strcspn( $selector, '/\'"(<\\' ) ) {
-			return preg_replace( '~[ \t\n]*,[ \t\n]*~', "{$to_append}, ", trim( $selector, " \t\n" ) ) . $to_append;
-		}
-
 		$new_selectors = array();
 		$selectors     = static::split_selector_list( $selector );
 		foreach ( $selectors as $sel ) {
@@ -1707,29 +1684,6 @@ class WP_Theme_JSON {
 	protected static function prepend_to_selector( $selector, $to_prepend ) {
 		if ( ! str_contains( $selector, ',' ) ) {
 			return $to_prepend . trim( $selector, " \t\n" );
-		}
-
-		/**
-		 * Check for an opportunity to skip the more-costly selector splitting.
-		 * This should be possible if there are no comments, strings, functions,
-		 * URLs, escapes, or comment declaration openers (CDOs).
-		 *
-		 * Note that this means the fast-path will not apply for selectors like
-		 * the following incomplete list:
-		 *
-		 *  - `[class ~= "wide"]`
-		 *  - `.wp-block:is(.is-style-a, .is-style-b)`
-		 *  - `:nth-child(1)`
-		 *
-		 * These syntax forms all present opportunities where a comma may not
-		 * separate selectors. If none of the start characters are present,
-		 * there should be no way for a comma to mean anything other than a
-		 * comma token. The exception are syntax errors, which are not handled here.
-		 *
-		 * @link https://www.w3.org/TR/css-syntax-3/#parse-comma-separated-list-of-component-values
-		 */
-		if ( strlen( $selector ) === strcspn( $selector, '/\'"(<\\' ) ) {
-			return $to_prepend . preg_replace( '~[ \t\n]*,[ \t\n]*~', ", {$to_prepend}", trim( $selector, " \t\n" ) );
 		}
 
 		$new_selectors = array();
@@ -1781,119 +1735,30 @@ class WP_Theme_JSON {
 	 */
 	protected static function split_selector_list( $selector ): array {
 		if ( ! str_contains( $selector, ',' ) ) {
-			// See note on trimming CSS whitespace in main loop.
 			return array( trim( $selector, " \t\n" ) );
 		}
 
-		$selectors         = array();
-		$selector_length   = strlen( $selector );
-		$parentheses_depth = 0;
-		$at                = 0;
-		$was_at            = 0;
+		$selectors = WP_CSS_Token_Processor::split_comma_separated_list( $selector );
 
-		while ( $at < $selector_length ) {
-			$next_at = $at + strcspn( $selector, '/,\'"()<-\\', $at );
-			if ( $next_at >= $selector_length ) {
-				break;
-			}
-
-			$next_cp = $selector[ $next_at ];
-
-			// Escaped syntax characters do not act as delimiters.
-			if ( '\\' === $next_cp ) {
-				$at = min( $next_at + 2, $selector_length );
-				continue;
-			}
-
-			/*
-			 * Start of a parenthesized expression, which maintains a stack of parentheses.
-			 * For the sake of this function, no selector list will be split inside parentheses.
-			 * Therefore it’s possible to jump ahead until this list completes.
-			 */
-			if ( '(' === $next_cp || ')' === $next_cp ) {
-				$parentheses_depth += '(' === $next_cp ? 1 : -1;
-				$at                 = $next_at + 1;
-				continue;
-			}
-
-			// Start of a string, which will be incorporated into the selector in which it’s found.
-			if ( "'" === $next_cp || '"' === $next_cp ) {
-				$end_of_string = $next_at + 1;
-				while ( $end_of_string < $selector_length ) {
-					$end_of_string += strcspn( $selector, "{$next_cp}\\", $end_of_string );
-					if ( $end_of_string >= $selector_length ) {
-						break;
-					}
-
-					$end_cp = $selector[ $end_of_string ];
-
-					// Skip escaped characters.
-					if ( '\\' === $end_cp ) {
-						$end_of_string = $end_of_string + 2;
-						continue;
-					}
-
-					if ( $next_cp === $end_cp ) {
-						++$end_of_string;
-						break;
-					}
-
-					++$end_of_string;
-				}
-
-				$at = $end_of_string;
-				continue;
-			}
-
-			// Start of a comment, which will be incorporated into the selector in which it’s found.
-			if ( '/' === $next_cp && ( $next_at + 1 ) < $selector_length && '*' === $selector[ $next_at + 1 ] ) {
-				$comment_end_at = strpos( $selector, '*/', $next_at + 1 );
-				$is_terminated  = false !== $comment_end_at;
-				$after_comment  = $is_terminated ? $comment_end_at + 2 : strlen( $selector );
-				$at             = $after_comment;
-				continue;
-			}
-
-			// Start of a CDO or CDC, which will be incorporated into the selector in which it’s found.
-			if (
-				( '<' === $next_cp && 0 === substr_compare( $selector, '<!--', $next_at, 4 ) ) ||
-				( '-' === $next_cp && 0 === substr_compare( $selector, '-->', $next_at, 3 ) )
-			) {
-				$at = $next_at + ( '<' === $next_cp ? 4 : 3 );
-				continue;
-			}
-
-			// Everything else is either a comma token or part of a selector.
-			if ( ',' === $next_cp && 0 === $parentheses_depth ) {
-				/**
-				 * Trim each selector so that downstream code doesn’t see whitespace
-				 * as the first character in a selector and get confused.
-				 *
-				 * There is inconsistency in this because comments and other syntax
-				 * are included which are also not part of the selector itself, but
-				 * a tradeoff is made between removing common syntax which carries
-				 * no meaning and rarer syntax which leaves auxiliary information.
-				 *
-				 * > A newline, U+0009 CHARACTER TABULATION, or U+0020 SPACE.
-				 * > Note that U+000D CARRIAGE RETURN and U+000C FORM FEED are
-				 * > not included in this definition, as they are converted
-				 * > to U+000A LINE FEED during preprocessing.
-				 *
-				 * @link https://www.w3.org/TR/css-syntax/#whitespace
-				 * @link https://www.w3.org/TR/css-syntax/#newline
-				 */
-				$selectors[] = trim( substr( $selector, $was_at, $next_at - $was_at ), " \t\n" );
-				$at          = $next_at + 1;
-				$was_at      = $at;
-				continue;
-			}
-
-			$at = $next_at + 1;
+		// A comma at the end of the list does not start another selector.
+		if ( '' === end( $selectors ) ) {
+			array_pop( $selectors );
 		}
 
-		if ( $was_at < $selector_length ) {
-			// See note on trimming CSS whitespace in main loop.
-			$selectors[] = trim( substr( $selector, $was_at ), " \t\n" );
+		/*
+		 * Trim CSS whitespace so that callers do not see it as the first
+		 * character of a selector. Comments stay in the selector they follow.
+		 *
+		 * > A newline, U+0009 CHARACTER TABULATION, or U+0020 SPACE.
+		 * > Note that U+000D CARRIAGE RETURN and U+000C FORM FEED are
+		 * > not included in this definition, as they are converted
+		 * > to U+000A LINE FEED during preprocessing.
+		 *
+		 * @link https://www.w3.org/TR/css-syntax/#whitespace
+		 * @link https://www.w3.org/TR/css-syntax/#newline
+		 */
+		foreach ( $selectors as $i => $item ) {
+			$selectors[ $i ] = trim( $item, " \t\n" );
 		}
 
 		return $selectors;
@@ -6031,7 +5896,9 @@ class WP_Theme_JSON {
 		 * If the block selector is compounded, will append the element to each
 		 * individual block selector.
 		 */
-		$block_selectors   = explode( ',', $root_selector );
+		$block_selectors   = str_contains( $root_selector, ',' )
+			? WP_CSS_Token_Processor::split_comma_separated_list( $root_selector )
+			: array( $root_selector );
 		$element_selectors = array();
 		foreach ( static::ELEMENTS as $el_name => $el_selector ) {
 			$element_selector = array();

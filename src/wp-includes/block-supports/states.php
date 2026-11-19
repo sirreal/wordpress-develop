@@ -431,12 +431,7 @@ function wp_get_block_state_element_selectors( $root_selector ) {
 				break;
 			}
 
-			$selector_prefix = "$block_selector ";
-			if ( ! str_contains( $element_selector, ',' ) ) {
-				$selectors[] = $selector_prefix . $element_selector;
-				continue;
-			}
-
+			$selector_prefix     = "$block_selector ";
 			$prepended_selectors = array();
 			foreach ( wp_split_selector_list( $element_selector ) as $selector ) {
 				$prepended_selectors[] = $selector_prefix . $selector;
@@ -577,7 +572,11 @@ function wp_get_block_state_unique_class( $block_name, $css_rules ) {
 /**
  * Splits a selector list by top-level commas.
  *
+ * Commas inside strings, comments, escapes, functions and blocks do not
+ * split the list. Each selector keeps its surrounding whitespace.
+ *
  * @since 7.1.0
+ * @since 7.3.0 Ignores commas inside strings, comments, escapes, brackets and braces.
  *
  * @param string $selector CSS selector list.
  * @return string[] Selectors.
@@ -587,30 +586,7 @@ function wp_split_selector_list( $selector ) {
 		return array( $selector );
 	}
 
-	$selectors         = array();
-	$current_selector  = '';
-	$parentheses_depth = 0;
-	$selector_length   = strlen( $selector );
-
-	for ( $i = 0; $i < $selector_length; $i++ ) {
-		$char = $selector[ $i ];
-
-		if ( '(' === $char ) {
-			++$parentheses_depth;
-		} elseif ( ')' === $char && $parentheses_depth > 0 ) {
-			--$parentheses_depth;
-		} elseif ( ',' === $char && 0 === $parentheses_depth ) {
-			$selectors[]      = $current_selector;
-			$current_selector = '';
-			continue;
-		}
-
-		$current_selector .= $char;
-	}
-
-	$selectors[] = $current_selector;
-
-	return $selectors;
+	return WP_CSS_Token_Processor::split_comma_separated_list( $selector );
 }
 
 /**
@@ -638,26 +614,57 @@ function wp_get_state_selector_ancestor( $selector, $block_name ) {
 		return '';
 	}
 
+	/*
+	 * - `$ancestor_length`: bytes up to the end of the first top-level combinator,
+	 *   including the whitespace and comments around it.
+	 * - `$next_compound`: source text of the compound after that combinator,
+	 *   without the contents of its functions and brackets.
+	 *
+	 *     .wp-block-list > li:not(.x) a
+	 *     ╰──── ancestor ─╯╰─ next ──╯
+	 */
+	$processor       = new WP_CSS_Token_Processor( $selector );
 	$ancestor_length = 0;
 	$next_compound   = '';
 	$depth           = 0;
-	$selector_length = strlen( $selector );
 
-	for ( $i = 0; $i < $selector_length; $i++ ) {
-		$char = $selector[ $i ];
+	while ( $processor->next_token() ) {
+		$type      = $processor->get_token_type();
+		$token_end = $processor->get_token_start() + $processor->get_token_length();
 
-		if ( '(' === $char || '[' === $char ) {
-			++$depth;
-		} elseif ( ( ')' === $char || ']' === $char ) && $depth > 0 ) {
-			--$depth;
-		} elseif ( 0 === $depth && str_contains( " \t\n\r\f>+~", $char ) ) {
-			if ( $ancestor_length ) {
-				break;
+		if ( $depth > 0 ) {
+			if ( WP_CSS_Token_Processor::TOKEN_RIGHT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_RIGHT_BRACKET === $type ) {
+				--$depth;
+			} elseif ( WP_CSS_Token_Processor::TOKEN_FUNCTION === $type || WP_CSS_Token_Processor::TOKEN_LEFT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET === $type ) {
+				++$depth;
 			}
-			$ancestor_length = $i + strspn( $selector, " \t\n\r\f>+~", $i );
-			$i               = $ancestor_length - 1;
-		} elseif ( 0 === $depth && $ancestor_length ) {
-			$next_compound .= $char;
+			continue;
+		}
+
+		$is_combinator = (
+			WP_CSS_Token_Processor::TOKEN_WHITESPACE === $type ||
+			( WP_CSS_Token_Processor::TOKEN_DELIM === $type && str_contains( '>+~', $selector[ $processor->get_token_start() ] ) )
+		);
+
+		if ( $is_combinator || WP_CSS_Token_Processor::TOKEN_COMMENT === $type ) {
+			if ( '' !== $next_compound ) {
+				if ( $is_combinator ) {
+					break;
+				}
+				continue;
+			}
+			if ( $is_combinator || $ancestor_length > 0 ) {
+				$ancestor_length = $token_end;
+			}
+			continue;
+		}
+
+		if ( $ancestor_length > 0 ) {
+			$next_compound .= substr( $selector, $processor->get_token_start(), $processor->get_token_length() );
+		}
+
+		if ( WP_CSS_Token_Processor::TOKEN_FUNCTION === $type || WP_CSS_Token_Processor::TOKEN_LEFT_PAREN === $type || WP_CSS_Token_Processor::TOKEN_LEFT_BRACKET === $type ) {
+			++$depth;
 		}
 	}
 

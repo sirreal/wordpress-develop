@@ -176,4 +176,36 @@ class Tests_Style_Engine_wpStyleEngineCSSRule extends WP_UnitTestCase {
 
 		$this->assertSameIgnoreEOL( $expected, $css_rule->get_css( true ) );
 	}
+
+	/**
+	 * Tests that prettified output puts each selector of a selector list on its
+	 * own line, and keeps commas inside functions and strings in place.
+	 *
+	 * @ticket 65669
+	 *
+	 * @covers ::get_css
+	 *
+	 * @dataProvider data_should_prettify_selector_list
+	 *
+	 * @param string $selector Selector list.
+	 * @param string $expected Prettified selector.
+	 */
+	public function test_should_prettify_selector_list( $selector, $expected ) {
+		$css_rule = new WP_Style_Engine_CSS_Rule( $selector, array( 'color' => 'red' ) );
+
+		$this->assertSameIgnoreEOL( "{$expected} {\n\tcolor: red;\n}", $css_rule->get_css( true ) );
+	}
+
+	/**
+	 * Data provider for test_should_prettify_selector_list().
+	 *
+	 * @return array<string, array{0: string, 1: string}>
+	 */
+	public static function data_should_prettify_selector_list() {
+		return array(
+			'selector list'                => array( '.a ,  .b', ".a,\n.b" ),
+			'comma in a function'          => array( ':is(.a, .b) img', ':is(.a, .b) img' ),
+			'comma in an attribute string' => array( '[title="x, y"]', '[title="x, y"]' ),
+		);
+	}
 }

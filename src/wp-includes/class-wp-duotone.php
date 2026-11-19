@@ -846,7 +846,9 @@ class WP_Duotone {
 	 */
 	private static function enqueue_block_css( $filter_id, $duotone_selector, $filter_value ) {
 		// Build the CSS selectors to which the filter will be applied.
-		$selectors = explode( ',', $duotone_selector );
+		$selectors = str_contains( $duotone_selector, ',' )
+			? WP_CSS_Token_Processor::split_comma_separated_list( $duotone_selector )
+			: array( $duotone_selector );
 
 		$selectors_scoped = array();
 		foreach ( $selectors as $selector_part ) {
