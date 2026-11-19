@@ -216,4 +216,120 @@ class Tests_CssApi_WpCssToken extends WP_UnitTestCase {
 			'no escapes, newlines preprocessed' => array( "/*\\41\r\n*/", "\\41\n" ),
 		);
 	}
+
+	/**
+	 * Tests that a token reports whether it is an angle.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_angle
+	 *
+	 * @covers ::is_angle
+	 */
+	public function test_is_angle( string $css, bool $expected ): void {
+		$this->assertSame( $expected, self::get_only_token( $css )->is_angle() );
+	}
+
+	/**
+	 * Data provider for test_is_angle().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_angle(): array {
+		return array(
+			'degrees'                      => array( '45deg', true ),
+			'gradians'                     => array( '100grad', true ),
+			'radians'                      => array( '1.5rad', true ),
+			'turns'                        => array( '.5turn', true ),
+			'negative'                     => array( '-15deg', true ),
+			'leading plus sign'            => array( '+1deg', true ),
+			'zero with a unit'             => array( '0deg', true ),
+			'exponent'                     => array( '1e2deg', true ),
+			'negative exponent'            => array( '1e-1turn', true ),
+			'uppercase unit'               => array( '1DEG', true ),
+			'mixed case unit'              => array( '100GrAd', true ),
+			'hex escape in the unit'       => array( '1\\64 eg', true ),
+			'identity escape in the unit'  => array( '1de\\g', true ),
+			'number 0'                     => array( '0', false ),
+			'number other than 0'          => array( '45', false ),
+			'percentage'                   => array( '50%', false ),
+			'length'                       => array( '1px', false ),
+			'unit with a suffix'           => array( '1degs', false ),
+			'unit with a trailing null'    => array( "1deg\0", false ),
+			'non-ASCII letter in the unit' => array( "1d\u{0435}g", false ),
+			'ident'                        => array( 'deg', false ),
+			'function'                     => array( 'calc(', false ),
+		);
+	}
+
+	/**
+	 * Tests that a token reports whether it is a length.
+	 *
+	 * @ticket 65738
+	 * @dataProvider data_is_length
+	 *
+	 * @covers ::is_length
+	 */
+	public function test_is_length( string $css, bool $expected ): void {
+		$this->assertSame( $expected, self::get_only_token( $css )->is_length() );
+	}
+
+	/**
+	 * Data provider for test_is_length().
+	 *
+	 * @return array[]
+	 */
+	public static function data_is_length(): array {
+		return array(
+			'pixels'                         => array( '10px', true ),
+			'quarter millimeters'            => array( '1Q', true ),
+			'font-relative unit'             => array( '.5em', true ),
+			'root font-relative unit'        => array( '1rcap', true ),
+			'viewport unit'                  => array( '10vmin', true ),
+			'small viewport unit'            => array( '1svmax', true ),
+			'large viewport unit'            => array( '1lvh', true ),
+			'dynamic viewport unit'          => array( '10DVH', true ),
+			'container query unit'           => array( '2cqi', true ),
+			'negative'                       => array( '-1px', true ),
+			'leading plus sign'              => array( '+.5em', true ),
+			'exponent'                       => array( '1e1px', true ),
+			'uppercase unit'                 => array( '1PX', true ),
+			'hex escape in the unit'         => array( '1\\70 x', true ),
+			'number 0'                       => array( '0', true ),
+			'zero with a decimal point'      => array( '0.0', true ),
+			'negative zero'                  => array( '-0', true ),
+			'zero with a plus sign'          => array( '+0', true ),
+			'zero with no integer part'      => array( '.0', true ),
+			'zero with an exponent'          => array( '0e3', true ),
+			'zero with a negative exponent'  => array( '-0.00E-5', true ),
+			'zero with leading zeros'        => array( '000', true ),
+			'number other than 0'            => array( '10', false ),
+			'number with a zero exponent'    => array( '1e0', false ),
+			'number that underflows a float' => array( '1e-400', false ),
+			'zero point one'                 => array( '0.1', false ),
+			'percentage'                     => array( '50%', false ),
+			'zero percent'                   => array( '0%', false ),
+			'angle'                          => array( '5deg', false ),
+			'resolution'                     => array( '1dppx', false ),
+			'flex'                           => array( '1fr', false ),
+			'unit with a suffix'             => array( '1pxx', false ),
+			'fullwidth unit'                 => array( "1\u{FF50}\u{FF58}", false ),
+			'ident'                          => array( 'px', false ),
+			'function'                       => array( 'calc(', false ),
+		);
+	}
+
+	/**
+	 * Returns the token of CSS that tokenizes as exactly one token.
+	 *
+	 * @param string $css CSS of one token.
+	 * @return WP_CSS_Token The token.
+	 */
+	private static function get_only_token( string $css ): WP_CSS_Token {
+		$processor = new WP_CSS_Token_Processor( $css );
+		self::assertTrue( $processor->next_token(), 'The CSS must have a token.' );
+		$token = $processor->get_token();
+		self::assertFalse( $processor->next_token(), 'The CSS must have only one token.' );
+
+		return $token;
+	}
 }
