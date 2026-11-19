@@ -1792,8 +1792,8 @@ class Tests_Block_Supports_States extends WP_UnitTestCase {
 			'viewport'       => array(
 				'test/transform-state',
 				'<figure class="wp-block-test-transform-state"><img src="x.png" /><figcaption>Caption</figcaption></figure>',
-				array( '@mobile' => array( 'transform' => array( 'rotate' => '0' ) ) ),
-				'@media (width <= 480px){.%s img{rotate:0 !important;}}',
+				array( '@mobile' => array( 'transform' => array( 'rotate' => '0deg' ) ) ),
+				'@media (width <= 480px){.%s img{rotate:0deg !important;}}',
 			),
 		);
 	}

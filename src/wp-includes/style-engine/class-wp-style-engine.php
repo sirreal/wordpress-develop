@@ -49,22 +49,6 @@ final class WP_Style_Engine {
 	const VALID_BACKGROUND_CLIP_VALUES = array( 'border-box', 'padding-box', 'content-box', 'text' );
 
 	/**
-	 * Matches a single CSS angle: a number with a `deg`, `grad`, `rad` or `turn` unit, or `0`.
-	 *
-	 * @since 7.3.0
-	 * @var string
-	 */
-	const VALID_ANGLE_PATTERN = '/^(?:[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:deg|grad|rad|turn)|0)$/iD';
-
-	/**
-	 * Matches a single CSS length or percentage: a number with a length unit or `%`, or `0`.
-	 *
-	 * @since 7.3.0
-	 * @var string
-	 */
-	const VALID_LENGTH_PERCENTAGE_PATTERN = '/^(?:[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|px|cm|mm|q|in|pt|pc|r?em|r?ex|r?ch|r?cap|r?ic|r?lh|[sld]?v(?:w|h|i|b|min|max)|cq(?:w|h|i|b|min|max))|0)$/iD';
-
-	/**
 	 * Style definitions that contain the instructions to parse/output valid Gutenberg styles from a block's attributes.
 	 *
 	 * For every style definition, the following properties are valid:
@@ -904,7 +888,8 @@ final class WP_Style_Engine {
 	 * @return array<string, string> An associative array of CSS definitions, mapping properties to values.
 	 */
 	protected static function get_angle_css_declarations( $style_value, $style_definition ) {
-		if ( ! is_string( $style_value ) || ! preg_match( static::VALID_ANGLE_PATTERN, $style_value ) ) {
+		$token = is_string( $style_value ) ? WP_CSS_Token_Processor::parse_single_token( $style_value ) : null;
+		if ( null === $token || ! $token->is_angle() ) {
 			return array();
 		}
 
@@ -932,7 +917,8 @@ final class WP_Style_Engine {
 		$axes = array();
 		foreach ( array( 'x', 'y' ) as $axis ) {
 			$axis_value = $style_value[ $axis ] ?? '0';
-			if ( ! is_string( $axis_value ) || ! preg_match( static::VALID_LENGTH_PERCENTAGE_PATTERN, $axis_value ) ) {
+			$token      = is_string( $axis_value ) ? WP_CSS_Token_Processor::parse_single_token( $axis_value ) : null;
+			if ( null === $token || ! ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() ) ) {
 				return array();
 			}
 			$axes[] = $axis_value;

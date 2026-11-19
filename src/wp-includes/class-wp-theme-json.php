@@ -3292,8 +3292,11 @@ class WP_Theme_JSON {
 			}
 
 			// Mirrors the style engine, which outputs a single angle only.
-			if ( 'rotate' === $css_property && ( ! is_string( $value ) || ! preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, $value ) ) ) {
-				continue;
+			if ( 'rotate' === $css_property ) {
+				$token = is_string( $value ) ? WP_CSS_Token_Processor::parse_single_token( $value ) : null;
+				if ( null === $token || ! $token->is_angle() ) {
+					continue;
+				}
 			}
 
 			// Calculates fluid typography rules where available.

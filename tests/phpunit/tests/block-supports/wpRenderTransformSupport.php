@@ -331,6 +331,23 @@ class Tests_Block_Supports_WpRenderTransformSupport extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A zero written with a decimal point and sign is a valid axis to fill from.
+	 *
+	 * @ticket 66467
+	 */
+	public function test_translation_axis_is_filled_from_a_zero_global_styles_axis() {
+		$this->register_transform_block( array( 'translate' => true ) );
+		$this->set_global_block_styles(
+			array( 'transform' => array( 'translate' => array( 'x' => '-0.0' ) ) )
+		);
+
+		$this->assertSame(
+			'<div class="wp-block-test-transform-block" style="color:red;translate:-0.0 1rem;"><img src="x.png" /></div>',
+			$this->render_transformed_block( array( 'translate' => array( 'y' => '1rem' ) ) )
+		);
+	}
+
+	/**
 	 * @ticket 66467
 	 *
 	 * @covers ::wp_get_block_style_with_filled_translate

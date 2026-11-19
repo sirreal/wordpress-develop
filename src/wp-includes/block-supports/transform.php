@@ -60,7 +60,8 @@ function wp_fill_translate_axes( $translate, ...$fallbacks ) {
 		}
 		foreach ( $fallbacks as $fallback ) {
 			$value = is_array( $fallback ) ? ( $fallback[ $axis ] ?? null ) : null;
-			if ( is_string( $value ) && preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $value ) ) {
+			$token = is_string( $value ) ? WP_CSS_Token_Processor::parse_single_token( $value ) : null;
+			if ( null !== $token && ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() ) ) {
 				$translate[ $axis ] = $value;
 				break;
 			}

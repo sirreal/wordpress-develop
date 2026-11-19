@@ -4210,20 +4210,19 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
 			 */
 			$allow_css = 0 === preg_match( '%[\\\(&=}]|/\*%', $css_test_string );
 
-			// Only allow a single angle for `rotate`, mirroring the style engine.
-			if ( $allow_css && $angle_attr ) {
-				$allow_css = 1 === preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, trim( $parts[1] ) );
-			}
-
-			// Only allow one or two lengths or percentages for `translate`, mirroring the style engine.
-			if ( $allow_css && $translate_attr ) {
-				$axes      = preg_split( '/\s+/', trim( $parts[1] ) );
-				$allow_css = count( $axes ) <= 2;
-				foreach ( $axes as $axis ) {
-					if ( $allow_css && 1 !== preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $axis ) ) {
-						$allow_css = false;
-					}
+			/*
+			 * Only allow a single angle for `rotate`, and one or two lengths or
+			 * percentages for `translate`, mirroring the style engine.
+			 */
+			if ( $allow_css && ( $angle_attr || $translate_attr ) ) {
+				$processor = new WP_CSS_Token_Processor( trim( $parts[1] ) );
+				$tokens    = array();
+				while ( $processor->next_token() ) {
+					$tokens[] = $processor->get_token();
 				}
+				$allow_css = $angle_attr
+					? 1 === count( $tokens ) && $tokens[0]->is_angle()
+					: _safecss_filter_attr_is_translate_value( $tokens );
 			}
 
 			/**
@@ -4278,9 +4277,10 @@ function _safecss_filter_attr_legacy( $css, $allowed_attr ) {
  *  - The value has no `&` delimiter at any depth. The output contains no
  *    `&`: other tokens escape it, and no property value uses a bare `&`.
  *  - The value has no `\` or control character delimiter at any depth.
- *  - A `rotate` value is a single angle and a `translate` value one or two
- *    lengths or percentages, as WP_Style_Engine::VALID_ANGLE_PATTERN and
- *    WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN match them.
+ *  - A `rotate` value is a single angle, as WP_CSS_Token::is_angle()
+ *    checks, and a `translate` value one or two lengths or percentages
+ *    separated by whitespace, as _safecss_filter_attr_is_translate_value()
+ *    checks.
  *
  * Checks run on decoded values. Comments are dropped; an empty comment is
  * written only between two tokens that would otherwise read as other
@@ -4339,21 +4339,13 @@ function _safecss_filter_attr_declarations( $css, $allowed_attr ) {
 		}
 
 		// Only allow a single angle for `rotate`, mirroring the style engine.
-		if ( 'rotate' === $name && 1 !== preg_match( WP_Style_Engine::VALID_ANGLE_PATTERN, WP_CSS_Token_Serializer::serialize( $tokens ) ) ) {
+		if ( 'rotate' === $name && ( 1 !== count( $tokens ) || ! $tokens[0]->is_angle() ) ) {
 			continue;
 		}
 
 		// Only allow one or two lengths or percentages for `translate`, mirroring the style engine.
-		if ( 'translate' === $name ) {
-			$axes = preg_split( '/\s+/', WP_CSS_Token_Serializer::serialize( $tokens ) );
-			if ( count( $axes ) > 2 ) {
-				continue;
-			}
-			foreach ( $axes as $axis ) {
-				if ( 1 !== preg_match( WP_Style_Engine::VALID_LENGTH_PERCENTAGE_PATTERN, $axis ) ) {
-					continue 2;
-				}
-			}
+		if ( 'translate' === $name && ! _safecss_filter_attr_is_translate_value( $tokens ) ) {
+			continue;
 		}
 
 		// The deprecated `safecss_filter_attr_allow_css` filter is applied by the legacy implementation only.
@@ -4362,6 +4354,48 @@ function _safecss_filter_attr_declarations( $css, $allowed_attr ) {
 	}
 
 	return implode( ' ', $declarations );
+}
+
+/**
+ * Checks whether tokens are one or two lengths or percentages separated by whitespace, the `translate` values this filter allows.
+ *
+ * Comments are ignored, so a comment alone does not separate two lengths.
+ *
+ * @since 7.3.0
+ * @access private
+ * @ignore
+ * @internal
+ *
+ * @see WP_CSS_Token::is_length()
+ *
+ * @param WP_CSS_Token[] $tokens Value tokens, without leading or trailing whitespace.
+ * @return bool Whether the tokens are an allowed `translate` value.
+ */
+function _safecss_filter_attr_is_translate_value( $tokens ) {
+	$count       = 0;
+	$after_space = true;
+	foreach ( $tokens as $token ) {
+		switch ( $token->get_type() ) {
+			case WP_CSS_Token_Processor::TOKEN_COMMENT:
+				continue 2;
+
+			case WP_CSS_Token_Processor::TOKEN_WHITESPACE:
+				$after_space = true;
+				continue 2;
+		}
+
+		// A second length must follow whitespace, and a third is not allowed.
+		if (
+			! $after_space ||
+			++$count > 2 ||
+			! ( $token->is_length() || WP_CSS_Token_Processor::TOKEN_PERCENTAGE === $token->get_type() )
+		) {
+			return false;
+		}
+		$after_space = false;
+	}
+
+	return $count > 0;
 }
 
 /**
