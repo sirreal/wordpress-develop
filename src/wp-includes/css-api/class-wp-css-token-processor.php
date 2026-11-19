@@ -787,6 +787,75 @@ class WP_CSS_Token_Processor {
 	}
 
 	/**
+	 * Splits CSS into the source text between its top-level commas.
+	 *
+	 * A comma inside a string, comment, escape, url token, function, `()`,
+	 * `[]` or `{}` block belongs to the item that holds it. Each item is
+	 * the bytes of the input between two top-level commas, with whitespace,
+	 * comments and escapes as written, so joining the items with commas
+	 * reproduces the input.
+	 *
+	 * Example:
+	 *
+	 * ```php interactive
+	 * $items = WP_CSS_Token_Processor::split_comma_separated_list( '[title="a,b"], :is(c, d) e,f\\,g' );
+	 * foreach ( $items as $item ) {
+	 *     echo "[{$item}]\n";
+	 * }
+	 * // Outputs:
+	 * // [[title="a,b"]]
+	 * // [ :is(c, d) e]
+	 * // [f\,g]
+	 * ```
+	 *
+	 * Unlike the CSS Syntax 3 algorithm, a comma at the end of the input
+	 * produces a final empty item, so a caller whose grammar forbids a
+	 * trailing comma can reject it. Empty input produces no items.
+	 *
+	 * @since 7.3.0
+	 *
+	 * @link https://www.w3.org/TR/css-syntax-3/#parse-comma-separated-list-of-component-values
+	 *
+	 * @param string $css CSS source to split.
+	 * @return string[] Source text of each item, in source order.
+	 */
+	public static function split_comma_separated_list( string $css ): array {
+		$processor = new self( $css );
+		$items     = array();
+		$item_at   = 0;
+
+		// Closing token types of the open blocks and functions, innermost last.
+		$closers = array();
+
+		while ( $processor->next_token() ) {
+			$type = $processor->token_type;
+
+			if ( self::TOKEN_COMMA === $type && array() === $closers ) {
+				$items[] = substr( $css, $item_at, $processor->token_starts_at - $item_at );
+				$item_at = $processor->at;
+				continue;
+			}
+
+			// A closing token ends a block only when it matches the innermost open block.
+			if ( array() !== $closers && end( $closers ) === $type ) {
+				array_pop( $closers );
+			} elseif ( self::TOKEN_FUNCTION === $type || self::TOKEN_LEFT_PAREN === $type ) {
+				$closers[] = self::TOKEN_RIGHT_PAREN;
+			} elseif ( self::TOKEN_LEFT_BRACKET === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACKET;
+			} elseif ( self::TOKEN_LEFT_BRACE === $type ) {
+				$closers[] = self::TOKEN_RIGHT_BRACE;
+			}
+		}
+
+		if ( $item_at < strlen( $css ) || array() !== $items ) {
+			$items[] = substr( $css, $item_at );
+		}
+
+		return $items;
+	}
+
+	/**
 	 * Clears token state between tokens.
 	 *
 	 * @since 7.3.0
