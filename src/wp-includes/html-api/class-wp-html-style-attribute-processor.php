@@ -484,10 +484,8 @@ class WP_HTML_Style_Attribute_Processor {
 		$this->ensure_parsed();
 
 		$old_declaration_count = count( $this->declarations );
-		$trimmed_style         = rtrim( $this->style, self::WHITESPACE );
-		$insert_at             = strlen( $trimmed_style );
-		$repair_at             = strlen( $this->style );
-		$eof_repair            = $this->get_eof_repair( $repair_at );
+		$insert_at             = $this->get_append_offset();
+		$eof_repair            = $this->get_eof_repair( $insert_at );
 		if ( null === $eof_repair ) {
 			return false;
 		}
@@ -500,7 +498,7 @@ class WP_HTML_Style_Attribute_Processor {
 			return false;
 		}
 
-		$updated = $this->verify_append( $repair_at, $eof_repair, $separator, $declaration_text, $old_declaration_count, $name, $parsed_value, $important );
+		$updated = $this->verify_append( $insert_at, $eof_repair, $separator, $declaration_text, $old_declaration_count, $name, $parsed_value, $important );
 		if ( null === $updated ) {
 			return false;
 		}
@@ -1144,6 +1142,29 @@ class WP_HTML_Style_Attribute_Processor {
 		if ( $this->current_declaration >= count( $this->declarations ) ) {
 			$this->current_declaration = count( $this->declarations );
 		}
+	}
+
+	/**
+	 * Gets the byte offset at which to append a declaration.
+	 *
+	 * A whitespace token at the end of the style stays after the appended
+	 * declaration, so the separator follows the text before it. Trailing
+	 * whitespace inside another token, such as an unterminated string or
+	 * an escaped space, is part of that token and stays before the
+	 * appended declaration.
+	 *
+	 * @since 7.3.0
+	 * @ignore
+	 *
+	 * @return int Byte offset.
+	 */
+	private function get_append_offset(): int {
+		$last_token = end( $this->tokens );
+		if ( false !== $last_token && WP_CSS_Token_Processor::TOKEN_WHITESPACE === $last_token->get_type() ) {
+			return $last_token->get_start();
+		}
+
+		return strlen( $this->style );
 	}
 
 	/**

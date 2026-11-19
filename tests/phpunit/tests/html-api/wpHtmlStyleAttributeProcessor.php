@@ -1044,6 +1044,43 @@ class Tests_HtmlApi_WpHtmlStyleAttributeProcessor extends WP_UnitTestCase {
 	}
 
 	/**
+	 * @ticket 65738
+	 *
+	 * @covers ::append_declaration
+	 * @covers ::get_updated_style
+	 *
+	 * @dataProvider data_styles_ending_in_whitespace
+	 *
+	 * @param string $style    Style text.
+	 * @param string $expected Updated style text.
+	 */
+	public function test_append_declaration_before_trailing_whitespace( string $style, string $expected ) {
+		$processor = new WP_HTML_Style_Attribute_Processor( $style );
+
+		$this->assertTrue( $processor->append_declaration( 'padding', '10px' ) );
+		$this->assertSame( $expected, $processor->get_updated_style() );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array<string, array{string, string}>
+	 */
+	public static function data_styles_ending_in_whitespace(): array {
+		return array(
+			'space after a semicolon'         => array( 'margin: 5px; ', 'margin: 5px; padding: 10px; ' ),
+			'space after a value'             => array( 'margin: 5px ', 'margin: 5px; padding: 10px; ' ),
+			'newline and tab after a value'   => array( "margin: 5px\n\t", "margin: 5px; padding: 10px;\n\t" ),
+			'space after a comment'           => array( 'margin: 5px /* a */ ', 'margin: 5px /* a */; padding: 10px; ' ),
+			'whitespace only'                 => array( '   ', 'padding: 10px;   ' ),
+			'space in an open function'       => array( 'width: var(--x ', 'width: var(--x); padding: 10px; ' ),
+			'space in an unterminated string' => array( 'font-family: "a ', 'font-family: "a "; padding: 10px;' ),
+			'escaped space at the end'        => array( 'font-family: a\\ ', 'font-family: a\\ ; padding: 10px;' ),
+			'space in an unterminated url'    => array( 'background: url(a ', 'background: url(a ); padding: 10px;' ),
+		);
+	}
+
+	/**
 	 * @covers ::append_declaration
 	 * @covers ::get_updated_style
 	 */

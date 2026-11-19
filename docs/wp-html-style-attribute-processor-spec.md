@@ -319,6 +319,12 @@ Repair should insert only the specific missing delimiters discovered from parser
 or tokenizer state, plus the boundary needed before the appended declaration. If
 the processor cannot determine a precise repair, append returns `false`.
 
+A whitespace token at the end of the style stays at the end: the separator and
+the appended declaration go before it. `margin: 5px ` becomes
+`margin: 5px; padding: 10px; `. Trailing whitespace inside another token, such as
+an unterminated string or an escaped space, belongs to that token and stays before
+the appended declaration.
+
 EOF repair is essential for append. `set_value()` replacement values must be
 self-contained and do not receive EOF repair.
 
